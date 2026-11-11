@@ -471,7 +471,7 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     let pad = d.pad();
 
     // ---- header: the morning briefing
-    let needs = s.recs.iter().filter(|r| r.status == "pending").count();
+    let needs = s.bundles.len(); // one unit everywhere: folders waiting (#30)
     let title = match s.pane {
         Pane::Today => "Today", Pane::Questions => "Questions", Pane::System => "System",
         Pane::Ask => "Search", Pane::History => "History", Pane::Files => "Files", Pane::Time => "Time",

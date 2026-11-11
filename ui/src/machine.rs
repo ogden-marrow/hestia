@@ -240,10 +240,10 @@ pub fn panels(s: &State) -> Vec<El> {
         let drift = c.drift();
         cats = cats.child(
             row().key(format!("mcat-{i}")).h(d.row_h()).px(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
-                .fill(if on { acc } else { rune::Color::TRANSPARENT })
+                .fill(if on { t.control_off } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { s.mcat = i; s.mit = 0 })
-                .child(text(c.name.to_string()).font(style(&d, type_::LABEL)).color(if on { d.on_accent() } else { t.text }).grow(1.0))
-                .child(text(if drift > 0 { format!("{drift} changed") } else { "Up to date".into() }).font(style(&d, type_::LABEL)).color(if on { d.on_accent() } else if drift > 0 { acc } else { t.text_secondary })),
+                .child(text(c.name.to_string()).font(style(&d, type_::LABEL)).color(t.text).grow(1.0))
+                .child(text(if drift > 0 { format!("{drift} changed") } else { "Up to date".into() }).font(style(&d, type_::LABEL)).color(if drift > 0 { acc } else { t.text_secondary })),
         );
     }
     let left = col().w(240.0).padding(d.gap()).gap(d.gap()).side(&d)
