@@ -23,12 +23,16 @@ for w in "$(id -un)" "$(hostname -s 2>/dev/null)"; do
   while IFS= read -r l; do say "this computer's name '$w' appears: $l"; done < <(git grep -nIiF -- "$w" -- . "${files[@]}" | cut -c1-160)
 done
 
-# 4. commits: author and committer must be a no-reply identity (a hidden, GitHub-owned address)
+# 4. commits: the maintainer has chosen to be public under their own name and email (decision recorded in
+# docs/THREAT_MODEL.md T19), so a real identity on a commit is a NOTE, not a failure. Anyone else's address would still be
+# caught in files above. To make this strict again for a project whose maintainer wants a hidden identity, set
+# PRIVACY_STRICT_IDENTITY=1 (the GitHub setting 'Keep my email addresses private' is what makes merges use a no-reply address).
 range="${RANGE:-origin/main..HEAD}"
 okid='(@users\.noreply\.github\.com|^noreply@github\.com|^noreply@anthropic\.com|^noreply@example\.invalid)$'
 while IFS='|' read -r h ae ce an; do
-  echo "$ae" | grep -qE "$okid" || say "commit $h is authored with a real email address (author '$an'): use a no-reply identity, and merge pull requests with 'rebase', never 'squash' (GitHub fills a squash commit from your public profile)"
-  echo "$ce" | grep -qE "$okid" || say "commit $h has a real committer email"
+  if ! echo "$ae$ce" | grep -qvE "$okid" ; then continue; fi
+  if echo "$ae" | grep -qE "$okid" && echo "$ce" | grep -qE "$okid"; then continue; fi
+  if [ "${PRIVACY_STRICT_IDENTITY:-0}" = 1 ]; then say "commit $h carries a real email address (author '$an')"; else echo "note: commit $h carries the maintainer's public identity (accepted, see T19)" >&2; fi
 done < <(git log --format='%h|%ae|%ce|%an' "$range" 2>/dev/null)
 
 [ "$bad" = 0 ] && echo "privacy ok"
