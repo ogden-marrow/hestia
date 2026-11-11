@@ -24,3 +24,10 @@ One rule: **every change is traceable from a force in VISION.md to an issue to a
 - `main` is always releasable. CI: build, tests, clippy, a clean-container install test.
 - Releases are tagged, built by CI, and checked on a clean machine.
 - Nothing is pushed or published without an explicit go from the owner.
+
+## Do not mainline
+- **One thing at a time.** Pick one issue, work it on its own branch, merge it when its acceptance test passes. Nothing else rides along.
+- **Found something else? File it and keep going.** A bug spotted during feature work becomes an issue with a repro and a severity, then you return to the feature. No drive-by fixes.
+- **Separate lanes.** Features, bug passes and review-board triage happen in different sessions. Triage only files and orders issues; it never fixes.
+- **Bug pass:** fix in severity order, each with a regression test that fails before the fix.
+- **Reviews produce issues, not edits.**
