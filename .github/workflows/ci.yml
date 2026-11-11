@@ -26,6 +26,8 @@ jobs:
       - run: cargo test --release --locked
       - name: Clipboard extension never records secrets
         run: node tests/clipboard-filter.js
+      - name: A clean computer, end to end (install, capture, restore dry-run, uninstall)
+        run: bash tests/install-e2e.sh
       - name: Uninstall and install-path safety
         run: bash tests/uninstall.sh
       - name: Desktop settings are captured by allowlist
