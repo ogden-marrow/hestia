@@ -6,7 +6,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 w="$here/packaging/libexec/watch.sh"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/home" "$T/repo"
-export HOME="$T/home" XDG_RUNTIME_DIR="$T"
+# the watcher politely skips a busy computer; a CI runner that has just finished a build can look busy, so the test says "now"
+export HOME="$T/home" XDG_RUNTIME_DIR="$T" HESTIA_NOW=1
 git config --global user.email t@t.t; git config --global user.name t
 ls_bin="$here/target/release/lifestream"; [ -x "$ls_bin" ] || ls_bin="$here/target/debug/lifestream"
 [ -x "$ls_bin" ] || { echo "build lifestream first (cargo build)" >&2; exit 2; }
