@@ -196,10 +196,13 @@ impl State {
     }
     fn capture_now(&mut self) {
         let d = dir(&self.repo_dir);
-        match Command::new("bash").arg("capture.sh").current_dir(&d).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
-            Ok(_) => self.msg = "capturing… press Refresh in a few seconds, then see the result in History".into(),
-            Err(e) => self.msg = format!("could not start the capture: {e}"),
+        if !d.join("capture.sh").exists() {
+            self.msg = format!("there is no capture.sh in {}; this home repository has no machine capture yet", d.display());
+            return;
         }
+        self.msg = "capturing this machine…".into();
+        self.jobs.start("capture", Some(|s: &mut State| s.reload_machine()),
+            move || super::jobs::run(Command::new("bash").arg("capture.sh").current_dir(&d), "the capture").map(|_| "captured. History shows what changed".to_string()));
     }
     fn add_capture(&mut self) {
         let d = dir(&self.repo_dir);
@@ -269,7 +272,7 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(row().w_full().gap(d.gap()).center_y().px(d.item_px())
             .child(text(cat.map(|c| c.name).unwrap_or("")).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
             .child(btn("m-refresh", "Refresh", false).on_press(|s: &mut State| s.reload_machine()))
-            .child(btn("m-capture", "Capture now", true).on_press(|s: &mut State| s.capture_now())))
+            .child(super::questions::action(&d, "m-capture", "Capture now", "Capturing…", true, s.jobs.running("capture"), |s: &mut State| s.capture_now())))
         .child(text(if s.msg.is_empty() { "Compared with the copy saved in your repository. Capture now updates that copy; History shows what changed.".to_string() } else { s.msg.clone() })
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));

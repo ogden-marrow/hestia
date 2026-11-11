@@ -84,6 +84,16 @@ pub fn button<F: Fn(&mut State) + 'static>(d: &Design, key: &str, label: String,
         .child(text(label).font(style(d, type_::LABEL)).color(if primary { d.on_accent() } else { t.text }))
 }
 
+/// A button for something that takes time: while it runs it is dimmed, cannot be pressed, and says what it is doing.
+pub fn action<F: Fn(&mut State) + 'static>(d: &Design, key: &str, label: &str, busy_label: &str, primary: bool, busy: bool, press: F) -> El {
+    let t = d.theme();
+    let b = row().key(key.to_string()).h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM))
+        .fill(if busy { t.control_track } else if primary { d.accent_color() } else { rune::Color::TRANSPARENT })
+        .border(1.0, if busy { t.card_border } else if primary { d.accent_color() } else { t.card_border })
+        .child(text(if busy { busy_label } else { label }.to_string()).font(style(d, type_::LABEL)).color(if busy { t.text_secondary } else if primary { d.on_accent() } else { t.text }));
+    if busy { b } else { b.on_press(press) }
+}
+
 pub fn heading(d: &Design, label: &str) -> El {
     text(label.to_string()).font(style(d, type_::SECTION)).color(d.theme().text_secondary)
 }

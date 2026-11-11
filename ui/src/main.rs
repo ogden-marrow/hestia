@@ -9,6 +9,7 @@ mod files;
 mod folders;
 mod history;
 mod icons;
+mod jobs;
 mod launcher;
 mod machine;
 mod prefs;
@@ -81,6 +82,7 @@ struct State {
     ask_hits: Vec<usize>, // record indexes: word matches and meaning matches together
     asel: usize,
     msg: String,
+    jobs: jobs::Jobs,
     pane: Pane,
     status: Status,
     fresh: Arc<Mutex<Option<Fresh>>>, // written by the background thread, taken by poll
@@ -237,7 +239,7 @@ impl State {
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
             design: Design::default(), recs, total: 0, home_field: TextEdit::new("Home"), gh_account: TextEdit::new(""), gh_repo: TextEdit::new("home"), gh_note: String::new(), publish_confirm: false, hestia_field: TextEdit::new(""), dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
-            ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(),
+            ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, close_after: false, wstep: 0, launched_ask: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false,
             f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), f_filekind: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
@@ -418,11 +420,15 @@ impl State {
     /// Create the private repository on GitHub and push (only after the confirmation click).
     fn publish_home(&mut self) {
         self.publish_confirm = false;
-        let (a, r) = (self.gh_account.text.trim().to_string(), self.gh_repo.text.trim().to_string());
-        match lifestream::home::publish(&self.repo_dir, &a, &r) {
-            Ok(url) => self.msg = format!("created the private repository {url} and pushed the first commit"),
-            Err(e) => self.msg = format!("not published: {e:#}"),
-        }
+        let (a, r, dir) = (self.gh_account.text.trim().to_string(), self.gh_repo.text.trim().to_string(), self.repo_dir.clone());
+        self.msg = format!("publishing to github.com/{a}/{r}…");
+        self.jobs.start("publish", None, move || lifestream::home::publish(&dir, &a, &r)
+            .map(|url| format!("created the private repository {url} and pushed the first commit")).map_err(|e| format!("not published: {e:#}")));
+    }
+    fn start_scan(&mut self) {
+        self.msg = "scanning your folders: this can take a few minutes".into();
+        self.jobs.start("scan", Some(|s: &mut State| { if let Some(p) = &s.stream { s.recs = lifestream::load_all(p).unwrap_or_default(); s.refresh_derived(); s.total = s.recs.len(); } }),
+            || jobs::run(std::process::Command::new("systemctl").args(["--user", "start", "lifestream-nightly.service"]), "the scan").map(|_| "the scan finished".to_string()));
     }
     fn open_files(&mut self) {
         self.refresh_plan();
@@ -540,7 +546,7 @@ fn system_panel(s: &State) -> El {
         .child(col().grow(1.0).gap(2.0)
             .child(text("Overnight scan").font(style(&d, type_::BODY)).color(t.text))
             .child(text("Reads your folders and updates the stream. The schedule is in Settings.").font(style(&d, type_::LABEL)).color(t.text_secondary)))
-        .child(questions::button(&d, "scan-now", "Scan now".into(), true, |_: &mut State| { let _ = std::process::Command::new("systemctl").args(["--user", "start", "lifestream-nightly.service"]).spawn(); }));
+        .child(questions::action(&d, "scan-now", "Scan now", "Scanning…", true, s.jobs.running("scan"), |s: &mut State| s.start_scan()));
     let mut timers = card("timers and services").child(
         row().gap(d.pad()).child(cell("".into(), 14.0, t.text_secondary)).child(cell("unit".into(), 230.0, t.text_secondary))
             .child(cell("state".into(), 130.0, t.text_secondary)).child(cell("next run".into(), 150.0, t.text_secondary)).child(cell("last run".into(), 150.0, t.text_secondary)),
@@ -616,6 +622,7 @@ fn setup(s: &mut State, wake: rune::Waker) {
     // Windowed runs only (headless snapshots gather once, at startup).
     if std::env::args().any(|a| matches!(a.as_str(), "--snap" | "--trace" | "--tree" | "--frames" | "--script" | "--list-scenes")) { return; }
     s.icons = rune::ImageCache::new(wake.clone());
+    s.jobs.set_waker(wake.clone());
     let (slot, stream, repo_dir, watch) = (s.fresh.clone(), s.stream.clone().unwrap_or_default(), s.repo_dir.clone(), s.watch.clone());
     std::thread::spawn(move || {
         let mut tick = 0u64;
@@ -637,7 +644,15 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
     if s.close_after {
         tx.close_window();
     }
-    let Some(f) = s.fresh.lock().unwrap().take() else { return false };
+    let finished = s.jobs.take_finished();
+    let any = !finished.is_empty();
+    for j in finished {
+        match j.result {
+            Ok(m) => { s.msg = m; if let Some(f) = j.then { f(s); } }
+            Err(e) => s.msg = e,
+        }
+    }
+    let Some(f) = s.fresh.lock().unwrap().take() else { return any };
     if s.pane == Pane::Ask {
         s.clips = clipboard::load();
     }
@@ -660,7 +675,7 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
         s.reload_dir();
         changed = true;
     }
-    changed
+    changed || any
 }
 
 fn field(d: &Design, key: &str, edit: &TextEdit, hint: &str, get: fn(&mut State) -> &mut TextEdit) -> El {

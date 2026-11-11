@@ -79,10 +79,10 @@ pub fn screen(s: &State) -> El {
                     b = b.child(col().w_full().padding(d.pad()).gap(d.gap()).tile(&d)
                         .child(text(format!("Create the private repository {acct}/{repo} on GitHub and push your first commit to it?")).font(style(&d, type_::LABEL)).color(t.text).wrap_anywhere().shrink())
                         .child(row().gap(d.gap())
-                            .child(button(&d, "w-yes", "Yes, publish".into(), true, |s: &mut State| s.publish_home()))
+                            .child(crate::questions::action(&d, "w-yes", "Yes, publish", "Publishing…", true, s.jobs.running("publish"), |s: &mut State| s.publish_home()))
                             .child(button(&d, "w-no", "Cancel".into(), false, |s: &mut State| s.publish_confirm = false))));
                 } else {
-                    b = b.child(button(&d, "w-publish", "Publish to GitHub…".into(), false, |s: &mut State| s.publish_confirm = true));
+                    b = b.child(crate::questions::action(&d, "w-publish", "Publish to GitHub…", "Publishing…", false, s.jobs.running("publish"), |s: &mut State| s.publish_confirm = true));
                 }
             }
             if !s.gh_note.is_empty() {

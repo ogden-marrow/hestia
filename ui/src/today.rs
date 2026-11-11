@@ -58,7 +58,7 @@ fn get_started(s: &State) -> Option<El> {
         .child(step(1, home, "Create your home repository", "The private git repository that holds everything of yours. Hestia will not scan until it exists, because it holds the list of places that must never be read.",
             (!home).then(|| go("gs-home", "Set it up", |s| { crate::welcome::open(s); s.wstep = 2; s.detect_github(); }))))
         .child(step(2, scanned, "Run your first scan", "Reads your folders and builds the stream. It never changes a file, and it runs by itself every night.",
-            (home && !scanned).then(|| go("gs-scan", "Scan now", |s| { s.msg = "scan started: this can take a few minutes".into(); let _ = std::process::Command::new("systemctl").args(["--user", "start", "lifestream-nightly.service"]).spawn(); }))))
+            (home && !scanned).then(|| crate::questions::action(&d, "gs-scan", "Scan now", "Scanning…", true, s.jobs.running("scan"), |s: &mut State| s.start_scan()))))
         .child(step(3, launcher, "Turn on Hestia Search", "Alt+Space from anywhere, and clipboard history. GNOME needs one log out and in after you turn it on.",
             (!launcher).then(|| go("gs-ext", "Turn on", |s| s.msg = crate::setup::enable_extension())))))
 }
