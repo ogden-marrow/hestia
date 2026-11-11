@@ -10,3 +10,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Deliberately deferred (revisit with a reason, not because a bot asked):
+      # ureq 3 renames most of the API the sign-in engine uses; sha2 0.11 changes how digests are formatted, and those
+      # hashes are the record IDs of the stream, so any change must be proven byte-for-byte identical first.
+      - dependency-name: "ureq"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sha2"
+        update-types: ["version-update:semver-major"]
