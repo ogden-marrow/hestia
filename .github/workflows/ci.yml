@@ -19,3 +19,5 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libfontconfig1-dev libdbus-1-dev pkg-config
       - run: cargo build --release --locked
       - run: cargo test --release --locked
+      - name: Watcher on a fresh home repository
+        run: bash tests/watcher.sh

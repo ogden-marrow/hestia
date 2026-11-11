@@ -6,4 +6,4 @@ Type=oneshot
 Nice=19
 IOSchedulingClass=idle
 CPUSchedulingPolicy=idle
-ExecStart=@HOME_REPO@/applications/linux/ubuntu/26.10/watch.sh
+ExecStart=@LIBEXEC@/watch.sh @HOME_REPO@
