@@ -118,6 +118,11 @@ enum Cmd {
         #[arg(long)]
         write: bool,
     },
+    /// Find, adopt or create your home repository on GitHub (needs `auth login` first). One JSON event per line.
+    Home {
+        #[command(subcommand)]
+        what: HomeCmd,
+    },
     /// Sign in with GitHub. There is no Hestia account: GitHub only stores your private home repository.
     /// Every command prints one JSON event per line; none ever contains the token.
     Auth {
@@ -144,6 +149,25 @@ enum Cmd {
         since_hours: i64,
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HomeCmd {
+    /// Look through your own private repositories for a home repository
+    Discover {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Download one of your private home repositories and make it this computer's home
+    Adopt {
+        /// owner/name
+        repo: String,
+        /// where to put it (default ~/Home); must be empty or missing
+        #[arg(long)]
+        into: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -201,6 +225,45 @@ fn main() -> Result<()> {
                 println!("wrote {}", lifestream::machine::write(&repo, &m)?.display());
             } else {
                 print!("{}", toml::to_string_pretty(&m)?);
+            }
+            Ok(())
+        }
+        Cmd::Home { what } => {
+            use lifestream::{auth, auth::Store, ghrepo};
+            let mut out = std::io::stdout();
+            let ep = match auth::Endpoints::from_env() {
+                Ok(e) => e,
+                Err(e) => {
+                    auth::failed(&mut out, "other", Some(("message", &e.to_string())));
+                    std::process::exit(1);
+                }
+            };
+            let token = match auth::Keyring.get() {
+                Ok(Some(t)) => t,
+                Ok(None) => {
+                    auth::failed(&mut out, "other", Some(("message", "you are not signed in to GitHub")));
+                    std::process::exit(1);
+                }
+                Err(auth::StoreErr::NoKeyring) => {
+                    auth::failed(&mut out, "no-keyring", None);
+                    std::process::exit(1);
+                }
+                Err(auth::StoreErr::Other(m)) => {
+                    auth::failed(&mut out, "other", Some(("message", &format!("the keyring said: {m}"))));
+                    std::process::exit(1);
+                }
+            };
+            let ok = match what {
+                HomeCmd::Discover { .. } => ghrepo::discover(&mut out, &token, &ep),
+                HomeCmd::Adopt { repo, into, .. } => {
+                    let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
+                    let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));
+                    let exe = std::env::current_exe()?;
+                    ghrepo::adopt(&mut out, &token, &ep, "https://github.com", &repo, &dest, &settings, &exe, &chrono_today())
+                }
+            };
+            if !ok {
+                std::process::exit(1);
             }
             Ok(())
         }
