@@ -116,20 +116,35 @@ git -C "$repo" diff --cached --quiet -- "$rel/MACHINE.txt" machines || commit_ar
 
 # ---- push automatically, but only to a private GitHub repo (checked on the URL git will really push to,
 # after pushurl and insteadOf rewrites) and only if the shared scanner finds nothing in the new commits
+# Signed in to Hestia (the token lives in the system keyring)? Then Hestia vouches for the repository and git gets the
+# token from the keyring; otherwise the GitHub CLI does both, as before.
+signed_in() { "$LS" auth status --json 2>/dev/null | grep -q '"signed_in":true'; }
 push_ok() {
   git -C "$repo" remote get-url origin >/dev/null 2>&1 || { note "ok: $made commit(s) (no remote yet)"; return 1; }
   local url slug; url=$(git -C "$repo" remote get-url --push origin)
   case "$url" in https://github.com/*|git@github.com:*) ;; *) note "not pushed: remote is not a GitHub repository"; return 1;; esac
   slug=$(printf '%s' "$url" | sed -E 's#^(https://github.com/|git@github.com:)##; s#\.git$##')
-  [ "$(gh repo view "$slug" --json isPrivate --jq .isPrivate 2>/dev/null)" = "true" ] || { note "not pushed: remote is not a confirmed private repo"; return 1; }
+  if signed_in; then
+    "$LS" home check-private "$slug" >/dev/null 2>&1 || { note "not pushed: remote is not a confirmed private repo of yours"; return 1; }
+    case "$LS" in *\'*) note "not pushed: the Hestia program path has a quote in it"; return 1;; esac
+    helper="!'$LS' auth git-credential"
+  else
+    [ "$(gh repo view "$slug" --json isPrivate --jq .isPrivate 2>/dev/null)" = "true" ] || { note "not pushed: remote is not a confirmed private repo"; return 1; }
+    helper=""
+  fi
   local range="origin/main..HEAD"; git -C "$repo" rev-parse origin/main >/dev/null 2>&1 || range="all"
   "$LS" secret-scan --repo "$repo" --range "$range" >/dev/null 2>&1 || { note "not pushed: possible secret in the new commits (run: lifestream secret-scan --repo $repo --range $range)"; return 1; }
+}
+helper=""
+push_now() { # signed in: ours is the only credential helper asked, so the keyring token is what git uses
+  if [ -n "$helper" ]; then git -C "$repo" -c credential.helper= -c "credential.helper=$helper" push -q origin HEAD 2>>"$state/watch.err"
+  else git -C "$repo" push -q origin HEAD 2>>"$state/watch.err"; fi
 }
 # Auto-push is on by default; set HESTIA_AUTOPUSH=0 to turn it off.
 if [ "${HESTIA_AUTOPUSH:-1}" = 0 ]; then
   note "ok: $made commit(s) (auto-push is off)"
 elif push_ok; then
   if [ -n "$(git -C "$repo" log origin/main..HEAD --oneline 2>/dev/null)" ]; then
-    if git -C "$repo" push -q origin HEAD 2>>"$state/watch.err"; then note "ok: $made commit(s), pushed"; else note "ok: $made commit(s); push failed: see watch.err"; fi
+    if push_now; then note "ok: $made commit(s), pushed"; else note "ok: $made commit(s); push failed: see watch.err"; fi
   else note "ok: $made commit(s), up to date"; fi
 fi

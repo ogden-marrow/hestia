@@ -79,4 +79,20 @@ echo "a new kind of capture" > "$rel/new-capture.txt"; run
 git ls-files --error-unmatch "$rel/new-capture.txt" >/dev/null 2>&1 || fail "a new capture file stayed untracked"
 git log -1 --format=%s | grep -q "new files captured (new-capture.txt)" || fail "the new file did not get its own plain commit"
 [ -z "$(git status --short)" ] || fail "tree not clean after committing new capture files"
+# signed in to Hestia: the repository must be vouched for by Hestia (a private repo of yours) before anything is sent
+git config --unset-all "url.file://$T/elsewhere.pushInsteadOf" 2>/dev/null || true
+git remote remove origin 2>/dev/null || true
+git remote add origin https://github.com/someone/private-home.git
+cat > "$T/fake-ls" <<EOF
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "auth status") echo '{"event":"status","signed_in":true,"user":"someone"}' ;;
+  "home check-private") exit 1 ;;
+  *) exec "$ls_bin" "\$@" ;;
+esac
+EOF
+chmod +x "$T/fake-ls"
+echo 'export BAZ=3' >> "$T/home/.bashrc"
+LIFESTREAM="$T/fake-ls" run
+grep -q "confirmed private repo of yours" "$T/home/.local/share/hestia/watch.json" || fail "a repository Hestia could not vouch for was pushed to"
 echo "watcher ok"
