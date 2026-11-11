@@ -169,6 +169,13 @@ enum HomeCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Is this one of your own PRIVATE repositories? (the watcher asks before every push)
+    CheckPrivate {
+        /// owner/name
+        repo: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Make a new private home repository on GitHub, set it up here, and send the first copy
     Create {
         /// the repository name (default: home)
@@ -266,6 +273,7 @@ fn main() -> Result<()> {
             };
             let ok = match what {
                 HomeCmd::Discover { .. } => ghrepo::discover(&mut out, &token, &ep),
+                HomeCmd::CheckPrivate { repo, .. } => ghrepo::check_private(&mut out, &token, &ep, &repo),
                 HomeCmd::Create { name, into, .. } => {
                     let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
                     let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));

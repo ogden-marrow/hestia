@@ -216,6 +216,29 @@ pub fn adopt(out: &mut dyn Write, token: &str, ep: &Endpoints, git_base: &str, f
     true
 }
 
+/// Is `owner/name` a PRIVATE repository that belongs to the signed-in person? The watcher asks before every push.
+pub fn check_private(out: &mut dyn Write, token: &str, ep: &Endpoints, full: &str) -> bool {
+    if !valid_full_name(full) {
+        return other(out, "that is not a repository name (use owner/name)");
+    }
+    let Some(user) = who(out, ep, token) else { return false };
+    if !full.split('/').next().is_some_and(|o| o.eq_ignore_ascii_case(&user)) {
+        return other(out, "not one of your own repositories");
+    }
+    match get(ep, token, &format!("/repos/{full}")) {
+        Ok(v) if v["private"].as_bool() == Some(true) => {
+            emit(out, json!({"event": "private", "repo": full}));
+            true
+        }
+        Ok(_) => other(out, "that repository is public"),
+        Err(ureq::Error::Status(404, _)) => other(out, "that repository was not found"),
+        Err(e) => {
+            fail_http(out, e);
+            false
+        }
+    }
+}
+
 /// Everything in this repository's history is about to become reachable on GitHub: look first.
 pub fn guard_history(dir: &Path) -> Result<()> {
     let found = crate::secrets::scan_git(dir, crate::secrets::Scope::AllHistory)?;
@@ -485,6 +508,24 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
         std::fs::remove_dir_all(&root2).unwrap();
     }
+    #[test]
+    fn check_private_accepts_only_your_own_private_repository() {
+        let run = |routes: Vec<(String, u16, String)>, full: &str| {
+            let (ep, _) = fake(routes);
+            let mut out = Vec::new();
+            let ok = check_private(&mut out, &tok(), &ep, full);
+            (ok, String::from_utf8(out).unwrap())
+        };
+        let (ok, o) = run(vec![me(), ("/repos/ada/home".into(), 200, r#"{"private":true}"#.into())], "ada/home");
+        assert!(ok && o.contains(r#""event":"private""#), "{o}");
+        let (ok, o) = run(vec![me(), ("/repos/ada/home".into(), 200, r#"{"private":false}"#.into())], "ada/home");
+        assert!(!ok && o.contains("public"), "{o}");
+        let (ok, o) = run(vec![me()], "someone/home");
+        assert!(!ok && o.contains("your own"), "{o}");
+        let (ok, o) = run(vec![me()], "ada/missing");
+        assert!(!ok && o.contains("not found"), "{o}");
+    }
+
     fn create_routes(post_status: u16) -> Vec<(String, u16, String)> {
         vec![me(), ("/user/repos".into(), post_status, "{}".into()), ("/repos/ada/home/topics".into(), 200, "{}".into())]
     }
