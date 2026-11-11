@@ -24,5 +24,7 @@ jobs:
       - run: cargo test --release --locked
       - name: Clipboard extension never records secrets
         run: node tests/clipboard-filter.js
+      - name: Bootstrap restores a machine safely
+        run: bash tests/bootstrap.sh
       - name: Watcher on a fresh home repository
         run: bash tests/watcher.sh
