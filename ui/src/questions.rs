@@ -84,6 +84,20 @@ pub fn button<F: Fn(&mut State) + 'static>(d: &Design, key: &str, label: String,
         .child(text(label).font(style(d, type_::LABEL)).color(if primary { d.on_accent() } else { t.text }))
 }
 
+/// The screen's one primary action: accent fill, the tall hit target.
+pub fn primary<F: Fn(&mut State) + 'static>(d: &Design, key: &str, label: &str, press: F) -> El {
+    row().key(key.to_string()).h(crate::design::hit::PRIMARY).px(d.pad() + crate::design::space::XS).center_y().radius(d.r(tok::radius::SM))
+        .fill(d.accent_color()).on_press(press)
+        .child(text(label.to_string()).font(d.text(crate::design::Role::Body)).color(d.on_accent()))
+}
+
+/// A secondary action that stays out of the way: text only, no rule.
+pub fn quiet<F: Fn(&mut State) + 'static>(d: &Design, key: &str, label: &str, press: F) -> El {
+    row().key(key.to_string()).h(crate::design::hit::PRIMARY).px(d.pad()).center_y().radius(d.r(tok::radius::SM))
+        .on_press(press)
+        .child(text(label.to_string()).font(d.text(crate::design::Role::Body)).color(d.theme().text_secondary))
+}
+
 /// A button for something that takes time: while it runs it is dimmed, cannot be pressed, and says what it is doing.
 pub fn action<F: Fn(&mut State) + 'static>(d: &Design, key: &str, label: &str, busy_label: &str, primary: bool, busy: bool, press: F) -> El {
     let t = d.theme();
