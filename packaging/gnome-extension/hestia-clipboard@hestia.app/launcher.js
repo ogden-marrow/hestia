@@ -30,6 +30,8 @@ export class Launcher {
         this._grab = null;
         this._closing = false;
         this._rows = [];
+        this._waiting = false; // a query is out and its answer has not come back
+        this._enterQueued = false; // Enter was pressed during that wait
     }
 
     // ---- the engine
@@ -83,7 +85,13 @@ export class Launcher {
         } else if (v.hits && this._actor) {
             this._hits = v.hits;
             this._sel = 0;
+            this._waiting = false;
             this._render();
+            // Enter pressed before this answer arrived opens the top result, never nothing
+            if (this._enterQueued) { this._enterQueued = false; this._run(0); }
+        } else if (v.done === false) {
+            // the engine could not open it: say so where the person is looking
+            Main.notify('Hestia', v.error || "Couldn't open that.");
         }
     }
 
@@ -177,11 +185,14 @@ export class Launcher {
 
     _typed() {
         const q = this._entry.get_text();
+        this._enterQueued = false;
         if (!q.trim()) {
             this._hits = [];
+            this._waiting = false;
             this._render();
             return;
         }
+        this._waiting = true;
         this._send({q});
     }
 
@@ -190,7 +201,7 @@ export class Launcher {
         if (k === Clutter.KEY_Escape) { this.close(); return Clutter.EVENT_STOP; }
         if (k === Clutter.KEY_Down || (k === Clutter.KEY_Tab)) { this._move(1); return Clutter.EVENT_STOP; }
         if (k === Clutter.KEY_Up || k === Clutter.KEY_ISO_Left_Tab) { this._move(-1); return Clutter.EVENT_STOP; }
-        if (k === Clutter.KEY_Return || k === Clutter.KEY_KP_Enter) { this._run(this._sel); return Clutter.EVENT_STOP; }
+        if (k === Clutter.KEY_Return || k === Clutter.KEY_KP_Enter || k === Clutter.KEY_ISO_Enter) { this._run(this._sel); return Clutter.EVENT_STOP; }
         return Clutter.EVENT_PROPAGATE;
     }
 
@@ -217,6 +228,8 @@ export class Launcher {
     }
 
     _run(i) {
+        // an answer is still on its way: wait for it rather than act on a stale list
+        if (this._waiting) { this._enterQueued = true; return; }
         if (!this._hits[i]) return;
         this._send({run: i});
         this.close();
