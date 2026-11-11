@@ -484,18 +484,18 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
             .child(text("Hestia").font(style(&d, type_::TITLE)).color(t.text)))
         .child(text(title).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
         .child(
-            text(format!("{needs} need you")).key("need-you").font(style(&d, type_::LABEL)).color(if needs > 0 { acc } else { t.text_secondary })
+            text(if needs == 0 { "All clear".to_string() } else { crate::today::count(needs, "question", "questions") }).key("need-you").font(style(&d, type_::LABEL)).color(if needs > 0 { acc } else { t.text_secondary })
                 .on_press(|s: &mut State| s.pane = Pane::Questions),
         );
 
     // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"
     let info = match s.pane {
-        Pane::Today => format!("{} files in the stream · {} folders waiting", s.total, s.bundles.len()),
-        Pane::Questions => format!("{} folders · {} files", s.bundles.len(), s.bundles.iter().map(|b| b.ids.len()).sum::<usize>()),
-        Pane::Files => format!("{} folders in the tree · {} inboxes · {}", s.tree.folders.len(), s.tree.inbox.len(), files::tilde(&s.cwd)),
-        Pane::History => s.repo_status.clone(),
-        Pane::Time => format!("{} days with files", s.days.len()),
-        Pane::Machine => format!("{} differences from the capture", s.mach.iter().map(|c| c.drift()).sum::<usize>()),
+        Pane::Today => if s.bundles.is_empty() { format!("{} sorted · nothing waiting for you", today::count(s.total, "file", "files")) } else { format!("{} sorted · {} waiting for you", today::count(s.total, "file", "files"), today::count(s.bundles.len(), "folder", "folders")) },
+        Pane::Questions => if s.bundles.is_empty() { "No questions waiting".to_string() } else { format!("{} · {}", today::count(s.bundles.len(), "folder", "folders"), today::count(s.bundles.iter().map(|b| b.ids.len()).sum::<usize>(), "file", "files")) },
+        Pane::Files => format!("{} · {} · {}", today::count(s.tree.folders.len(), "folder", "folders"), today::count(s.tree.inbox.len(), "watched folder", "watched folders"), files::tilde(&s.cwd)),
+        Pane::History => format!("{} saved", today::count(s.commits.len(), "change", "changes")),
+        Pane::Time => today::count(s.days.len(), "day with files", "days with files"),
+        Pane::Machine => format!("{} since your last backup", today::count(s.mach.iter().map(|c| c.drift()).sum::<usize>(), "change", "changes")),
         Pane::System => format!("models {}", if s.status.ollama_up { "ready" } else { "off" }),
         Pane::Ask => "apps, files, clipboard and Hestia, on this computer".into(),
         Pane::Settings => "changes apply right away".into(),
@@ -889,6 +889,29 @@ mod look_tests {
         assert_eq!(rt.state.pane, Pane::Settings);
         click(&mut rt, "accent-orange");
         assert_ne!(rt.state.design.accent.r.to_bits(), before, "choosing an accent restyles the app");
+    }
+}
+
+/// Developer vocabulary the owner must never read on a primary screen (#90). Checks the exact
+/// strings this sweep replaced, so they cannot creep back; Advanced/Details may still use them.
+#[cfg(test)]
+mod calm_words {
+    #[test]
+    fn replaced_strings_do_not_return() {
+        let banned = [
+            "\"git\".into()", "main…origin/main", "Remove from tree", "(regex)", "\"Top Hit\"", "Config and dotfiles",
+            "Packages (apt)", "\"Flatpaks\"", "\"Snaps\"", "differences from the capture", "need you\"", "inboxes · ", "Keep the capture current",
+        ];
+        for (file, src) in [
+            ("main.rs", include_str!("main.rs")), ("history.rs", include_str!("history.rs")), ("machine.rs", include_str!("machine.rs")),
+            ("folders.rs", include_str!("folders.rs")), ("sidebar.rs", include_str!("sidebar.rs")), ("prefs.rs", include_str!("prefs.rs")),
+            ("launcher.rs", include_str!("launcher.rs")), ("questions.rs", include_str!("questions.rs")),
+        ] {
+            let code = src.split("mod calm_words").next().unwrap_or(src);
+            for b in banned {
+                assert!(!code.contains(b), "{file} brings back {b:?}");
+            }
+        }
     }
 }
 

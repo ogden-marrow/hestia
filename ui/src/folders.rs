@@ -190,7 +190,7 @@ impl State {
             let gone = self.tree.folders.remove(self.tsel);
             if self.save_tree() {
                 self.select_folder(self.tsel.min(self.tree.folders.len().saturating_sub(1)));
-                self.msg = format!("removed {} from the tree (nothing on disk was touched)", gone.path);
+                self.msg = format!("{} is no longer used by Hestia (your files were not touched)", gone.path);
             } else {
                 self.tree.folders.insert(self.tsel, gone);
             }
@@ -408,10 +408,11 @@ pub fn panels(s: &State) -> Vec<El> {
     let mut center = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(col().w_full().px(d.item_px()).py(d.gap() * 0.5).gap(d.gap())
             .child(text("Files").font(style(&d, type_::TITLE)).color(t.text))
-            .child(text("Everything you own, grouped by what it is for. Pick a folder to see its rule and what is inside. Files loose in an inbox are filed by this tree; nothing inside a project or a curated folder is taken apart.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
-            .child(heading(&d, "INBOXES: where loose files get filed (click to remove)"))
+            .child(text("All your files, sorted by purpose. Choose a folder to see what goes in it. Hestia leaves your projects and special folders alone.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
+            .child(heading(&d, "WATCHED FOLDERS"))
+            .child(text("Hestia sorts new files that land in these. Click one to stop watching it; your files stay where they are.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
             .child(inbox)
-            .child(field(&d, "inbox-add", &s.f_inbox, "add an inbox folder, like Downloads ↵", |s: &mut State| &mut s.f_inbox).on_submit(|s: &mut State, _: &mut Tx| s.add_inbox())));
+            .child(field(&d, "inbox-add", &s.f_inbox, "Add a folder to watch, like Downloads", |s: &mut State| &mut s.f_inbox).on_submit(|s: &mut State, _: &mut Tx| s.add_inbox())));
     if let Some(b) = banner {
         center = center.child(b);
     }
@@ -425,19 +426,19 @@ pub fn panels(s: &State) -> Vec<El> {
         let here = tonight.get(&f.path).copied().unwrap_or(0);
         body = body.child(col().w_full().gap(d.gap())
             .child(text(f.path.clone()).font(TextStyle { size: d.size(16.0), ..style(&d, type_::TITLE) }).color(t.text).wrap_anywhere().shrink())
-            .child(text(if here > 0 { format!("{here} files would land here tonight") } else { "nothing would land here tonight".to_string() }).font(style(&d, type_::LABEL)).color(if here > 0 { acc } else { t.text_secondary }))
-            .child(heading(&d, "THIS FOLDER ACCEPTS"))
+            .child(text(if here > 0 { format!("{here} files will be moved here tonight") } else { "Nothing will be moved here tonight.".to_string() }).font(style(&d, type_::LABEL)).color(if here > 0 { acc } else { t.text_secondary }))
+            .child(heading(&d, "HESTIA PUTS THESE KINDS OF FILES HERE"))
             .child(text(format!("~/{}", f.path)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).wrap_anywhere().shrink())
             .child(field(&d, "f-path", &s.f_path, "rename this folder (its contents come along)", |s: &mut State| &mut s.f_path))
             .child(field(&d, "f-kind", &s.f_kind, "kinds, like image, video/camera", |s: &mut State| &mut s.f_kind))
-            .child(field(&d, "f-tag", &s.f_tag, "tags a file must have", |s: &mut State| &mut s.f_tag))
-            .child(field(&d, "f-name", &s.f_name, "file-name pattern (regex), optional", |s: &mut State| &mut s.f_name))
+            .child(field(&d, "f-tag", &s.f_tag, "Only files with these labels (optional)", |s: &mut State| &mut s.f_tag))
+            .child(field(&d, "f-name", &s.f_name, "Only files whose names match (optional)", |s: &mut State| &mut s.f_name))
             .child(row().key("f-year").w_full().px(d.item_px()).py(d.gap()).radius(d.r(tok::radius::SM)).fill(t.control_track)
                 .on_press(|s: &mut State| s.f_year = !s.f_year).child(toggle(&d, s.f_year)))
             .child(row().w_full().gap(d.gap()).flex_wrap()
                 .child(button(&d, "f-save", "Save".into(), true, |s: &mut State| s.save_folder()))
                 .child(button(&d, "f-move", "Move to another folder…".into(), false, |s: &mut State| s.moving = Some(s.tsel)))
-                .child(button(&d, "f-delete", "Remove from tree".into(), false, |s: &mut State| s.delete_folder()))));
+                .child(button(&d, "f-delete", "Stop using this folder".into(), false, |s: &mut State| s.delete_folder()))));
     }
     body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "CONTENTS")).child(super::contents::list(s)));
     body = body.child(col().w_full().gap(d.gap())

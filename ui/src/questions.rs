@@ -151,11 +151,13 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(chips),
         );
     }
-    let total: usize = s.bundles.iter().map(|b| b.ids.len()).sum();
     let center = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(col().w_full().px(d.item_px()).py(d.gap() * 0.5).gap(2.0)
             .child(text("Questions").font(style(&d, type_::TITLE)).color(t.text))
-            .child(text(format!("{} folders hold {} files. Answer one and its similar neighbours can follow.{}", s.bundles.len(), total, if s.msg.is_empty() { String::new() } else { format!("  ·  {}", s.msg) })).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()))
+            .child(text({
+                let lead = if s.bundles.is_empty() { "Hestia has no questions for you right now.".to_string() } else { format!("{} need a quick answer. Your answer will also be used for similar folders.", crate::today::count(s.bundles.len(), "folder", "folders")) };
+                if s.msg.is_empty() { lead } else { format!("{lead}  ·  {}", s.msg) }
+            }).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()))
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
 
     // ---- the answer

@@ -215,13 +215,13 @@ pub fn results(s: &State) -> Vec<Hit> {
     let order = |g: &str| match g { "Apps" => 0, "Hestia" => 1, "Clipboard" => 2, "Files" => 3, _ => 4 };
     out.sort_by_key(|h| order(h.group));
     if let Some(first) = out.first_mut() {
-        first.top = true; // shown under "Top Hit"; the rest keep their own headings
+        first.top = true; // shown under "Best match"; the rest keep their own headings
     }
     out
 }
 
 pub fn heading_of(h: &Hit) -> &'static str {
-    if h.top { "Top Hit" } else { match h.group { "Apps" => "Applications", "Files" => "Documents", g => g } }
+    if h.top { "Best match" } else { match h.group { "Apps" => "Applications", "Files" => "Documents", "Clipboard" => "Recently copied", g => g } }
 }
 
 /// The window height that fits this many results: the bar, then rows and headings.
@@ -380,7 +380,7 @@ pub fn panel(s: &State) -> El {
     let hits = results(s);
     let n = hits.len();
     let field = rune::text_input(&s.ask, d.font(big)).key("ask-big").single_line().grow(1.0).h(64.0).py(19.0).color(t.text)
-        .placeholder("Hestia Search", t.text_secondary)
+        .placeholder("Search your files, apps and folders", t.text_secondary)
         .on_edit(|s: &mut State| &mut s.ask)
         .on_input_change(|s: &mut State, tx: &mut Tx| {
             s.asel = 0;
