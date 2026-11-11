@@ -103,9 +103,9 @@ pub fn panels(s: &State) -> Vec<El> {
         let on = i == s.stab;
         tabs = tabs.child(
             row().key(format!("tab-{i}")).h(d.row_h()).px(d.item_px()).center_y().radius(d.r(tok::radius::SM))
-                .fill(if on { acc } else { rune::Color::TRANSPARENT })
+                .fill(if on { t.control_off } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) } })
-                .child(text(name.to_string()).font(style(&d, type_::LABEL)).color(if on { d.on_accent() } else { t.text })),
+                .child(text(name.to_string()).font(style(&d, type_::LABEL)).color(t.text)),
         );
     }
     let tabs = col().w(220.0).padding(d.gap()).gap(d.gap()).side(&d)
