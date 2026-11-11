@@ -118,6 +118,20 @@ enum Cmd {
         #[arg(long)]
         write: bool,
     },
+    /// Look for secrets before anything leaves this computer. Exit 1 if any are found; never prints the secret.
+    SecretScan {
+        /// the repository to check
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// check what is staged to be committed
+        #[arg(long)]
+        staged: bool,
+        /// check every commit in a range, like origin/main..HEAD, or `all` for the whole history
+        #[arg(long)]
+        range: Option<String>,
+        /// or check these files
+        paths: Vec<PathBuf>,
+    },
     /// The morning briefing: what happened overnight and what needs me
     Brief {
         #[arg(long, default_value_t = 24)]
@@ -161,6 +175,25 @@ fn main() -> Result<()> {
             } else {
                 print!("{}", toml::to_string_pretty(&m)?);
             }
+            Ok(())
+        }
+        Cmd::SecretScan { repo, staged, range, paths } => {
+            let mut n = 0;
+            let mut report = |where_: &str, data: &[u8]| for f in lifestream::secrets::scan(data) { println!("{where_}:{}: {}", f.line, f.rule); n += 1; };
+            if !paths.is_empty() {
+                for p in &paths { report(&p.display().to_string(), &std::fs::read(p)?); }
+            } else {
+                let repo = repo.unwrap_or_else(|| PathBuf::from("."));
+                let scope = match (staged, range.as_deref()) {
+                    (true, _) => lifestream::secrets::Scope::Staged,
+                    (_, Some("all")) => lifestream::secrets::Scope::AllHistory,
+                    (_, Some(r)) => lifestream::secrets::Scope::Range(r),
+                    _ => anyhow::bail!("say what to check: --staged, --range <a..b|all>, or file paths"),
+                };
+                for (file, f) in lifestream::secrets::scan_git(&repo, scope)? { println!("{file}: {}", f.rule); n += 1; }
+            }
+            if n > 0 { eprintln!("{n} possible secret(s) found: nothing was sent anywhere"); std::process::exit(1); }
+            println!("no secrets found");
             Ok(())
         }
         Cmd::Suggest { out, host } => {

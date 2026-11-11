@@ -11,6 +11,7 @@ pub mod home;
 pub mod machine;
 pub mod query;
 pub mod rules;
+pub mod secrets;
 pub mod semantic;
 pub mod system;
 pub mod tree;
