@@ -526,6 +526,36 @@ mod tests {
         assert!(!ok && o.contains("not found"), "{o}");
     }
 
+    #[test]
+    fn check_private_fails_closed_on_renamed_transferred_forbidden_and_odd_answers() {
+        let run = |routes: Vec<(String, u16, String)>| {
+            let (ep, _) = fake(routes);
+            let mut out = Vec::new();
+            let ok = check_private(&mut out, &tok(), &ep, "ada/home");
+            (ok, String::from_utf8(out).unwrap())
+        };
+        // a renamed or transferred repository answers with a redirect: never followed, never accepted
+        for code in [301u16, 302, 307, 308] {
+            let (ok, o) = run(vec![me(), ("/repos/ada/home".into(), code, "{}".into())]);
+            assert!(!ok && o.contains(r#""event":"failed""#), "{code}: {o}");
+        }
+        // forbidden, rate-limited and server errors are refusals, not "probably private"
+        for code in [403u16, 429, 500, 502] {
+            let (ok, _) = run(vec![me(), ("/repos/ada/home".into(), code, "{}".into())]);
+            assert!(!ok, "{code} must not count as private");
+        }
+        // an answer that does not say private:true (missing field, string, null) is not private
+        for body in ["{}", r#"{"private":"true"}"#, r#"{"private":null}"#, "[]", "not json"] {
+            let (ok, _) = run(vec![me(), ("/repos/ada/home".into(), 200, body.into())]);
+            assert!(!ok, "{body} must not count as private");
+        }
+        // someone else's repository, even a private one, is not yours to push to
+        let (ep, _) = fake(vec![me(), ("/repos/ada/home".into(), 200, r#"{"private":true}"#.into())]);
+        let mut out = Vec::new();
+        assert!(!check_private(&mut out, &tok(), &ep, "ada-org/home"));
+        assert!(String::from_utf8(out).unwrap().contains("your own"));
+    }
+
     fn create_routes(post_status: u16) -> Vec<(String, u16, String)> {
         vec![me(), ("/user/repos".into(), post_status, "{}".into()), ("/repos/ada/home/topics".into(), 200, "{}".into())]
     }
