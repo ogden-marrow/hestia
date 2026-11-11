@@ -270,16 +270,16 @@ pub fn panels(s: &State) -> Vec<El> {
             .fill(if primary { acc } else { rune::Color::TRANSPARENT }).border(1.0, if primary { acc } else { t.card_border })
             .child(text(label.to_string()).font(style(&d, type_::LABEL)).color(if primary { d.on_accent() } else { t.text }))
     };
-    let middle = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
+    let middle = col().grow(1.0).shrink().min_w(270.0).padding(d.gap()).gap(d.gap()).panel(&d)
+        .child(text(cat.map(|c| c.name).unwrap_or("")).font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).wrap_anywhere().shrink())
         .child(row().w_full().gap(d.gap()).center_y().px(d.item_px())
-            .child(text(cat.map(|c| c.name).unwrap_or("")).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
             .child(btn("m-refresh", "Refresh", false).on_press(|s: &mut State| s.reload_machine()))
             .child(super::questions::action(&d, "m-capture", "Capture now", "Capturing…", true, s.jobs.running("capture"), |s: &mut State| s.capture_now())))
         .child(text(if s.msg.is_empty() { "Compared with the copy saved in your repository. Capture now updates that copy; History shows what changed.".to_string() } else { s.msg.clone() })
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
 
-    let mut detail = col().w(440.0).padding(d.pad()).gap(d.pad()).panel(&d);
+    let mut detail = col().w(280.0).shrink().min_w(200.0).padding(d.pad()).gap(d.pad()).panel(&d);
     let mut body = col().w_full().shrink().min_w(0.0).gap(d.pad());
     if let Some(it) = cat.and_then(|c| c.items.get(s.mit)) {
         body = body.child(col().w_full().gap(4.0)
@@ -301,7 +301,7 @@ pub fn panels(s: &State) -> Vec<El> {
     }
     if s.mcat == 0 {
         body = body.child(col().w_full().gap(d.gap())
-            .child(text("CAPTURE ANOTHER FILE OR FOLDER").font(style(&d, type_::SECTION)).color(t.text_secondary))
+            .child(text("CAPTURE ANOTHER FILE OR FOLDER").font(style(&d, type_::SECTION)).color(t.text_secondary).wrap_anywhere().shrink())
             .child(super::field(&d, "f-cap", &s.f_cap, "like ~/.vimrc or ~/.config/kitty ↵", |s: &mut State| &mut s.f_cap).on_submit(|s: &mut State, _: &mut Tx| s.add_capture()))
             .child(text("Anything that looks like it holds secrets (keys, tokens, passwords, browser and mail data) is refused.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
     }
