@@ -118,6 +118,12 @@ pub fn publish(dir: &Path, account: &str, repo: &str) -> Result<String> {
     if !is_home(dir) {
         bail!("{} is not a home repository yet", dir.display());
     }
+    // Everything in the history is about to become reachable on GitHub: look first.
+    let found = crate::secrets::scan_git(dir, crate::secrets::Scope::AllHistory)?;
+    if !found.is_empty() {
+        let list: Vec<String> = found.iter().take(5).map(|(f, x)| format!("{f} ({})", x.rule)).collect();
+        bail!("not published: {} possible secret(s) in the history: {}. Nothing was sent.", found.len(), list.join(", "));
+    }
     let full = format!("{account}/{repo}");
     let o = Command::new("gh").args(["repo", "create", &full, "--private", "--source"]).arg(dir).args(["--remote", "origin", "--push"]).output().context("the `gh` tool is not installed")?;
     if !o.status.success() {
@@ -134,6 +140,20 @@ mod tests {
         let d = std::env::temp_dir().join(format!("hestia-home-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    #[test]
+    fn publish_refuses_a_history_with_a_secret_before_calling_anything() {
+        let d = temp("leak");
+        unsafe { std::env::set_var("GIT_AUTHOR_NAME", "t"); std::env::set_var("GIT_AUTHOR_EMAIL", "t@t.t"); std::env::set_var("GIT_COMMITTER_NAME", "t"); std::env::set_var("GIT_COMMITTER_EMAIL", "t@t.t"); }
+        create(&d, None, "2026-01-01").unwrap();
+        std::fs::write(d.join("notes.txt"), format!("GITHUB_TOKEN=gho_{}\n", "aB1cD2eF3g".repeat(4))).unwrap();
+        git(&d, &["add", "-A"]).unwrap();
+        git(&d, &["commit", "-q", "-m", "oops"]).unwrap();
+        let e = publish(&d, "someone", "home").unwrap_err().to_string();
+        assert!(e.contains("possible secret") && e.contains("notes.txt"), "{e}");
+        assert!(!e.contains("gho_"), "the message must not repeat the secret");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
