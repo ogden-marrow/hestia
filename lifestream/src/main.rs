@@ -118,6 +118,12 @@ enum Cmd {
         #[arg(long)]
         write: bool,
     },
+    /// Sign in with GitHub. There is no Hestia account: GitHub only stores your private home repository.
+    /// Every command prints one JSON event per line; none ever contains the token.
+    Auth {
+        #[command(subcommand)]
+        what: AuthCmd,
+    },
     /// Look for secrets before anything leaves this computer. Exit 1 if any are found; never prints the secret.
     SecretScan {
         /// the repository to check
@@ -139,6 +145,27 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum AuthCmd {
+    /// Show a code, wait for you to approve in your browser, keep the token in the system keyring
+    Login {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Who is signed in
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Forget the token on this computer
+    Logout {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Answers git's password question from the keyring, for github.com over https only (used as a git credential helper)
+    GitCredential { op: String },
 }
 
 #[derive(Subcommand)]
@@ -174,6 +201,31 @@ fn main() -> Result<()> {
                 println!("wrote {}", lifestream::machine::write(&repo, &m)?.display());
             } else {
                 print!("{}", toml::to_string_pretty(&m)?);
+            }
+            Ok(())
+        }
+        Cmd::Auth { what } => {
+            use lifestream::auth;
+            let mut out = std::io::stdout();
+            let ep = match auth::Endpoints::from_env() {
+                Ok(e) => e,
+                Err(e) => {
+                    auth::failed(&mut out, "other", Some(("message", &e.to_string())));
+                    std::process::exit(1);
+                }
+            };
+            let ok = match what {
+                AuthCmd::Login { .. } => auth::login(&mut out, &auth::Keyring, &ep, auth::CLIENT_ID),
+                AuthCmd::Status { .. } => auth::status(&mut out, &auth::Keyring, &ep),
+                AuthCmd::Logout { .. } => auth::logout(&mut out, &auth::Keyring),
+                AuthCmd::GitCredential { op } => {
+                    let mut input = String::new();
+                    std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
+                    auth::git_credential(&op, &input, &auth::Keyring, &mut out).is_ok()
+                }
+            };
+            if !ok {
+                std::process::exit(1);
             }
             Ok(())
         }
