@@ -10,6 +10,25 @@ use crate::design::{Design, Role, Surface};
 use crate::questions::{primary, quiet};
 use rune::{col, el, row, text, El};
 
+/// The owner's requirement (#110): said plainly on the sign-in screen, not behind a link.
+pub const NO_ACCOUNT: &str = "Hestia doesn't have accounts. Signing in to GitHub only lets Hestia keep a private copy of how your computer is set up, in a repository that only you can see. Nothing is sent to us, because there is no us.";
+/// What is asked for, shown beside the approval code.
+pub const PERMISSION: &str = "Hestia asks GitHub for permission to create and use a private repository. GitHub's approval page words this more broadly; Hestia only touches your home repository.";
+/// The short form, repeated in Settings > Account.
+pub const SHORT: &str = "No Hestia account and no online service. GitHub only stores your private home repository.";
+
+const KEEPER: &str = "Your sign-in stays in this computer's password keeper, encrypted. You can sign out any time in Settings.";
+
+/// The privacy statements each screen must show on the screen itself (checked by a test).
+pub fn statements(a: &Auth) -> &'static [&'static str] {
+    match a {
+        Auth::SignedOut => &[NO_ACCOUNT, PERMISSION, KEEPER],
+        Auth::Waiting { .. } => &[PERMISSION],
+        Auth::NoKeyring => &[NO_ACCOUNT],
+        _ => &[],
+    }
+}
+
 /// A repository that could be the home repository.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Repo {
@@ -31,8 +50,8 @@ pub enum Fail {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Auth {
-    /// GitHub's command-line tool is not installed.
-    NoTool,
+    /// No system keyring to hold the sign-in encrypted. Hestia never stores it any other way (#110).
+    NoKeyring,
     SignedOut,
     /// A code to type on github.com; the app notices the approval by itself.
     Waiting { code: String },
@@ -95,7 +114,7 @@ pub fn next(a: &Auth, e: Event) -> Auth {
         },
         (A::Failed { why: Fail::Exists(name), user }, Event::UseIt) => A::Cloning { user: user.clone().unwrap_or_default(), repo: name.clone() },
         (A::Failed { user: Some(user), .. }, Event::Retry) => A::Looking { user: user.clone() },
-        (A::Failed { .. } | A::NoTool, Event::Retry) => A::SignedOut,
+        (A::Failed { .. } | A::NoKeyring, Event::Retry) => A::SignedOut,
         (_, Event::Failed(why)) => A::Failed { why, user },
         _ => a.clone(),
     }
@@ -106,7 +125,7 @@ pub fn canned(name: &str) -> Option<Auth> {
     let user = || "ada".to_string();
     let repo = |n: &str, u: &str| Repo { name: n.to_string(), updated: u.to_string() };
     Some(match name {
-        "no-tool" => Auth::NoTool,
+        "no-keyring" => Auth::NoKeyring,
         "signed-out" => Auth::SignedOut,
         "waiting" => Auth::Waiting { code: "WDJB-MJHT".into() },
         "looking" => Auth::Looking { user: user() },
@@ -126,7 +145,7 @@ pub fn canned(name: &str) -> Option<Auth> {
     })
 }
 
-pub const ALL: [&str; 15] = ["no-tool", "signed-out", "waiting", "looking", "found", "found-many", "none", "creating", "cloning", "ready", "offline", "denied", "expired", "sso", "exists"];
+pub const ALL: [&str; 15] = ["no-keyring", "signed-out", "waiting", "looking", "found", "found-many", "none", "creating", "cloning", "ready", "offline", "denied", "expired", "sso", "exists"];
 
 /// The engine's answer to an event, applied on the UI thread.
 pub fn apply(s: &mut State, e: Event) {
@@ -175,20 +194,22 @@ pub fn view(s: &State) -> Option<View> {
     let retry = |label: &'static str| primary(&d, "acct-retry", label, |s: &mut State| apply(s, Event::Retry));
     let signed_in = |u: &str| text(format!("Signed in as {u}")).font(d.text(Role::Label)).color(t.text_secondary);
     Some(match a {
-        Auth::NoTool => View { problem: None, title: "One more piece first".into(),
+        Auth::NoKeyring => View { problem: Some("Sign-in is off"), title: "Can't keep a sign-in safe here".into(),
             body: col().w_full().gap(d.pad())
-                .child(para(&d, "Hestia signs in to GitHub with GitHub's own tool, and it is not on this computer yet. Install it from Software, or run this in a terminal:"))
-                .child(card(&d, vec![text("sudo apt install gh").font(mono(d.text(Role::Body))).color(t.text)])),
+                .child(para(&d, "Hestia keeps your GitHub sign-in in this computer's password keeper, encrypted, and will not store it any other way. The keeper isn't available right now."))
+                .child(para(&d, "Start or unlock it (on GNOME it is called Passwords and Keys), then check again."))
+                .child(para(&d, statements(a)[0])),
             actions: vec![retry("Check again")] },
         Auth::SignedOut => View { problem: None, title: "Sign in to GitHub".into(),
             body: col().w_full().gap(d.pad())
-                .child(para(&d, "Hestia keeps your computer's setup and your organised files in a private repository that only you can see. Sign in once. Hestia finds your repository, or makes one."))
-                .child(para(&d, "Hestia never sees your password. GitHub's own tool does the signing in."))
-                ,
+                .child(para(&d, statements(a)[0]))
+                .child(para(&d, statements(a)[1]))
+                .child(para(&d, statements(a)[2])),
             actions: vec![primary(&d, "acct-signin", "Sign in with GitHub", |s: &mut State| apply(s, Event::SignIn))] },
         Auth::Waiting { code } => View { problem: None, title: "Approve in your browser".into(),
             body: col().w_full().gap(d.pad())
                 .child(para(&d, "Open GitHub, type this code, and approve. Hestia notices by itself."))
+                .child(para(&d, statements(a)[0]))
                 .child(card(&d, vec![
                     text(if code.is_empty() { "Getting your code…".to_string() } else { code.clone() }).font(mono(d.text(Role::Display))).color(t.text),
                     row().gap(d.gap())
@@ -333,6 +354,22 @@ mod tests {
         }
         let exists = A::Failed { why: Fail::Exists("ada/home".into()), user: Some("ada".into()) };
         assert_eq!(next(&exists, Event::UseIt), A::Cloning { user: "ada".into(), repo: "ada/home".into() });
+    }
+
+    #[test]
+    fn sign_in_screens_say_there_is_no_account_and_what_is_asked() {
+        // the owner's acceptance criteria (#110): on the screen itself, beside the code
+        assert!(statements(&canned("signed-out").unwrap()).contains(&NO_ACCOUNT));
+        assert!(statements(&canned("signed-out").unwrap()).contains(&PERMISSION));
+        assert!(statements(&canned("waiting").unwrap()).contains(&PERMISSION), "the permission sits beside the code");
+        assert!(statements(&canned("no-keyring").unwrap()).contains(&NO_ACCOUNT));
+        assert!(NO_ACCOUNT.contains("no us") && SHORT.contains("No Hestia account"));
+        // calm words: none of these appear in what the person reads
+        for line in [NO_ACCOUNT, PERMISSION, SHORT, KEEPER] {
+            for bad in ["token", "OAuth", "scope", "git ", "repo ", "keyring"] {
+                assert!(!line.contains(bad), "{bad:?} in {line:?}");
+            }
+        }
     }
 
     #[test]
