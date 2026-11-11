@@ -71,7 +71,7 @@ Set `HESTIA_AUTOPUSH=0` to turn pushing off.
 
 A GNOME Shell extension (`packaging/gnome-extension`) draws the **Alt+Space** launcher inside the shell,
 so it is centred, instant and closes when you click away. It finds apps, files, things you copied and
-Hestia itself. The same extension records a text-only clipboard history. The welcome tour turns it on.
+Hestia itself. The same extension can keep a text-only clipboard history; it is off until you turn it on in Settings.
 
 ## What's in the box
 
@@ -137,8 +137,10 @@ lifestream brief                                   # the morning briefing
 
 Only names, paths, kinds and tags are embedded, never file contents, and only by a model on this
 machine: any non-loopback model host is refused. Paths you mark sensitive in your home repository's
-`manifest/rules.toml` are never read, moved or sent to any model. The clipboard history is text only
-and skips password managers.
+`manifest/rules.toml` are never read, moved or sent to any model. The clipboard history is **off until you
+turn it on**. It is text only, kept in a file only you can read, skips password managers and anything that looks
+like a key, token or one-time code (a filter, not a guarantee: do not rely on it for secrets), drops old entries on
+a timer, and is deleted when you turn it off.
 
 ## Build and test
 
