@@ -26,5 +26,7 @@ jobs:
         run: node tests/clipboard-filter.js
       - name: Bootstrap restores a machine safely
         run: bash tests/bootstrap.sh
+      - name: The watch timer fires after install, not only after a reboot
+        run: grep -q '^OnActiveSec=' packaging/systemd/hestia-watch.timer
       - name: Watcher on a fresh home repository
         run: bash tests/watcher.sh

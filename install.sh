@@ -62,7 +62,9 @@ for f in "$pk"/systemd/*; do
 done
 systemctl --user daemon-reload
 systemctl --user enable --now hestia-tray.service lifestream-nightly.timer lifestream-morning.timer
-systemctl --user enable --now hestia-watch.timer
+systemctl --user enable hestia-watch.timer
+# restart, not just start: a timer that is already running keeps its old schedule until restarted
+systemctl --user restart hestia-watch.timer
 
 echo "Hestia is installed. Log out and in once so the launcher and the home repository setting take effect."
 systemctl --user list-timers 'lifestream-*' 'hestia-*' || true
