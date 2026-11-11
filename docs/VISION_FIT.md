@@ -27,6 +27,6 @@ Updated 2026-11-11. Honest scorecard, one row per force. **Met** means a strange
 ## Order of work this implies
 
 1. Make sign-in live (Client ID), then test the whole first run on a clean machine (#6).
-2. Finish the safety items (#56, #57, #45, #17).
+2. Finish the safety items (#45, #17, #59).
 3. Collapse the two code trees (#7), then the release (#12).
 4. The UI milestone in parallel; the stream as the front door once #81 is decided.
