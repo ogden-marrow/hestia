@@ -39,7 +39,7 @@ jobs:
           mkdir -p "$d/DEBIAN"
           printf 'Package: hestia\nVersion: %s\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: Hestia authors <noreply@example.invalid>\nDescription: The hearth of your computer: files, history and time\n' "$v" > "$d/DEBIAN/control"
           dpkg-deb --build --root-owner-group "$d"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             hestia-linux-x86_64.tar.gz
