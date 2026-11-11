@@ -738,7 +738,7 @@ fn main() {
             ("ask", |s| scene(s, Pane::Ask)),
             ("machine", |s| { scene(s, Pane::Machine); s.reload_machine() }),
             ("welcome", |s| scene(s, Pane::Welcome)),
-            ("welcome-home", |s| { s.wstep = 2; s.repo_dir = PathBuf::from("/nonexistent/none"); s.gh_account = TextEdit::new("ogden-marrow"); s.gh_note = "signed in to GitHub as ogden-marrow".into(); scene(s, Pane::Welcome) }),
+            ("welcome-home", |s| { s.wstep = 2; s.repo_dir = PathBuf::from("/nonexistent/none"); s.gh_account = TextEdit::new("your-account"); s.gh_note = "signed in to GitHub as your-account".into(); scene(s, Pane::Welcome) }),
             ("welcome-key", |s| { s.wstep = 3; scene(s, Pane::Welcome) }),
             ("settings", |s| scene(s, Pane::Settings)),
             ("settings-scanning", |s| { s.stab = 2; scene(s, Pane::Settings) }),
