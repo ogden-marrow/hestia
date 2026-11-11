@@ -3,7 +3,7 @@
 #   ~/.config/...  is stored in config/      other ~/... files are stored in dotfiles/
 # NEVER listed (secrets, keys, sessions, caches): ~/.ssh  ~/.gnupg  ~/.config/gh  browser profiles,
 # keyrings, mail, online accounts, anything with "token", "secret" or "password" in its name.
-# capture.sh also refuses those even if they are added here, and scans what it copied for secrets.
+# capture.sh also refuses those even if they are added here, and watch.sh scans what it copied with the shared secret scanner, withholding any file that looks sensitive.
 
 # shell and git
 ~/.bashrc
