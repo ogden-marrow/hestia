@@ -1,6 +1,7 @@
 //! Hestia, drawn with Rune. `hestia` opens the window;
 //! `hestia --snap out.png --scene dark-pink --size 1280x760` renders headless.
 
+mod account;
 mod clipboard;
 mod design;
 mod contents;
@@ -69,6 +70,7 @@ struct State {
     gh_note: String,
     publish_confirm: bool,
     hestia_field: TextEdit,
+    auth: Option<account::Auth>, // the sign-in flow (#110); None until the engine is wired
     dom_sel: usize,
     dom_edit: lifestream::domains::Domain,
     d_name: TextEdit,
@@ -239,7 +241,7 @@ impl State {
         let dir = stream.as_deref().and_then(|d| d.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
-            design: Design::default(), recs, total: 0, home_field: TextEdit::new("Home"), gh_account: TextEdit::new(""), gh_repo: TextEdit::new("home"), gh_note: String::new(), publish_confirm: false, hestia_field: TextEdit::new(""), dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
+            design: Design::default(), recs, total: 0, auth: None, home_field: TextEdit::new("Home"), gh_account: TextEdit::new(""), gh_repo: TextEdit::new("home"), gh_note: String::new(), publish_confirm: false, hestia_field: TextEdit::new(""), dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
             ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, close_after: false, wstep: 0, launched_ask: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false,
@@ -735,6 +737,14 @@ fn scene(s: &mut State, pane: Pane) {
     }
     if let Ok(look) = std::env::var("HESTIA_LOOK") {
         apply_look(&mut s.settings, &look);
+    }
+    // HESTIA_AUTH=waiting shows one state of the sign-in flow (see account::ALL).
+    if let Some(a) = std::env::var("HESTIA_AUTH").ok().and_then(|n| account::canned(&n)) {
+        s.auth = Some(a);
+        s.wstep = 2;
+        s.restyle();
+        s.pane = Pane::Welcome;
+        return;
     }
     s.restyle();
     s.pane = pane;
