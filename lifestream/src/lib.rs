@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod bundle;
 pub mod domains;
+pub mod ghrepo;
 pub mod home;
 pub mod machine;
 pub mod query;
