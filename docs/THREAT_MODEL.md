@@ -48,16 +48,17 @@ Out of scope: an attacker with root, a compromised desktop session or keyring, p
 | T12 | The GitHub token leaks | Only in the system keyring, refused when there is none, never printed, logged, put on a command line or in a file; git gets it through a credential helper that answers only for github.com over https; no redirects; base URLs overridable only to loopback | Fixed | #118 |
 | T13 | Three lists of "never capture" drift apart | One deny-list read by capture, the Machine screen and the starter manifest | Fixed | #129 |
 | T14 | A bulk action is triggered by a deceptive name | "Answer similar folders together" is off until chosen | Fixed | #131 |
-| T15 | A compromised dependency or CI action | Actions not yet pinned by commit, no dependency audit in CI | **Open** | #59 |
+| T15 | A compromised dependency or CI action | Every action is pinned to a commit; Dependabot proposes updates; cargo-deny blocks a dependency from an unexpected registry or git source and reports known advisories (three 'unmaintained' notices, no vulnerabilities: #135) | Mitigated | #59, #135 |
 | T16 | Releases are not verifiable | No signed or attested releases yet | **Open** | #12, #59 |
 | T17 | A private home repository is published by mistake | Publishing is never automatic; the person's repository is created private and verified private before every push | Mitigated | #121, #122 |
-| T18 | Uninstall leaves things behind (units, a world-readable temp dump) | Known gaps | **Open** | #60 |
-| T19 | The repository contains personal data (this public repository) | Fixtures read no real data; test tokens are built at run time; a pre-publish check in CI is not yet in place | **Open** | #61 |
+| T18 | Uninstall leaves things behind, or an install writes an unsafe unit | Uninstall removes programs, units and overrides, always deletes the clipboard history, gives Alt+Space back, and only `--purge` deletes settings; install refuses path characters that could change a systemd unit; the launcher ignores toggles while the screen is locked | Fixed | #60 |
+| T19 | The public repository holds personal data | Files and new commits are checked in CI (`tests/privacy.sh`: home paths, email addresses, this computer's user and host name, and a no-reply identity on every new commit); fixtures read no real data; test tokens are built at run time; pull requests are merged with 'rebase', never 'squash', because GitHub fills a squash commit from the merging account's public profile | **Open: history** | #61, #142 |
 | T20 | Sign-in uses a broader permission than needed | GitHub's `repo` scope is the narrowest that can create a private repository; a narrower mechanism (a GitHub App on one repository) is to be investigated | Residual risk | #110 |
 | T21 | The GitHub CLI fallback in the watcher checks "private" but not owner | Disappears when Hestia sign-in is live | Residual risk | #110 |
 
 ## Residual risks we accept, and why
 
+- **Public history already contains the owner's real name and personal email** on 41 merge commits made on 2026-11-11 by GitHub's squash merge (#142). New commits are protected; the existing ones need an owner decision (rewrite the history, or accept).
 - A secret the scanner cannot recognise can still reach the person's own private repository. The repository stays private and the person can rewrite it; we do not claim otherwise in the product.
 - The person's own GitHub account is the root of trust for backups. If it is compromised, so is the backup.
 - The system keyring is trusted: any program that can unlock it as the same user can read the token.
@@ -66,7 +67,7 @@ Out of scope: an attacker with root, a compromised desktop session or keyring, p
 
 A release is blocked unless all of these hold:
 
-1. No row above is **Open** with a severity of high or critical (T15 and T16 must be closed or explicitly accepted by the owner).
+1. No row above is **Open** with a severity of high or critical (T16, signed releases, must be closed or explicitly accepted by the owner).
 2. `cargo test --workspace` and every shell test pass in CI on a clean runner.
 3. The secret scanner finds nothing in the repository's history, apart from the named test fixtures.
 4. A clean-machine install and first run has been done end to end (#6).

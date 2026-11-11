@@ -1,0 +1,11 @@
+# Email-shaped strings that are fine in this public repository (regular expressions, one per line).
+noreply
+@users\.noreply
+@example\.
+@evil\.
+t@t\.t
+you@
+git@github\.com
+@hestia\.app
+@gnome
+@bbport
