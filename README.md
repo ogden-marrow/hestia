@@ -67,6 +67,14 @@ like a secret (the original is never touched). It pushes only to a private GitHu
 URL git will actually use, and only if the new commits scan clean; otherwise it says why and does not push.
 Set `HESTIA_AUTOPUSH=0` to turn pushing off.
 
+### Rebuilding a computer
+
+`~/.local/libexec/hestia/bootstrap.sh <home-repo>` (path under your install prefix) restores a computer from what
+the watcher captured. It is a **dry run** until you add `--apply`, never deletes (anything already there is moved
+to `NAME.bak.<time>`), copies dotfiles and config instead of linking them into the repository, and holds back
+anything that runs by itself (autostart entries, systemd user units, custom keyboard-shortcut commands) until you
+have read the list and re-run with `--allow-executable`. Third-party apt sources only run with `--only sources`.
+
 ## The launcher
 
 A GNOME Shell extension (`packaging/gnome-extension`) draws the **Alt+Space** launcher inside the shell,
