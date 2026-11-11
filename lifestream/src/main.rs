@@ -118,6 +118,10 @@ enum Cmd {
         #[arg(long)]
         write: bool,
     },
+    /// Which of these home-relative paths must never be captured? Prints the refused ones; exit 1 if any.
+    DenyPath {
+        paths: Vec<String>,
+    },
     /// Find, adopt or create your home repository on GitHub (needs `auth login` first). One JSON event per line.
     Home {
         #[command(subcommand)]
@@ -243,6 +247,14 @@ fn main() -> Result<()> {
                 println!("wrote {}", lifestream::machine::write(&repo, &m)?.display());
             } else {
                 print!("{}", toml::to_string_pretty(&m)?);
+            }
+            Ok(())
+        }
+        Cmd::DenyPath { paths } => {
+            let refused: Vec<&String> = paths.iter().filter(|p| lifestream::deny::capture_refused(p)).collect();
+            refused.iter().for_each(|p| println!("{p}"));
+            if !refused.is_empty() {
+                std::process::exit(1);
             }
             Ok(())
         }

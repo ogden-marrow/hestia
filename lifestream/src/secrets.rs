@@ -27,6 +27,9 @@ const RULES: &[(&str, &str)] = &[
     ("credentials in a url", r"[A-Za-z][A-Za-z0-9+.\-]*://[^/\s:@]+:[^/\s@]{3,}@"),
     ("netrc login", r"(?i)\bmachine\s+\S+\s+login\s+\S+\s+password\s+\S+"),
     ("docker auth", r#"(?i)"auth"\s*:\s*"[A-Za-z0-9+/=]{20,}""#),
+    // short passwords: a quoted literal of 8+ characters assigned to a password-like name, or an exported one
+    ("password literal", r#"(?i)\b[a-z0-9_]*(?:passw(?:or)?d|pwd|passphrase|secret)[a-z0-9_]*\s*[=:]\s*(?:"[^"\s$]{8,}"|'[^'\s$]{8,}')"#),
+    ("exported secret", r#"(?i)^\s*export\s+[a-z0-9_]*(?:passw(?:or)?d|pwd|passphrase|secret|token|api_?key)[a-z0-9_]*=[^\s"'$(`][^\s]{7,}"#),
     ("secret assignment", r#"(?i)\b[a-z0-9_]*(?:api[_\-]?key|secret|token|passw(?:or)?d|credential)[a-z0-9_]*\s*[=:]\s*['"]?[A-Za-z0-9_\-/+=.]{16,}"#),
 ];
 
@@ -130,5 +133,22 @@ mod tests {
     fn findings_name_the_line_not_the_secret() {
         let f = scan(format!("one\ntwo\nGITHUB_TOKEN={}", fake("gho_", 36)).as_bytes());
         assert_eq!(f.last().map(|x| x.line), Some(3));
+    }
+    #[test]
+    fn short_passwords_are_caught_and_ordinary_code_is_not() {
+        // built from parts so no source line holds a login-and-password shape
+        let pw = format!("{}{}", "pass", "word");
+        let hit = |line: String| !scan(line.as_bytes()).is_empty();
+        assert!(hit(format!("DB_{pw}=\"hunter2hunter\"")), "quoted literal");
+        assert!(hit(format!("{pw}: 'correcthorse'")), "yaml-style quoted");
+        assert!(hit(format!("export MY_{}=abcd1234ef", pw.to_uppercase())), "exported, unquoted");
+        assert!(hit("export API_KEY=abcdefgh1234".to_string()), "exported key");
+        // things that look similar but are not secrets
+        assert!(!hit(format!("{}_MIN_LENGTH=8", pw.to_uppercase())), "a number");
+        assert!(!hit(format!("export {}_FILE=$HOME/.pw", pw.to_uppercase())), "a variable reference");
+        assert!(!hit(format!("{pw} = input(\"Enter it: \")")), "a prompt");
+        assert!(!hit(format!("{pw}: \"\"")), "empty");
+        assert!(!hit(format!("# set your {pw} in the settings")), "a comment");
+        assert!(!hit(format!("{pw} = \"$SOME_VARIABLE\"")), "a reference in quotes");
     }
 }

@@ -20,9 +20,14 @@ hestia/         the Hestia app itself, as a submodule\n\
 ```\n\n\
 This repository is private. Secrets never go in it.\n";
 
-const MANIFEST: &str = "# What Hestia must never read, and what is backed up where. Paths are relative to $HOME.\n\
+const MANIFEST_HEAD: &str = "# What Hestia must never read, and what is backed up where. Paths are relative to $HOME.\n\
+# The sensitive rules below come from Hestia's one deny-list; add your own here, you cannot remove them.\n\
 # tier \"store\": irreplaceable, goes to the encrypted store. tier \"skip\": regenerable, never backed up.\n\n\
-[[rule]]\ntier = \"skip\"\npath = \".cache\"\nnote = \"Caches come back by themselves.\"\n";
+[[rule]]\ntier = \"skip\"\npath = \".cache\"\nnote = \"Caches come back by themselves.\"\n\n";
+
+fn manifest() -> String {
+    format!("{MANIFEST_HEAD}{}", crate::deny::manifest_rules())
+}
 
 const GITIGNORE: &str = "# Secrets: never commit.\n.env\n.env.*\n*.key\n*.pem\n*.p12\nid_*\n*_ed25519\n*_rsa\n*.kdbx\ntarget/\n";
 
@@ -55,7 +60,7 @@ pub fn create(dir: &Path, hestia_url: Option<&str>, today: &str) -> Result<Vec<S
     std::fs::write(dir.join("README.md"), README)?;
     std::fs::write(dir.join(".gitignore"), GITIGNORE)?;
     std::fs::create_dir_all(dir.join("manifest"))?;
-    std::fs::write(dir.join("manifest/rules.toml"), MANIFEST)?;
+    std::fs::write(dir.join("manifest/rules.toml"), manifest())?;
     std::fs::create_dir_all(dir.join("domains"))?;
     std::fs::write(dir.join("domains/README.md"), "Your own domain files go here (`<id>.toml`). They replace or add to the nine stock domains.\n")?;
 

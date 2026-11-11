@@ -57,13 +57,9 @@ pub fn dest_of(rel: &str) -> String {
     }
 }
 
-/// Paths that must never be captured, however they are added (capture.sh refuses the same ones).
+/// Paths that must never be captured, however they are added. The list lives in one place: `lifestream::deny`.
 pub fn secret_path(rel: &str) -> bool {
-    let lower = rel.to_lowercase();
-    rel.contains("..")
-        || [".ssh", ".gnupg", ".config/gh", ".config/claude", ".config/helium", ".config/goa-1.0", ".config/evolution"].iter().any(|p| lower.starts_with(p))
-        || ["password", "secret", "token", ".pem", ".key", "id_rsa", "id_ed25519"].iter().any(|p| lower.contains(p))
-        || lifestream::looks_secret(rel.rsplit('/').next().unwrap_or(rel))
+    lifestream::deny::capture_refused(rel)
 }
 
 /// "~/.vimrc", ".vimrc" or "/home/you/.vimrc" -> ".vimrc", if it is something we may capture.
