@@ -93,12 +93,14 @@ pub fn screen(s: &State) -> El {
         3 => {
             let state = crate::clipboard::extension_state();
             let on = state == "recording";
-            ("Hestia Search and clipboard", col().w_full().gap(d.pad())
-                .child(line(s, &format!("Press {} anywhere and type.", crate::setup::SHORTCUT_NAME), "Find apps, files, things you copied and Hestia itself. Type clipboard to browse what you copied: text only, kept on this computer, never passwords."))
-                .child(line(s, "A small part of Hestia lives in the desktop.", "GNOME only lets the shell draw the launcher and watch the clipboard, so Hestia adds one extension. Turn it on here; you log out and in once."))
+            ("Hestia Search", col().w_full().gap(d.pad())
+                .child(line(s, &format!("Press {} anywhere and type.", crate::setup::SHORTCUT_NAME), "Find apps, files and Hestia itself."))
+                .child(line(s, "A small part of Hestia lives in the desktop.", "GNOME only lets the shell draw the launcher, so Hestia adds one extension. Turn it on here; you log out and in once."))
                 .child(row().gap(d.pad()).center_y()
                     .child(crate::questions::action(&d, "w-ext", "Turn on", "Turning on…", !on, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search()))
-                    .child(text(if on { "on".to_string() } else { format!("not yet: {state}") }).font(style(&d, type_::LABEL)).color(if on { acc } else { t.text_secondary }))))
+                    .child(text(if on { "on".to_string() } else { format!("not yet: {state}") }).font(style(&d, type_::LABEL)).color(if on { acc } else { t.text_secondary })))
+                .child(line(s, "Remember what you copy (optional)", crate::clipboard::PRIVACY))
+                .child(row().child(crate::prefs::on_off(&d, "w-clip", s.settings.clipboard_on, |s, on| crate::prefs::set_clipboard(s, on)))))
         }
         _ => ("You are set", col().w_full().gap(d.section())
             .child(line(s, "That is all.", "Your first scan runs tonight. Until then Hestia shows what it already knows."))

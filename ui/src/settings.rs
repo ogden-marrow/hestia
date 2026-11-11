@@ -79,7 +79,7 @@ impl Default for Settings {
         Settings {
             scheme: Scheme::Auto, density: Density::Cozy, text: 1.0, accent: Accent::Blue,
             scan_on: true, scan_time: (2, 30), roots: ["Documents", "Downloads", "Pictures", "Videos"].map(String::from).to_vec(),
-            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: true, clipboard_on: true, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15, home: String::new(), hestia_repo: String::new(),
+            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: true, clipboard_on: false, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15, home: String::new(), hestia_repo: String::new(),
         }
     }
 }
@@ -119,7 +119,7 @@ impl Settings {
                 "tray" => s.tray = v != "off",
                 "hidden" => s.hidden = v == "yes",
                 "siblings" => s.siblings = v != "no",
-                "clipboard" => s.clipboard_on = v != "off",
+                "clipboard" => s.clipboard_on = v == "on", // opt-in: anything but an explicit "on" is off
                 "clipboard_max" => s.clipboard_max = v.parse::<u32>().map(|n| n.clamp(10, 1000)).unwrap_or(100),
                 "clipboard_days" => s.clipboard_days = v.parse::<u32>().map(|n| n.clamp(1, 365)).unwrap_or(7),
                 "welcomed" => s.welcomed = v == "yes",
@@ -177,6 +177,15 @@ mod tests {
         assert_eq!(Settings::parse(&s.render()), s);
         assert_eq!(Settings::parse("nonsense\naccent=???\ntext=abc\nscan_time=99:99\n"), Settings::default());
         assert_eq!(Settings::parse("text=9").text, 1.4, "text size is clamped");
+    }
+
+    #[test]
+    fn clipboard_history_is_opt_in() {
+        assert!(!Settings::default().clipboard_on);
+        for v in ["", "clipboard=", "clipboard=off", "clipboard=yes", "clipboard=ON", "clipboard=true"] {
+            assert!(!Settings::parse(v).clipboard_on, "{v:?}");
+        }
+        assert!(Settings::parse("clipboard=on").clipboard_on);
     }
 
     #[test]
