@@ -23,6 +23,12 @@ pub fn finish(s: &mut State) {
     s.pane = Pane::Today;
 }
 
+/// The Continue button, from anywhere in the tour (the sign-in flow uses it when it is done).
+pub fn advance(s: &mut State) {
+    s.msg.clear();
+    if s.wstep + 1 >= STEPS { finish(s) } else { s.wstep += 1; }
+}
+
 pub fn open(s: &mut State) {
     s.wstep = 0;
     s.msg.clear();
@@ -35,7 +41,15 @@ pub fn screen(s: &State) -> El {
     let acc = d.accent_color();
     let step = s.wstep.min(STEPS - 1);
 
-    let (title, mut body) = match step {
+    // The sign-in flow (step 3) draws itself; every other step is plain text below.
+    let mut problem = None;
+    let mut actions: Option<Vec<El>> = None;
+    let flow = if step == 2 { crate::account::view(s) } else { None };
+    let (title, mut body): (String, El) = if let Some(v) = flow {
+        problem = v.problem;
+        actions = Some(v.actions);
+        (v.title, v.body)
+    } else { let (t, b) = match step {
         0 => ("Welcome to Hestia", col().w_full().gap(d.section())
             .child(line(s, "It files your computer for you.", "Every night it reads your folders and works out what each file is and where it belongs."))
             .child(line(s, "It only asks when it is unsure.", "Each morning it tells you what it filed and asks a few questions about the rest."))
@@ -105,25 +119,38 @@ pub fn screen(s: &State) -> El {
         _ => ("You are set", col().w_full().gap(d.section())
             .child(line(s, "That is all.", "Your first scan runs tonight. Until then Hestia shows what it already knows."))
             .child(line(s, "Everything you chose is in Settings.", "You can run this tour again from Settings, About."))),
-    };
+    }; (t.to_string(), b) };
     if !s.msg.is_empty() && (step == 2 || step == 3) {
         body = body.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink());
     }
 
     let last = step == STEPS - 1;
-    let nav = row().w_full().gap(d.gap()).center_y()
+    let mut nav = row().w_full().gap(d.gap()).center_y()
         .child(text(format!("Step {} of {}", step + 1, STEPS)).font(d.text(Role::Label)).color(t.text_secondary))
-        .child(el().grow(1.0))
-        .child(crate::questions::quiet(&d, "w-skip", if last { "Back" } else { "Skip" }, move |s: &mut State| if last { s.wstep -= 1 } else { finish(s) }))
-        .child(crate::questions::primary(&d, "w-next", if last { "Open Hestia" } else { "Continue" }, move |s: &mut State| {
-            s.msg.clear();
-            if last { finish(s) } else { s.wstep += 1; if s.wstep == 2 { s.detect_github(); } }
-        }));
+        .child(el().grow(1.0));
+    nav = match actions {
+        Some(acts) => {
+            // the flow's own buttons, with a way to leave it for later
+            nav = nav.child(crate::questions::quiet(&d, "w-later", "Skip for now", |s: &mut State| advance(s)));
+            acts.into_iter().fold(nav, |n, a| n.child(a))
+        }
+        None => nav
+            .child(crate::questions::quiet(&d, "w-skip", if last { "Back" } else { "Skip" }, move |s: &mut State| if last { s.wstep -= 1 } else { finish(s) }))
+            .child(crate::questions::primary(&d, "w-next", if last { "Open Hestia" } else { "Continue" }, move |s: &mut State| {
+                s.msg.clear();
+                if last { finish(s) } else { s.wstep += 1; if s.wstep == 2 && s.auth.is_none() { s.detect_github(); } }
+            })),
+    };
 
     // No floating box: the whole window is the page, with one centred column of fixed measure.
     // The heading sits at the same height on every step; the body scrolls, the buttons stay put.
     let column = col().w(d.size(520.0)).h_full().gap(d.section()).py(d.section() * 2.0)
-        .child(text(title.to_string()).font(d.text(Role::Display)).color(t.text))
+        .child(col().w_full().gap(d.gap())
+            .child(match problem {
+                Some(p) => text(p.to_string()).font(d.text(Role::Label)).color(d.danger()),
+                None => el().size(1.0, 1.0),
+            })
+            .child(text(title).font(d.text(Role::Display)).color(t.text)))
         .child(col().w_full().grow(1.0).shrink().scroll(ScrollSpec { stick_bottom: false }).child(body))
         .child(nav);
     row().w_full().h_full().fill(t.card).child(el().grow(1.0)).child(column).child(el().grow(1.0))

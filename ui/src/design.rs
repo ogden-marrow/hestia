@@ -160,6 +160,11 @@ impl Design {
         self.accent
     }
 
+    /// The one red: errors and destructive confirmations only (DESIGN.md, issue #35).
+    pub fn danger(&self) -> Color {
+        if self.dark { oklch(0.72, 0.17, 25.0) } else { oklch(0.52, 0.19, 25.0) }
+    }
+
     /// Text on top of a solid accent fill.
     pub fn on_accent(&self) -> Color {
         oklch(0.99, 0.0, 0.0)
