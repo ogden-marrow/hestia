@@ -53,10 +53,10 @@ export default class HestiaClipboard extends Extension {
             this._wm = new Gio.Settings({schema_id: WM});
             this._menu = this._wm.get_strv('activate-window-menu');
             if (this._menu.includes(KEY)) this._wm.set_strv('activate-window-menu', this._menu.filter(k => k !== KEY));
-            Main.wm.addKeybinding('launcher-key', this.getSettings(), Meta.KeyBindingFlags.IGNORE_AUTOREPEAT, Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._launcher.toggle());
+            Main.wm.addKeybinding('launcher-key', this.getSettings(), Meta.KeyBindingFlags.IGNORE_AUTOREPEAT, Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => { if (!Main.sessionMode.isLocked) this._launcher.toggle(); });
             this._keyed = true;
             // `hestia-tray` and anything else can open it too:  gdbus call --session --dest org.gnome.Shell --object-path /app/hestia/Launcher --method app.hestia.Launcher.Toggle
-            this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS, {Toggle: () => this._launcher.toggle()});
+            this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS, {Toggle: () => { if (!Main.sessionMode.isLocked) this._launcher.toggle(); }});
             this._dbus.export(Gio.DBus.session, '/app/hestia/Launcher');
         } catch (e) {
             console.error(`hestia: launcher not started: ${e}`);

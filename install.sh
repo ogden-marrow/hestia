@@ -11,6 +11,14 @@ home_repo="${HESTIA_HOME:-$HOME/Home}"
 share="${XDG_DATA_HOME:-$HOME/.local/share}"
 pk="$here/packaging"
 
+# These paths are written into systemd units and a shell command. Refuse characters that could change what a unit
+# does (quotes, backslash, $, %, newlines, spaces) rather than try to escape them.
+for v in "$prefix" "$home_repo" "$here"; do
+  case "$v" in
+    *[!A-Za-z0-9_./~+@:,=-]*) echo "install.sh: '$v' has a character that is not safe to put in a systemd unit (letters, digits and _ . / ~ + @ : , = - only). Choose another place." >&2; exit 1 ;;
+  esac
+done
+
 # programs
 mkdir -p "$prefix/bin"
 if [ -d "$here/bin" ]; then

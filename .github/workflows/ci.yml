@@ -12,9 +12,9 @@ jobs:
   build-test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: System libraries
         timeout-minutes: 5
         run: |
@@ -24,6 +24,8 @@ jobs:
       - run: cargo test --release --locked
       - name: Clipboard extension never records secrets
         run: node tests/clipboard-filter.js
+      - name: Uninstall and install-path safety
+        run: bash tests/uninstall.sh
       - name: Desktop settings are captured by allowlist
         run: bash tests/dconf-filter.sh
       - name: Bootstrap restores a machine safely
@@ -32,3 +34,19 @@ jobs:
         run: grep -q '^OnActiveSec=' packaging/systemd/hestia-watch.timer
       - name: Watcher on a fresh home repository
         run: bash tests/watcher.sh
+
+  # Where dependencies come from and whether any has a known vulnerability. 'sources' blocks (a dependency from an
+  # unexpected place); 'advisories' reports but does not block, because a new advisory should not stop unrelated work.
+  dependencies:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Dependencies come only from where we expect
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          command: check sources
+      - name: Known vulnerabilities (reported, not blocking)
+        continue-on-error: true
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          command: check advisories
