@@ -52,13 +52,13 @@ Out of scope: an attacker with root, a compromised desktop session or keyring, p
 | T16 | Releases are not verifiable | No signed or attested releases yet | **Open** | #12, #59 |
 | T17 | A private home repository is published by mistake | Publishing is never automatic; the person's repository is created private and verified private before every push | Mitigated | #121, #122 |
 | T18 | Uninstall leaves things behind, or an install writes an unsafe unit | Uninstall removes programs, units and overrides, always deletes the clipboard history, gives Alt+Space back, and only `--purge` deletes settings; install refuses path characters that could change a systemd unit; the launcher ignores toggles while the screen is locked | Fixed | #60 |
-| T19 | The public repository holds personal data | Files and new commits are checked in CI (`tests/privacy.sh`: home paths, email addresses, this computer's user and host name, and a no-reply identity on every new commit); fixtures read no real data; test tokens are built at run time; pull requests are merged with 'rebase', never 'squash', because GitHub fills a squash commit from the merging account's public profile | **Open: history** | #61, #142 |
+| T19 | The public repository holds personal data | Files are checked in CI (`tests/privacy.sh`: home paths, email addresses, this computer's user and host name); fixtures read no real data; test tokens are built at run time. **Accepted by the maintainer (2026-11-11): their real name and email are public, so GitHub merges may carry them on commits.** The identity check on commits is a note, not a failure (`PRIVACY_STRICT_IDENTITY=1` makes it strict for a project that wants a hidden identity) | Accepted | #61, #142 |
 | T20 | Sign-in uses a broader permission than needed | GitHub's `repo` scope is the narrowest that can create a private repository; a narrower mechanism (a GitHub App on one repository) is to be investigated | Residual risk | #110 |
 | T21 | The GitHub CLI fallback in the watcher checks "private" but not owner | Disappears when Hestia sign-in is live | Residual risk | #110 |
 
 ## Residual risks we accept, and why
 
-- **Public history already contains the owner's real name and personal email** on 41 merge commits made on 2026-11-11 by GitHub's squash merge (#142). New commits are protected; the existing ones need an owner decision (rewrite the history, or accept).
+- **The maintainer's real name and email appear on merge commits** made by GitHub (#142). The maintainer is a public person and chose to accept this; it is not a leak. Contributors who want a hidden identity should use GitHub's 'Keep my email addresses private'.
 - A secret the scanner cannot recognise can still reach the person's own private repository. The repository stays private and the person can rewrite it; we do not claim otherwise in the product.
 - The person's own GitHub account is the root of trust for backups. If it is compromised, so is the backup.
 - The system keyring is trusted: any program that can unlock it as the same user can read the token.
