@@ -81,7 +81,14 @@ pub fn parse_entry(id: &str, path: &std::path::Path, text: &str) -> Option<App> 
     (is_app && !hidden && !name.is_empty()).then(|| App { id: id.to_string(), name, generic, keywords, path: path.to_path_buf() })
 }
 
+#[cfg(test)]
+thread_local!(static TEST_LAUNCHES: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) });
+
 fn launches_file() -> PathBuf {
+    #[cfg(test)]
+    if let Some(p) = TEST_LAUNCHES.with(|t| t.borrow().clone()) {
+        return p;
+    }
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/hestia/launches.tsv")
 }
 
@@ -91,15 +98,29 @@ pub fn load_launches() -> HashMap<String, u32> {
         .filter_map(|l| { let (id, n) = l.split_once('\t')?; Some((id.to_string(), n.parse().ok()?)) }).collect()
 }
 
-pub fn launch(app: &App, counts: &mut HashMap<String, u32>) {
-    let _ = std::process::Command::new("gio").arg("launch").arg(&app.path)
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+/// Open an app. A launcher that fails silently is worse than none, so a failure comes back as
+/// words a person can read, and a failed launch is not counted.
+pub fn launch(app: &App, counts: &mut HashMap<String, u32>) -> Result<(), String> {
+    run_gio(&app.path).map_err(|why| format!("Couldn't open {}: {why}", app.name))?;
     *counts.entry(app.id.clone()).or_default() += 1;
     if let Some(d) = launches_file().parent() {
         let _ = std::fs::create_dir_all(d);
     }
     let body: String = counts.iter().map(|(k, v)| format!("{k}\t{v}\n")).collect();
     let _ = std::fs::write(launches_file(), body);
+    Ok(())
+}
+
+/// `gio launch <entry>`; returns once the desktop has taken the request.
+fn run_gio(path: &std::path::Path) -> Result<(), String> {
+    let out = std::process::Command::new("gio").arg("launch").arg(path)
+        .stdin(std::process::Stdio::null()).output().map_err(|e| format!("gio is not available ({e})"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let first = err.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("the desktop refused");
+    Err(first.trim_start_matches("gio: ").to_string())
 }
 
 /// How well a query matches a name: prefix beats word-prefix beats anywhere.
@@ -247,10 +268,17 @@ impl State {
                 false
             }
             Kind::App(i) => {
-                if let Some(a) = self.apps.get(*i).cloned() {
-                    launch(&a, &mut self.launches);
+                let Some(a) = self.apps.get(*i).cloned() else {
+                    self.msg = "That app is gone. Search again.".into();
+                    return false;
+                };
+                match launch(&a, &mut self.launches) {
+                    Ok(()) => true,
+                    Err(why) => {
+                        self.msg = why;
+                        false
+                    }
                 }
-                true
             }
             Kind::Clip(i) => {
                 if let Some(c) = self.clips.get(*i) {
@@ -279,12 +307,14 @@ impl State {
 ///   {"q":"fire"}  ->  {"hits":[{"i":0,"top":true,"group":"Applications","title":"Firefox","sub":"Web Browser","kind":"app","path":"/usr/share/applications/firefox.desktop"}]}
 ///   {"run":0}     ->  {"done":true}  or  {"copy":"text"} for a clipboard item (the Shell owns the clipboard)
 pub fn serve() {
-    use std::io::{BufRead, Write};
     let mut s = State::default();
     s.launched_ask = true;
+    serve_with(s, std::io::stdin().lock(), std::io::stdout().lock());
+}
+
+fn serve_with(mut s: State, input: impl std::io::BufRead, mut out: impl std::io::Write) {
     let mut hits: Vec<Hit> = Vec::new();
-    let mut out = std::io::stdout().lock();
-    for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+    for line in input.lines().map_while(Result::ok) {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
         let reply = if let Some(q) = v["q"].as_str() {
             s.ask.text = q.to_string();
@@ -303,8 +333,11 @@ pub fn serve() {
         } else if let Some(i) = v["run"].as_u64() {
             match hits.get(i as usize).cloned() {
                 Some(Hit { kind: Kind::Clip(n), .. }) => serde_json::json!({"copy": s.clips.get(n).map(|c| c.text.clone()).unwrap_or_default()}),
-                Some(h) => { s.activate_inner(&h); serde_json::json!({"done": true}) }
-                None => serde_json::json!({"done": false}),
+                Some(h) => {
+                    s.msg.clear();
+                    if s.activate_inner(&h) { serde_json::json!({"done": true}) } else { serde_json::json!({"done": false, "error": s.msg}) }
+                }
+                None => serde_json::json!({"done": false, "error": "Nothing to open. Search again."}),
             }
         } else {
             continue;
@@ -370,7 +403,10 @@ pub fn panel(s: &State) -> El {
             true
         })
         .on_submit(|s: &mut State, tx: &mut Tx| {
-            if let Some(h) = results(s).get(s.asel).cloned() {
+            let all = results(s);
+            // the highlighted row is clamped when drawn, so Enter opens what is lit
+            if let Some(h) = all.get(s.asel.min(all.len().saturating_sub(1))).cloned() {
+                s.msg.clear();
                 s.activate(&h);
             }
             if s.launched_ask {
@@ -410,6 +446,9 @@ pub fn panel(s: &State) -> El {
     } else if !s.launched_ask {
         c = c.child(text("Type to search apps, files, clipboard (type “clipboard”) and Hestia.").font(style(&d, type_::LABEL)).color(t.text_secondary).px(20.0).py(d.gap()));
     }
+    if s.launched_ask && !s.msg.is_empty() {
+        c = c.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink().px(20.0).py(d.gap()));
+    }
     if s.launched_ask {
         // the window itself is the card: rounded, ruled, with the desktop showing at the corners
         c.radius(24.0).fill(t.card).border(1.0, t.card_border)
@@ -423,6 +462,49 @@ pub const LAUNCHER_W: f32 = 680.0;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Drive `{"q":..}` then `{"run":0}` through the real `serve` loop with a fake desktop entry
+    /// whose `Exec` touches a marker file, and check the app was started.
+    #[test]
+    fn serve_runs_the_selected_app_and_reports_failure() {
+        let dir = std::env::temp_dir().join(format!("hestia-serve-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        TEST_LAUNCHES.with(|t| *t.borrow_mut() = Some(dir.join("launches.tsv")));
+        let marker = dir.join("ran");
+        let entry = dir.join("zzfake.desktop");
+        let text = format!("[Desktop Entry]\nType=Application\nName=Zzfake Thing\nExec=touch {}\n", marker.display());
+        std::fs::write(&entry, &text).unwrap();
+        let state = || {
+            let mut s = State::default();
+            s.launched_ask = true;
+            s.apps = vec![parse_entry("zzfake.desktop", &entry, &text).unwrap()];
+            s.clips.clear();
+            s
+        };
+        let mut out = Vec::new();
+        serve_with(state(), "{\"q\":\"zzfake\"}\n{\"run\":0}\n".as_bytes(), &mut out);
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("Zzfake Thing") && out.contains("\"done\":true"), "{out}");
+        for _ in 0..50 {
+            if marker.exists() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(marker.exists(), "the selected app was not started");
+
+        // Enter with nothing to open says so instead of staying silent
+        let mut out = Vec::new();
+        serve_with(state(), "{\"run\":0}\n".as_bytes(), &mut out);
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("\"done\":false") && out.contains("error"), "{out}");
+
+        // a launch the desktop refuses is reported, not swallowed, and not counted
+        let mut counts = HashMap::new();
+        let gone = App { id: "gone.desktop".into(), name: "Gone".into(), generic: String::new(), keywords: String::new(), path: dir.join("missing.desktop") };
+        let err = launch(&gone, &mut counts).unwrap_err();
+        assert!(err.starts_with("Couldn't open Gone"), "{err}");
+        assert!(counts.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn matches_rank_prefix_over_word_over_anywhere() {
