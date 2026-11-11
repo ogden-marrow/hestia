@@ -15,7 +15,8 @@ mkdir -p "$here/apt-sources"
 [ -e "$here/capture-paths.txt" ] || cp "$libexec/capture-paths.default" "$here/capture-paths.txt"
 state="${XDG_DATA_HOME:-$HOME/.local/share}/hestia"; mkdir -p "$state"
 
-note() { printf '{"at":%s,"result":"%s"}\n' "$(date +%s)" "$1" > "$state/watch.json"; }
+withheld_note=""
+note() { printf '{"at":%s,"result":"%s%s"}\n' "$(date +%s)" "$1" "$withheld_note" > "$state/watch.json"; }
 
 # one at a time
 exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hestia-watch.lock"
@@ -29,8 +30,20 @@ cap=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
 if [ "${HESTIA_NOW:-0}" != 1 ] && [ "${on_ac:-1}" = "0" ] && [ "${cap:-100}" -lt 25 ]; then note "battery low: skipped"; exit 0; fi
 [ -e "$repo/.git/index.lock" ] && { note "git is busy: skipped"; exit 0; }
 
+# ---- the one secret scanner (lifestream secret-scan). No scanner, no commit: fail closed.
+LS="${LIFESTREAM:-$(command -v lifestream 2>/dev/null || echo "$HOME/.local/bin/lifestream")}"
+[ -x "$LS" ] || { note "nothing committed: the secret scanner is missing"; exit 1; }
+
 # ---- capture at the lowest priority
 nice -n 19 ionice -c 3 "$libexec/capture.sh" "$here" >/dev/null 2>"$state/watch.err" || { note "capture failed: see watch.err"; exit 1; }
+
+# ---- withhold anything that looks like a secret. The captured copy is dropped (the original on this
+# computer is never touched) and the file names are listed in watch.json; the secret itself never is.
+withheld=0
+while IFS= read -r f; do
+  [ -n "$f" ] && [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1))
+done < <(find "$here" -type f -not -path '*/.git/*' -print0 | xargs -0 -r "$LS" secret-scan 2>/dev/null | sed -E 's/:[0-9]+: .*$//' | sort -u)
+[ "$withheld" -gt 0 ] && withheld_note="; $withheld file(s) withheld: possible secrets"
 
 # ---- who is this machine (machines/<name>/machine.toml)
 lifestream machine --repo "$repo" --write >/dev/null 2>>"$state/watch.err" || true
@@ -76,20 +89,19 @@ n=$(git -C "$repo" status --porcelain -- "$rel/apt-sources" | wc -l)
 git -C "$repo" add -A -- "$rel/MACHINE.txt" machines 2>/dev/null
 git -C "$repo" diff --cached --quiet -- "$rel/MACHINE.txt" machines || commit_area machine "machine fingerprint or hardware notes changed" "$rel/MACHINE.txt" machines
 
-# ---- push automatically, but only to a private remote and only if nothing in the new commits looks like a secret
+# ---- push automatically, but only to a private GitHub repo (checked on the URL git will really push to,
+# after pushurl and insteadOf rewrites) and only if the shared scanner finds nothing in the new commits
 push_ok() {
   git -C "$repo" remote get-url origin >/dev/null 2>&1 || { note "ok: $made commit(s) (no remote yet)"; return 1; }
-  local url slug; url=$(git -C "$repo" remote get-url origin)
+  local url slug; url=$(git -C "$repo" remote get-url --push origin)
+  case "$url" in https://github.com/*|git@github.com:*) ;; *) note "not pushed: remote is not a GitHub repository"; return 1;; esac
   slug=$(printf '%s' "$url" | sed -E 's#^(https://github.com/|git@github.com:)##; s#\.git$##')
   [ "$(gh repo view "$slug" --json isPrivate --jq .isPrivate 2>/dev/null)" = "true" ] || { note "not pushed: remote is not a confirmed private repo"; return 1; }
-  local range="origin/main..HEAD"; git -C "$repo" rev-parse origin/main >/dev/null 2>&1 || range="HEAD"
-  if git -C "$repo" log -p --no-color "$range" 2>/dev/null | grep -E '^\+' | grep -qE 'BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{32,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{20,}'; then
-    note "not pushed: something that looks like a secret is in the new commits"; return 1
-  fi
+  local range="origin/main..HEAD"; git -C "$repo" rev-parse origin/main >/dev/null 2>&1 || range="all"
+  "$LS" secret-scan --repo "$repo" --range "$range" >/dev/null 2>&1 || { note "not pushed: possible secret in the new commits (run: lifestream secret-scan --repo $repo --range $range)"; return 1; }
 }
-# Auto-push stays off until the shared secret scanner replaces the regexes above (red team: they caught 0 of 11
-# common token formats). Turn on with HESTIA_AUTOPUSH=1 only after that fix lands.
-if [ "${HESTIA_AUTOPUSH:-0}" != 1 ]; then
+# Auto-push is on by default; set HESTIA_AUTOPUSH=0 to turn it off.
+if [ "${HESTIA_AUTOPUSH:-1}" = 0 ]; then
   note "ok: $made commit(s) (auto-push is off)"
 elif push_ok; then
   if [ -n "$(git -C "$repo" log origin/main..HEAD --oneline 2>/dev/null)" ]; then

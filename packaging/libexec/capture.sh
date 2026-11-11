@@ -62,11 +62,7 @@ done < capture-paths.txt
   echo "nvidia: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)"
 } > MACHINE.txt
 
-# --- secret guard: refuse to finish if anything secret-looking was copied --
-if grep -rIlE 'BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|(api[_-]?key|secret|passw(or)?d|token)"?[[:space:]]*[:=]' \
-     config dotfiles apt-sources dconf.ini 2>/dev/null; then
-  echo "SECRET GUARD: the files above look sensitive. Remove them from the allowlist." >&2
-  exit 1
-fi
+# Secrets: this script copies, it does not judge. watch.sh runs the one shared scanner (lifestream secret-scan)
+# over everything copied before anything is committed, and withholds any file that looks sensitive.
 
 echo "done. $(wc -l < apt-manual.txt) apt, $(wc -l < snap.txt) snap, $(wc -l < flatpak.txt) flatpak, $(wc -l < dconf.ini) dconf lines"

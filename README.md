@@ -62,7 +62,10 @@ their rules, and the contents of the folder you pick. Change them in **Settings,
 `machines/<name>/machine.toml` in your home repository, and the **Machine** screen compares what was
 captured under `applications/<os>/<distro>/<version>` with what is installed now. A load-aware watcher
 (`hestia-watch.timer`) re-captures every few minutes, only when the computer is quiet and the battery
-is fine, in small commits. It never pushes.
+is fine, in small commits. Before committing it scans what it captured and withholds any file that looks
+like a secret (the original is never touched). It pushes only to a private GitHub repository, checked on the
+URL git will actually use, and only if the new commits scan clean; otherwise it says why and does not push.
+Set `HESTIA_AUTOPUSH=0` to turn pushing off.
 
 ## The launcher
 
