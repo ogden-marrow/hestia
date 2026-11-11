@@ -51,10 +51,10 @@ while IFS= read -r line; do
   p="${line%%#*}"; p="$(echo "$p" | xargs)"
   [ -z "$p" ] && continue
   case "$p" in "~/"*) rel="${p#\~/}" ;; *) echo "skip (not under ~): $p" >&2; continue ;; esac
-  case "$rel" in
-    .ssh*|.gnupg*|.config/gh*|.config/Claude*|.config/helium*|.config/goa-1.0*|.config/evolution*|*..*|*password*|*secret*|*token*|*.pem|*.key|*id_rsa*|*id_ed25519*)
-      echo "REFUSED (secret-looking): $p" >&2; continue ;;
-  esac
+  # one deny-list for everything (lifestream deny-path); if it cannot be asked, nothing is captured from home
+  if ! "${LIFESTREAM:-lifestream}" deny-path "$rel" >/dev/null 2>&1; then
+    echo "REFUSED (never captured): $p" >&2; continue
+  fi
   [ -e ~/"$rel" ] || continue
   case "$rel" in .config/*) dest="$new/config/${rel#.config/}" ;; *) dest="$new/dotfiles/$rel" ;; esac
   mkdir -p "$(dirname "$dest")"

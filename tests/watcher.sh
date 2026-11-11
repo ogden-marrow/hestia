@@ -79,6 +79,13 @@ echo "a new kind of capture" > "$rel/new-capture.txt"; run
 git ls-files --error-unmatch "$rel/new-capture.txt" >/dev/null 2>&1 || fail "a new capture file stayed untracked"
 git log -1 --format=%s | grep -q "new files captured (new-capture.txt)" || fail "the new file did not get its own plain commit"
 [ -z "$(git status --short)" ] || fail "tree not clean after committing new capture files"
+# the one deny-list: a sensitive path is never captured even if it is added to capture-paths.txt
+mkdir -p "$T/home/.ssh"; echo "Host example" > "$T/home/.ssh/config"
+echo '~/.ssh/config' >> "$rel/capture-paths.txt"
+run
+[ ! -e "$rel/dotfiles/.ssh/config" ] || fail "a path on the deny-list was captured"
+git ls-files | grep -q '\.ssh' && fail "a path on the deny-list was committed"
+
 # signed in to Hestia: the repository must be vouched for by Hestia (a private repo of yours) before anything is sent
 git config --unset-all "url.file://$T/elsewhere.pushInsteadOf" 2>/dev/null || true
 git remote remove origin 2>/dev/null || true

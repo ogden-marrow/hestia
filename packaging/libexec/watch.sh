@@ -34,6 +34,7 @@ if [ "${HESTIA_NOW:-0}" != 1 ] && [ "${on_ac:-1}" = "0" ] && [ "${cap:-100}" -lt
 LS="${LIFESTREAM:-$(command -v lifestream 2>/dev/null || echo "$HOME/.local/bin/lifestream")}"
 [ -x "$LS" ] || { note "nothing committed: the secret scanner is missing"; exit 1; }
 
+export LIFESTREAM="$LS"   # capture.sh asks the engine's one deny-list which paths it may copy
 # ---- capture at the lowest priority
 nice -n 19 ionice -c 3 "$libexec/capture.sh" "$here" >/dev/null 2>"$state/watch.err" || { note "capture failed: see watch.err"; exit 1; }
 
