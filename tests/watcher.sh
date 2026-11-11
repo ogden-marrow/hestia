@@ -71,4 +71,12 @@ rm -f "$T/home/.bashrc" "$T/home/.profile" "$T/home/.bash_logout" "$T/home/.nvid
 run || true
 [ -e "$rel/dotfiles/.profile" ] || fail "a mass deletion was not refused"
 grep -q 'capture failed' "$T/home/.local/share/hestia/watch.json" || fail "the refusal was not reported"
+# a file that appears in the capture folder after the first capture is committed, not left untracked
+echo 'export PATH=$PATH' > "$T/home/.bashrc"
+for f in .profile .bash_logout .nvidia-settings-rc .config/mimeapps.list .config/user-dirs.dirs; do echo "# $f" > "$T/home/$f"; done
+rel=$(ls -d applications/linux/*/*)
+echo "a new kind of capture" > "$rel/new-capture.txt"; run
+git ls-files --error-unmatch "$rel/new-capture.txt" >/dev/null 2>&1 || fail "a new capture file stayed untracked"
+git log -1 --format=%s | grep -q "new files captured (new-capture.txt)" || fail "the new file did not get its own plain commit"
+[ -z "$(git status --short)" ] || fail "tree not clean after committing new capture files"
 echo "watcher ok"
