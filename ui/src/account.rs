@@ -45,6 +45,8 @@ pub enum Fail {
     Sso(String),
     /// A repository with this name already exists (so "create" would clash).
     Exists(String),
+    /// No system keyring: Hestia refuses to keep a sign-in in plain text.
+    NoKeyring,
     Other(String),
 }
 
@@ -80,6 +82,9 @@ pub enum Event {
     Cancel,
     Retry,
     Failed(Fail),
+    /// Already signed in when the app looked (engine `status`).
+    Known(String),
+    SignedOut,
 }
 
 fn user_of(a: &Auth) -> Option<String> {
@@ -95,6 +100,9 @@ pub fn next(a: &Auth, e: Event) -> Auth {
     use Auth as A;
     let user = user_of(a);
     match (a, e) {
+        (_, Event::Failed(Fail::NoKeyring)) => A::NoKeyring,
+        (A::SignedOut, Event::Known(user)) => A::Looking { user },
+        (_, Event::SignedOut) => A::SignedOut,
         (A::SignedOut, Event::SignIn) => A::Waiting { code: String::new() },
         (A::Waiting { .. }, Event::Code(code)) => A::Waiting { code },
         (A::Waiting { .. }, Event::Approved(user)) => A::Looking { user },
@@ -145,18 +153,35 @@ pub fn canned(name: &str) -> Option<Auth> {
     })
 }
 
+#[cfg(test)]
 pub const ALL: [&str; 15] = ["no-keyring", "signed-out", "waiting", "looking", "found", "found-many", "none", "creating", "cloning", "ready", "offline", "denied", "expired", "sso", "exists"];
 
-/// The engine's answer to an event, applied on the UI thread.
+/// An event arrives (a button, or a line from the engine): move the flow, then start whatever the
+/// new state needs. The engine is only ever started from here, so there is one place to read.
 pub fn apply(s: &mut State, e: Event) {
-    if let Some(a) = &s.auth {
-        s.auth = Some(next(a, e));
+    let Some(before) = s.auth.clone() else { return };
+    let after = next(&before, e.clone());
+    if after == before {
+        return;
+    }
+    s.auth = Some(after.clone());
+    match (&before, &after, &e) {
+        (_, _, Event::Cancel) => crate::engine::cancel(s),
+        (_, Auth::Waiting { .. }, Event::SignIn) => crate::engine::run(s, &["auth", "login", "--json"]),
+        (b, Auth::Looking { .. }, _) if !matches!(b, Auth::Looking { .. }) => crate::engine::run(s, &["home", "discover", "--json"]),
+        (_, Auth::Cloning { repo, .. }, _) => crate::engine::run(s, &["home", "adopt", repo, "--json"]),
+        (_, Auth::Creating { .. }, _) => crate::engine::run(s, &["home", "create", "--json"]),
+        (_, Auth::Ready { .. }, _) => s.adopted(),
+        _ => {}
     }
 }
 
-/// True while the flow is waiting on something that takes time (spinner, only Cancel allowed).
-pub fn busy(a: &Auth) -> bool {
-    matches!(a, Auth::Waiting { .. } | Auth::Looking { .. } | Auth::Creating { .. } | Auth::Cloning { .. })
+/// Start the flow when the person reaches it: look at whether they are already signed in.
+pub fn begin(s: &mut State) {
+    if s.auth.is_none() {
+        s.auth = Some(Auth::SignedOut);
+        crate::engine::run(s, &["auth", "status", "--json"]);
+    }
 }
 
 /// One screen: (eyebrow if it is a problem, title, body, actions with the primary last).
@@ -187,7 +212,8 @@ fn status(d: &Design, label: &str) -> El {
 }
 
 pub fn view(s: &State) -> Option<View> {
-    let a = s.auth.as_ref()?;
+    let signed_out = Auth::SignedOut;
+    let a = s.auth.as_ref().unwrap_or(&signed_out);
     let d = s.design;
     let t = d.theme();
     let cancel = || quiet(&d, "acct-cancel", "Cancel", |s: &mut State| apply(s, Event::Cancel));
@@ -259,6 +285,7 @@ pub fn view(s: &State) -> Option<View> {
         Auth::Ready { user, repo } => View { problem: None, title: "You're all set".into(),
             body: col().w_full().gap(d.pad()).child(signed_in(user))
                 .child(card(&d, vec![text(repo.clone()).font(d.text(Role::Title)).color(t.text), text("Private. Hestia keeps it up to date.".to_string()).font(d.text(Role::Label)).color(t.text_secondary)]))
+                .child(para(&d, SHORT))
                 .child(para(&d, "You can switch repositories or sign out any time in Settings, under Account.")),
             actions: vec![primary(&d, "acct-done", "Continue", |s: &mut State| crate::welcome::advance(s))] },
         Auth::Failed { why, user } => {
@@ -268,6 +295,7 @@ pub fn view(s: &State) -> Option<View> {
                 Fail::Expired => ("Code expired", "That code ran out", "Codes work for 15 minutes. Get a new one and approve it a little sooner.".into(), retry("Get a new code")),
                 Fail::Sso(org) => ("One more step", "Your organisation needs to approve", format!("{org} asks people to authorise apps before they can use its repositories. Open GitHub, authorise Hestia for {org}, then try again."), retry("Try again")),
                 Fail::Exists(name) => ("Already there", "A repository with that name exists", format!("{name} is already on your account. Hestia can use it instead of making a new one."), primary(&d, "acct-use-existing", "Use the existing one", |s: &mut State| apply(s, Event::UseIt))),
+                Fail::NoKeyring => ("Sign-in is off", "Can't keep a sign-in safe here", "Hestia keeps your GitHub sign-in in this computer's password keeper and will not store it any other way. Start or unlock the keeper, then try again.".into(), retry("Try again")),
                 Fail::Other(msg) => ("Something went wrong", "That didn't work", msg.clone(), retry("Try again")),
             };
             let mut actions = Vec::new();

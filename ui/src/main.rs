@@ -3,6 +3,7 @@
 
 mod account;
 mod clipboard;
+mod engine;
 mod design;
 mod contents;
 mod domains_ui;
@@ -64,13 +65,9 @@ struct State {
     design: Design,
     recs: Vec<Record>,
     total: usize, // live files in the stream
-    home_field: TextEdit,
-    gh_account: TextEdit,
-    gh_repo: TextEdit,
-    gh_note: String,
-    publish_confirm: bool,
-    hestia_field: TextEdit,
-    auth: Option<account::Auth>, // the sign-in flow (#110); None until the engine is wired
+    auth: Option<account::Auth>, // the sign-in flow (#110); None until the person reaches it
+    auth_inbox: Arc<Mutex<Vec<account::Event>>>, // lines from the engine, drained in poll
+    auth_pid: Arc<Mutex<Option<u32>>>, // the running engine command, so it can be cancelled
     dom_sel: usize,
     dom_edit: lifestream::domains::Domain,
     d_name: TextEdit,
@@ -241,7 +238,7 @@ impl State {
         let dir = stream.as_deref().and_then(|d| d.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
-            design: Design::default(), recs, total: 0, auth: None, home_field: TextEdit::new("Home"), gh_account: TextEdit::new(""), gh_repo: TextEdit::new("home"), gh_note: String::new(), publish_confirm: false, hestia_field: TextEdit::new(""), dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
+            design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
             ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, close_after: false, wstep: 0, launched_ask: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false,
@@ -386,47 +383,14 @@ impl State {
         self.reload_dir();
     }
     /// Open the Files screen: the plan for tonight, and the folder you were last in.
-    /// First-run: make the home repository in the folder the tour asked about, and start using it.
-    fn create_home(&mut self) {
-        let rel = self.home_field.text.trim().trim_start_matches("~/").trim_matches('/').to_string();
-        if rel.is_empty() || rel.contains("..") {
-            self.msg = "choose a folder name inside your home folder, like Home".into();
-            return;
-        }
-        let dir = files::home().join(&rel);
-        let url = self.hestia_field.text.trim().to_string();
-        let today = chrono::Local::now().format("%F").to_string();
-        match lifestream::home::create(&dir, Some(&url), &today) {
-            Ok(steps) => {
-                self.change_settings(|st| { st.home = rel.clone(); st.hestia_repo = url.clone(); });
-                self.repo_dir = dir.clone();
-                self.tree_path = dir.join("tree.toml");
-                self.tree = lifestream::tree::Tree::load(&self.tree_path).unwrap_or_default();
-                self.reload_domains();
-                self.msg = format!("created {}", steps.join(" · "));
-            }
-            Err(e) => self.msg = format!("{e:#}"),
-        }
-    }
-    /// Fill in the GitHub account the `gh` tool is signed in to, so the tour can say exactly where it will publish.
-    fn detect_github(&mut self) {
-        match lifestream::home::github_account() {
-            Some(a) => {
-                if self.gh_account.text.trim().is_empty() {
-                    self.gh_account = TextEdit::new(&a);
-                }
-                self.gh_note = format!("signed in to GitHub as {a}");
-            }
-            None => self.gh_note = "not signed in to GitHub: run `gh auth login` in a terminal to publish".into(),
-        }
-    }
-    /// Create the private repository on GitHub and push (only after the confirmation click).
-    fn publish_home(&mut self) {
-        self.publish_confirm = false;
-        let (a, r, dir) = (self.gh_account.text.trim().to_string(), self.gh_repo.text.trim().to_string(), self.repo_dir.clone());
-        self.msg = format!("publishing to github.com/{a}/{r}…");
-        self.jobs.start("publish", None, move || lifestream::home::publish(&dir, &a, &r)
-            .map(|url| format!("created the private repository {url} and pushed the first commit")).map_err(|e| format!("not published: {e:#}")));
+    /// The engine made or cloned the home repository and wrote the home setting: start using it.
+    fn adopted(&mut self) {
+        self.settings.home = Settings::load().home;
+        self.repo_dir = home_repo();
+        self.tree_path = self.repo_dir.join("tree.toml");
+        self.tree = lifestream::tree::Tree::load(&self.tree_path).unwrap_or_default();
+        self.reload_domains();
+        self.msg = "your home repository is ready".into();
     }
     fn turn_on_search(&mut self) {
         self.msg = "turning on Hestia Search…".into();
@@ -656,8 +620,13 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
     if s.close_after {
         tx.close_window();
     }
+    let heard = engine::drain(&s.auth_inbox);
+    let mut any = !heard.is_empty();
+    for e in heard {
+        account::apply(s, e);
+    }
     let finished = s.jobs.take_finished();
-    let any = !finished.is_empty();
+    any |= !finished.is_empty();
     for j in finished {
         match j.result {
             Ok(m) => { s.msg = m; if let Some(f) = j.then { f(s); } }
@@ -784,7 +753,6 @@ fn main() {
             ("ask", |s| scene(s, Pane::Ask)),
             ("machine", |s| { scene(s, Pane::Machine); s.reload_machine() }),
             ("welcome", |s| scene(s, Pane::Welcome)),
-            ("welcome-home", |s| { s.wstep = 2; s.repo_dir = PathBuf::from("/nonexistent/none"); s.gh_account = TextEdit::new("your-account"); s.gh_note = "signed in to GitHub as your-account".into(); scene(s, Pane::Welcome) }),
             ("welcome-key", |s| { s.wstep = 3; scene(s, Pane::Welcome) }),
             ("settings", |s| scene(s, Pane::Settings)),
             ("settings-scanning", |s| { s.stab = 2; scene(s, Pane::Settings) }),
