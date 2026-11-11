@@ -24,12 +24,18 @@ rm -f "$share"/icons/hicolor/*/apps/app.hestia.Hestia*.{svg,png}
 gtk-update-icon-cache -q -f -t "$share/icons/hicolor" 2>/dev/null
 update-desktop-database "$share/applications" 2>/dev/null
 rm -rf "$share/gnome-shell/extensions/hestia-clipboard@hestia.app"
+# the clipboard history is private: it goes with the program whether or not you purge your settings
+rm -f "$share/hestia/clipboard.jsonl"
 rm -f "$HOME/.config/environment.d/hestia.conf"
 if command -v gsettings >/dev/null; then
   # drop the extension from the enabled list so GNOME does not look for it
   cur="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null)"
   new="$(printf '%s' "$cur" | sed -E "s/'hestia-clipboard@hestia.app',? ?//; s/, ?\]/]/")"
   [ "$cur" != "$new" ] && gsettings set org.gnome.shell enabled-extensions "$new"
+  # Alt+Space belongs to the window menu until the extension asks for it; give it back if it is still taken away
+  if [ "$(gsettings get org.gnome.desktop.wm.keybindings activate-window-menu 2>/dev/null)" = "@as []" ]; then
+    gsettings reset org.gnome.desktop.wm.keybindings activate-window-menu
+  fi
 fi
 if [ "$purge" = 1 ]; then
   rm -rf "$HOME/.config/hestia" "$share/hestia" "$share/lifestream"
