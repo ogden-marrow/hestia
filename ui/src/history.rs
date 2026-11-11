@@ -30,7 +30,7 @@ pub fn panels(s: &State) -> Vec<El> {
                     .child(text(if work { "not committed yet".to_string() } else { format!("{} · {}", c.short, c.when) }).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).truncate())),
         );
     }
-    let commits = col().w(340.0).padding(d.gap()).gap(d.gap()).panel(&d)
+    let commits = col().w(250.0).shrink().min_w(200.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(text(format!("{} · {}", s.repo_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), s.repo_status)).font(style(&d, type_::SECTION)).color(t.text_secondary).truncate())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
 
@@ -52,7 +52,7 @@ pub fn panels(s: &State) -> Vec<El> {
     }
     let (total_add, total_del): (u32, u32) = s.changes.iter().fold((0, 0), |a, c| (a.0 + c.add, a.1 + c.del));
     let msg = s.commits.get(s.csel).map(|c| c.subject.clone()).unwrap_or_default();
-    let changed = col().w(280.0).padding(d.pad()).gap(d.gap()).panel(&d)
+    let changed = col().w(230.0).shrink().min_w(200.0).padding(d.pad()).gap(d.gap()).panel(&d)
         .child(text(msg).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink())
         .child(text(format!("{} files · +{total_add} −{total_del}", s.changes.len())).font(style(&d, type_::LABEL)).color(t.text_secondary))
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(files));
