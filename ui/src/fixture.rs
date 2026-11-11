@@ -68,6 +68,8 @@ pub fn apply(s: &mut State, pending_folders: bool) {
     s.clips.clear();
     s.apps.clear();
     s.skipped.clear();
+    s.repo_dir = std::path::PathBuf::from("/nonexistent/fixture-home"); // never show this machine's repository
+    s.account_user = None;
     s.refresh_derived();
 }
 

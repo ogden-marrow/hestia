@@ -67,6 +67,8 @@ struct State {
     total: usize, // live files in the stream
     auth: Option<account::Auth>, // the sign-in flow (#110); None until the person reaches it
     auth_inbox: Arc<Mutex<Vec<account::Event>>>, // lines from the engine, drained in poll
+    account_user: Option<String>, // who is signed in, as the engine last said
+    flow_return: Option<Pane>, // where the sign-in flow goes back to when opened from Settings
     auth_pid: Arc<Mutex<Option<u32>>>, // the running engine command, so it can be cancelled
     dom_sel: usize,
     dom_edit: lifestream::domains::Domain,
@@ -238,7 +240,7 @@ impl State {
         let dir = stream.as_deref().and_then(|d| d.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
-            design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
+            design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), flow_return: None, account_user: None, dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
             ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, close_after: false, wstep: 0, launched_ask: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false,
@@ -757,6 +759,7 @@ fn main() {
             ("settings", |s| scene(s, Pane::Settings)),
             ("settings-scanning", |s| { s.stab = 2; scene(s, Pane::Settings) }),
             ("settings-general", |s| { s.stab = 1; scene(s, Pane::Settings) }),
+            ("settings-account", |s| { s.stab = 7; s.account_user = std::env::var("HESTIA_ACCOUNT_USER").ok(); scene(s, Pane::Settings) }),
             ("settings-domains", |s| { s.stab = 6; s.select_domain(0); scene(s, Pane::Settings) }),
             ("time-compare", |s| { s.dsel = 40; s.compare = true; scene(s, Pane::Time) }),
         ],

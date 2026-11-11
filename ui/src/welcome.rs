@@ -81,12 +81,12 @@ pub fn screen(s: &State) -> El {
 
     let last = step == STEPS - 1;
     let mut nav = row().w_full().gap(d.gap()).center_y()
-        .child(text(format!("Step {} of {}", step + 1, STEPS)).font(d.text(Role::Label)).color(t.text_secondary))
+        .child(text(if s.flow_return.is_some() { "Settings · Account".to_string() } else { format!("Step {} of {}", step + 1, STEPS) }).font(d.text(Role::Label)).color(t.text_secondary))
         .child(el().grow(1.0));
     nav = match actions {
         Some(acts) => {
             // the flow's own buttons, with a way to leave it for later
-            nav = nav.child(crate::questions::quiet(&d, "w-later", "Skip for now", |s: &mut State| advance(s)));
+            nav = nav.child(crate::questions::quiet(&d, "w-later", if s.flow_return.is_some() { "Back to Settings" } else { "Skip for now" }, |s: &mut State| crate::account::done(s)));
             acts.into_iter().fold(nav, |n, a| n.child(a))
         }
         None => nav
