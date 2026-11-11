@@ -96,12 +96,18 @@ Requirements: Linux with systemd, GNOME Shell 50 or newer for the launcher exten
 runs anywhere Rune does), and a Rust toolchain if you build from source. [Ollama](https://ollama.com) is
 optional and only needed for meaning search and the local model tier.
 
-From a release tarball:
+From a release tarball (no compiler needed). Check the download first:
 
 ```bash
+sha256sum -c hestia-linux-x86_64.tar.gz.sha256          # the file is what was published
+gh attestation verify hestia-linux-x86_64.tar.gz --repo ogden-marrow/hestia   # and it was built by this repository's workflow
 tar xf hestia-linux-x86_64.tar.gz && cd hestia-linux-x86_64
 ./install.sh
 ```
+
+The `.deb` installs the app, the launcher extension and the icons, but not the background watcher and its schedule;
+use the tarball for the full setup. `./uninstall.sh` removes what `install.sh` put on the computer and leaves your
+home repository and files alone (`--purge` also deletes Hestia's own settings and data).
 
 From source:
 
@@ -122,9 +128,11 @@ Log out and in once so the launcher and the setting take effect.
 
 ## First run
 
-Open Hestia from the app grid. The welcome tour walks through naming your home repository (a folder
-inside your home folder, like `Home`; created if missing, with an optional Hestia submodule), the folders
-to watch, the overnight and morning schedule, and turning on the launcher and clipboard history. Then try:
+Open Hestia from the app grid. The welcome tour signs you in to GitHub and finds or creates your private home
+repository. There is no Hestia account and no Hestia server: GitHub only stores your own private repository, and the
+token lives only in your system keyring. (Sign-in needs a build that includes the project's GitHub Client ID; without
+it the welcome says so and lets you continue.) It then asks which folders to watch, sets the overnight and morning
+schedule, and offers the launcher; clipboard history stays off until you turn it on. Then try:
 
 ```bash
 lifestream scan ~/Documents ~/Pictures --dry-run   # preview, writes nothing

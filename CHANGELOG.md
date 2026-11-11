@@ -1,0 +1,37 @@
+# Changelog
+
+All notable changes. Dates are 2026-11-11 unless noted. This project has not cut a release yet; everything is under Unreleased.
+
+## Unreleased
+
+### Added
+- **Sign in with GitHub** (engine and screens): device-flow sign-in, find, adopt or create your private home repository.
+  The token lives only in the system keyring and is refused if there is none. Needs the project's GitHub Client ID to go live.
+- **Machine watcher shipped with Hestia**: captures packages, snaps, flatpaks, config, dotfiles and desktop settings every
+  few minutes when the computer is quiet, one commit per kind of change, and pushes to your private repository.
+- **Safe restore** (`bootstrap.sh`): a dry run by default; copies instead of linking, never overwrites, and holds back
+  anything that runs by itself until you ask.
+- **Design system and redesigned Welcome, Today, sidebar and wording**; the launcher shows why an app did not open.
+- **Release packaging**: one script builds the tarball and `.deb` with checksums and a signed build attestation.
+- **CI**: clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
+
+### Security
+- One shared secret scanner (modern token formats, short quoted or exported passwords, binaries) gates capture, push and
+  publish; secret lines are left out of the backup, private keys drop the file.
+- Pushes go only to a private GitHub repository of yours, checked on the address git will really use.
+- One list of paths that are never captured, read by capture, the Machine screen and the starter manifest.
+- File names reach the local model only as cleaned data; the model cannot choose a destination.
+- Capture can no longer delete a live file; the mover refuses symlinks, overwrites and hidden destinations.
+- Clipboard history is off by default, filters codes and secrets, is readable only by you and deleted when turned off.
+- Desktop settings are captured by allowlist; the launcher ignores toggles while the screen is locked.
+- CI actions are pinned to commits; the release workflow reads by default and only its job can write.
+- See `docs/THREAT_MODEL.md` for every finding, its status and the release gate.
+
+### Changed
+- "Answer similar folders together" is off until you choose it.
+- Auto-push is on by default (`HESTIA_AUTOPUSH=0` turns it off).
+
+### Known limits
+- No release has been cut, so signing and attestation are unexercised.
+- The `.deb` does not install the background watcher.
+- Not yet tried on a clean OS image with a real desktop session (`docs/VISION_FIT.md`).
