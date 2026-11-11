@@ -88,6 +88,44 @@ pub fn create(dir: &Path, hestia_url: Option<&str>, today: &str) -> Result<Vec<S
     Ok(done)
 }
 
+/// The address of `origin`, if the repository has one.
+pub fn remote(dir: &Path) -> Option<String> {
+    git(dir, &["remote", "get-url", "origin"]).ok().filter(|u| !u.is_empty())
+}
+
+/// The GitHub account the `gh` tool is signed in to, if any.
+pub fn github_account() -> Option<String> {
+    let o = Command::new("gh").args(["api", "user", "--jq", ".login"]).output().ok()?;
+    let login = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    (o.status.success() && !login.is_empty()).then_some(login)
+}
+
+fn name_ok(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
+/// Where the repository will live on GitHub: the address git will use as `origin`.
+pub fn remote_url(account: &str, repo: &str) -> String {
+    format!("https://github.com/{account}/{repo}.git")
+}
+
+/// Create a PRIVATE repository `account/repo` on GitHub, make it `origin` and push the first commit.
+/// Only called when the user confirms; fails if the repository already exists or `gh` is not signed in.
+pub fn publish(dir: &Path, account: &str, repo: &str) -> Result<String> {
+    if !name_ok(account) || !name_ok(repo) {
+        bail!("the GitHub account and repository names may only use letters, digits, - _ and .");
+    }
+    if !is_home(dir) {
+        bail!("{} is not a home repository yet", dir.display());
+    }
+    let full = format!("{account}/{repo}");
+    let o = Command::new("gh").args(["repo", "create", &full, "--private", "--source"]).arg(dir).args(["--remote", "origin", "--push"]).output().context("the `gh` tool is not installed")?;
+    if !o.status.success() {
+        bail!("{}", String::from_utf8_lossy(&o.stderr).trim());
+    }
+    Ok(remote_url(account, repo))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +151,13 @@ mod tests {
         assert!(git(&d, &["log", "--oneline"]).unwrap().contains("Start the home repository"));
         assert!(create(&d, None, "2026-01-01").unwrap_err().to_string().contains("already"));
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_remote_address_and_names_are_checked() {
+        assert_eq!(remote_url("me", "home"), "https://github.com/me/home.git");
+        assert!(name_ok("my-home_1.x") && !name_ok("bad name") && !name_ok("a/b") && !name_ok(""));
+        assert!(publish(Path::new("/nonexistent"), "me", "bad name").is_err());
     }
 
     #[test]
