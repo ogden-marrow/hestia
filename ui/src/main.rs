@@ -889,11 +889,11 @@ mod today_tests {
     use rune::{Env, Runtime};
 
     #[test]
-    fn it_opens_on_today_and_the_tiles_lead_somewhere() {
+    fn it_opens_on_today_and_the_sidebar_leads_somewhere() {
         let mut rt = Runtime::new(State::with(vec![], None), view, (1280.0, 800.0), Env { system_dark: true, scale: 1.0 });
         rt.frame(0.0);
         assert_eq!(rt.state.pane, Pane::Today);
-        let (x, y) = rt.find("tile-time").expect("the time tile is on the Today screen");
+        let (x, y) = rt.find("view-time").expect("the Time item is in the sidebar");
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(0.1);

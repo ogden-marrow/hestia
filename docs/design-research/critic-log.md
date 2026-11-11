@@ -9,3 +9,8 @@ Persona: hostile industrial designer + QA (self-run; independent critics follow 
 - **Designer, sidebar:** full-bleed solid accent selection plus an accent icon on the same row; badges: `8`, `git`, `0`, hollow circle. -> #50.
 - **First-time user, Today:** "folders both models agree on", "kept in history", "Jump back in" mean nothing without context. -> #73, #22.
 - **Data hygiene:** snapshots show the machine's real counts, dates and folder names; they must not be committed. Fixture-driven scenes are part of #46.
+
+## 2026-11-11 pass 2: Today rebuilt (PR ui/today-calm)
+- Before: 4 accent numerals, 4 icon cards, 2 duplicate headings, jargon ("both models agree"), 150% text overprint.
+- After, dark/light, 100%/150%, 960x640: one greeting (Display), one sentence, "Nothing needs you." or a folder list with one primary button, one quiet facts line. No overprint at 150%.
+- Honest remaining critique (designer): the lower half of the screen is empty when nothing needs you; this is where the stream goes (#81, #13). Sidebar badges (`git`, hollow circle) and the duplicated "0 need you"/status-strip are untouched (#50, #30). Needs-you state (folder list + primary) is covered by a render test but there is no snapshot of it until fixture scenes exist (#46).
