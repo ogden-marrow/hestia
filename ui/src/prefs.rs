@@ -129,16 +129,16 @@ pub fn panels(s: &State) -> Vec<El> {
         }
         1 => {
             body = body
-                .child(setting(&d, "Menu bar icon", "Shows how many folders need you and opens Hestia or the ask window.",
+                .child(setting(&d, "Menu bar icon", "Shows how many questions are waiting. Click it to open Hestia.",
                     on_off(&d, "tray", s.settings.tray, |s, on| s.change_schedule(|st| st.tray = on))))
-                .child(setting(&d, "Keep the capture current", "Hestia notices changes to your settings, packages and config, and saves each kind as its own small commit in your repository. It waits for a quiet moment and never pushes.",
+                .child(setting(&d, "Keep my backup up to date", "Hestia notices changes to your settings, programs and config files and saves them when your computer is quiet. Nothing is sent anywhere.",
                     on_off(&d, "watch", s.settings.watch_on, |s, on| s.change_schedule(|st| st.watch_on = on))))
-                .child(setting(&d, "Look every", "How often it checks for changes.",
-                    segmented(&d, "watchmins", &["5 min", "15 min", "Hourly"], match s.settings.watch_mins { 5 => 0, 60 => 2, _ => 1 },
+                .child(setting(&d, "Check for changes", "How often Hestia looks for changes.",
+                    segmented(&d, "watchmins", &["Every 5 min", "Every 15 min", "Hourly"], match s.settings.watch_mins { 5 => 0, 60 => 2, _ => 1 },
                         |s, i| s.change_schedule(|st| st.watch_mins = [5, 15, 60][i]))))
-                .child(setting(&d, "Morning briefing", "A notification each morning with what was filed overnight.",
+                .child(setting(&d, "Morning summary", "A notification each morning showing what Hestia sorted overnight.",
                     on_off(&d, "brief", s.settings.brief_on, |s, on| s.change_schedule(|st| st.brief_on = on))))
-                .child(setting(&d, "Briefing time", "When the morning notification appears.",
+                .child(setting(&d, "Summary time", "When the morning notification appears.",
                     clock(&d, "brief-time", s.settings.brief_time, |s, dh, dm| s.change_schedule(|st| st.brief_time = bump(st.brief_time, dh, dm)))));
         }
         3 => {

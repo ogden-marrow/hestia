@@ -27,11 +27,11 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(col().w(14.0).child(el().size(9.0, 9.0).radius(5.0).fill(if on || work { acc } else { t.text_secondary })))
                 .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
                     .child(text(c.subject.clone()).font(style(&d, type_::BODY)).color(t.text).truncate())
-                    .child(text(if work { "not committed yet".to_string() } else { format!("{} · {}", c.short, c.when) }).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).truncate())),
+                    .child(text(if work { "not saved yet".to_string() } else { c.when.clone() }).font(style(&d, type_::LABEL)).color(t.text_secondary).truncate())),
         );
     }
     let commits = col().w(250.0).shrink().min_w(200.0).padding(d.gap()).gap(d.gap()).panel(&d)
-        .child(text(format!("{} · {}", s.repo_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), s.repo_status)).font(style(&d, type_::SECTION)).color(t.text_secondary).truncate())
+        .child(text("Your saved changes".to_string()).font(style(&d, type_::SECTION)).color(t.text_secondary).truncate())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
 
     // ---- changed files
@@ -46,15 +46,14 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
                     .child(text(name).font(style(&d, type_::BODY)).color(t.text).truncate())
                     .child(text(dir).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).truncate()))
-                .child(text(format!("+{}", c.add)).font(style(&d, type_::MONO_CAPTION)).color(add_fg))
-                .child(text(format!("−{}", c.del)).font(style(&d, type_::MONO_CAPTION)).color(del_fg)),
+                .child(text(if c.del == 0 { format!("{} added", c.add) } else { format!("{} added, {} removed", c.add, c.del) }).font(style(&d, type_::LABEL)).color(t.text_secondary)),
         );
     }
     let (total_add, total_del): (u32, u32) = s.changes.iter().fold((0, 0), |a, c| (a.0 + c.add, a.1 + c.del));
     let msg = s.commits.get(s.csel).map(|c| c.subject.clone()).unwrap_or_default();
     let changed = col().w(230.0).shrink().min_w(200.0).padding(d.pad()).gap(d.gap()).panel(&d)
         .child(text(msg).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink())
-        .child(text(format!("{} files · +{total_add} −{total_del}", s.changes.len())).font(style(&d, type_::LABEL)).color(t.text_secondary))
+        .child(text(format!("{} · {}", crate::today::count(s.changes.len(), "file changed", "files changed"), if total_del == 0 { format!("{total_add} lines added") } else { format!("{total_add} added, {total_del} removed") })).font(style(&d, type_::LABEL)).color(t.text_secondary))
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(files));
 
     // ---- diff

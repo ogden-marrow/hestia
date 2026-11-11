@@ -139,7 +139,7 @@ fn compare_set(name: &'static str, captured: BTreeSet<String>, live: BTreeSet<St
 
 /// Compare the captured copy with the live machine. Read-only.
 pub fn scan(dir: &Path, home: &Path) -> Vec<Cat> {
-    let mut files = Cat { name: "Config and dotfiles", items: vec![] };
+    let mut files = Cat { name: "Settings files", items: vec![] };
     for p in read_paths(dir) {
         let Some(rel) = p.strip_prefix("~/") else { continue };
         let (captured, live) = (dir.join(dest_of(rel)), home.join(rel));
@@ -155,9 +155,9 @@ pub fn scan(dir: &Path, home: &Path) -> Vec<Cat> {
     }
     let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap_or_default();
     let first = |s: &str| lines(&s.lines().map(|l| l.split_whitespace().next().unwrap_or("").to_string()).collect::<Vec<_>>().join("\n"));
-    let packages = compare_set("Packages (apt)", lines(&read("apt-manual.txt")), lines(&out("apt-mark", &["showmanual"])), true);
-    let snaps = compare_set("Snaps", first(&read("snap.txt")), first(&out("snap", &["list"]).lines().skip(1).collect::<Vec<_>>().join("\n")), false);
-    let flatpaks = compare_set("Flatpaks", first(&read("flatpak.txt")), lines(&out("flatpak", &["list", "--app", "--columns=application"])), true);
+    let packages = compare_set("Installed programs", lines(&read("apt-manual.txt")), lines(&out("apt-mark", &["showmanual"])), true);
+    let snaps = compare_set("Programs from Snap Store", first(&read("snap.txt")), first(&out("snap", &["list"]).lines().skip(1).collect::<Vec<_>>().join("\n")), false);
+    let flatpaks = compare_set("Programs from Flathub", first(&read("flatpak.txt")), lines(&out("flatpak", &["list", "--app", "--columns=application"])), true);
     let live_dconf = out("dconf", &["dump", "/"]);
     let captured_dconf = read("dconf.ini");
     let gnome_diff = if live_dconf == captured_dconf { String::new() } else {
@@ -167,7 +167,7 @@ pub fn scan(dir: &Path, home: &Path) -> Vec<Cat> {
         let _ = std::fs::remove_file(&tmp);
         d
     };
-    let gnome = Cat { name: "GNOME settings", items: vec![Item {
+    let gnome = Cat { name: "Desktop settings", items: vec![Item {
         name: "Desktop settings (dconf)".into(),
         cond: if gnome_diff.is_empty() { Cond::Same } else { Cond::Changed },
         path: None, diff: parse_unified(&gnome_diff, 400),
@@ -181,10 +181,10 @@ pub fn scan(dir: &Path, home: &Path) -> Vec<Cat> {
 
 fn say(c: Cond) -> &'static str {
     match c {
-        Cond::Same => "matches the capture",
-        Cond::Changed => "changed since captured",
-        Cond::Missing => "captured, not on this machine now",
-        Cond::New => "on this machine, not captured yet",
+        Cond::Same => "matches your last backup",
+        Cond::Changed => "changed since your last backup",
+        Cond::Missing => "in your backup, not on this computer now",
+        Cond::New => "on this computer, not in your backup yet",
     }
 }
 
@@ -243,7 +243,7 @@ pub fn panels(s: &State) -> Vec<El> {
                 .fill(if on { acc } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { s.mcat = i; s.mit = 0 })
                 .child(text(c.name.to_string()).font(style(&d, type_::LABEL)).color(if on { d.on_accent() } else { t.text }).grow(1.0))
-                .child(text(if drift > 0 { format!("{drift} differ") } else { "ok".into() }).font(style(&d, type_::LABEL)).color(if on { d.on_accent() } else if drift > 0 { acc } else { t.text_secondary })),
+                .child(text(if drift > 0 { format!("{drift} changed") } else { "Up to date".into() }).font(style(&d, type_::LABEL)).color(if on { d.on_accent() } else if drift > 0 { acc } else { t.text_secondary })),
         );
     }
     let left = col().w(240.0).padding(d.gap()).gap(d.gap()).side(&d)
@@ -274,8 +274,8 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(text(cat.map(|c| c.name).unwrap_or("")).font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).wrap_anywhere().shrink())
         .child(row().w_full().gap(d.gap()).center_y().px(d.item_px())
             .child(btn("m-refresh", "Refresh", false).on_press(|s: &mut State| s.reload_machine()))
-            .child(super::questions::action(&d, "m-capture", "Capture now", "Capturing…", true, s.jobs.running("capture"), |s: &mut State| s.capture_now())))
-        .child(text(if s.msg.is_empty() { "Compared with the copy saved in your repository. Capture now updates that copy; History shows what changed.".to_string() } else { s.msg.clone() })
+            .child(super::questions::action(&d, "m-capture", "Back up now", "Backing up…", true, s.jobs.running("capture"), |s: &mut State| s.capture_now())))
+        .child(text(if s.msg.is_empty() { "How this computer differs from your last backup. Back up now to save the current state; History shows what changed.".to_string() } else { s.msg.clone() })
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
 
@@ -293,17 +293,17 @@ pub fn panels(s: &State) -> Vec<El> {
                 lines = lines.child(row().w_full().px(d.gap()).fill(bg)
                     .child(text(l.text.clone()).font(style(&d, type_::MONO_CAPTION)).color(fg).grow(1.0).shrink().min_w(0.0).wrap_anywhere()));
             }
-            body = body.child(col().w_full().gap(d.gap()).child(text("WHAT CHANGED (captured → now)").font(style(&d, type_::SECTION)).color(t.text_secondary)).child(lines));
+            body = body.child(col().w_full().gap(d.gap()).child(text("WHAT CHANGED (backup → now)").font(style(&d, type_::SECTION)).color(t.text_secondary)).child(lines));
         }
         if let Some(p) = it.path.clone() {
-            body = body.child(btn("m-remove", "Stop capturing this", false).on_press(move |s: &mut State| s.remove_capture(p.clone())));
+            body = body.child(btn("m-remove", "Stop backing this up", false).on_press(move |s: &mut State| s.remove_capture(p.clone())));
         }
     }
     if s.mcat == 0 {
         body = body.child(col().w_full().gap(d.gap())
-            .child(text("CAPTURE ANOTHER FILE OR FOLDER").font(style(&d, type_::SECTION)).color(t.text_secondary).wrap_anywhere().shrink())
-            .child(super::field(&d, "f-cap", &s.f_cap, "like ~/.vimrc or ~/.config/kitty ↵", |s: &mut State| &mut s.f_cap).on_submit(|s: &mut State, _: &mut Tx| s.add_capture()))
-            .child(text("Anything that looks like it holds secrets (keys, tokens, passwords, browser and mail data) is refused.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
+            .child(text("ADD A FILE OR FOLDER TO YOUR BACKUP").font(style(&d, type_::SECTION)).color(t.text_secondary).wrap_anywhere().shrink())
+            .child(super::field(&d, "f-cap", &s.f_cap, "a path, like ~/.config/kitty, then Return", |s: &mut State| &mut s.f_cap).on_submit(|s: &mut State, _: &mut Tx| s.add_capture()))
+            .child(text("For your safety, Hestia never copies anything that looks like a password, a key, or private browser or mail data.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
     }
     detail = detail.child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body));
     vec![left, middle, detail]
