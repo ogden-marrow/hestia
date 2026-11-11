@@ -54,9 +54,9 @@ pub mod motion {
 /// (or `Display` on Welcome); everything else is `Body` or smaller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
-    /// 28 / 600. The single moment on first launch and the empty states' headline.
+    /// 28 / 500. The single moment on first launch and the empty states' headline.
     Display,
-    /// 20 / 600. The pane's one title.
+    /// 20 / 500. The pane's one title.
     Heading,
     /// 15 / 600. A group inside a pane, a card's name.
     Title,
@@ -72,8 +72,8 @@ impl Role {
     /// (size in points at 100%, weight)
     pub const fn spec(self) -> (f32, f32) {
         match self {
-            Role::Display => (28.0, 600.0),
-            Role::Heading => (20.0, 600.0),
+            Role::Display => (28.0, 500.0),
+            Role::Heading => (20.0, 500.0),
             Role::Title => (15.0, 600.0),
             Role::Body => (13.0, 400.0),
             Role::Label => (12.0, 500.0),
