@@ -43,4 +43,23 @@ git remote add origin https://github.com/someone/private-home.git
 git config "url.file://$T/elsewhere.pushInsteadOf" https://github.com/someone/private-home.git
 echo 'export BAR=2' >> "$T/home/.bashrc"; run
 grep -q 'not pushed' "$T/home/.local/share/hestia/watch.json" || fail "a rewritten push target was not refused"
+# a live file that is a symlink into the repository is never deleted by capture (bootstrap layout)
+git remote remove origin 2>/dev/null || true
+echo 'export PATH=$PATH' > "$T/home/.bashrc"; run
+rel=$(ls -d applications/linux/*/*)
+cp "$rel/dotfiles/.bashrc" "$T/kept.bashrc"; rm -f "$T/home/.bashrc"; ln -s "$T/repo/$rel/dotfiles/.bashrc" "$T/home/.bashrc"
+mark=$(git rev-parse HEAD)
+run
+[ -s "$rel/dotfiles/.bashrc" ] || fail "capture deleted a file that a live symlink points at"
+git log --diff-filter=D --name-only --format= "$mark..HEAD" | grep -q 'dotfiles/.bashrc' && fail "a deletion of the live dotfile was committed"
+
+# a capture that would drop most of what was captured before is refused, and the old copy stays
+rm -f "$T/home/.bashrc"; cp "$T/kept.bashrc" "$T/home/.bashrc"
+mkdir -p "$T/home/.config"
+for f in .profile .bash_logout .nvidia-settings-rc .config/mimeapps.list .config/user-dirs.dirs; do echo "# $f" > "$T/home/$f"; done
+run
+rm -f "$T/home/.bashrc" "$T/home/.profile" "$T/home/.bash_logout" "$T/home/.nvidia-settings-rc" "$T/home/.config/mimeapps.list" "$T/home/.config/user-dirs.dirs"
+run || true
+[ -e "$rel/dotfiles/.profile" ] || fail "a mass deletion was not refused"
+grep -q 'capture failed' "$T/home/.local/share/hestia/watch.json" || fail "the refusal was not reported"
 echo "watcher ok"
