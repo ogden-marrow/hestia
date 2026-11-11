@@ -37,6 +37,15 @@ git log -p --all | grep -q "$tok" && fail "a secret was committed"
 grep -q 'withheld' "$T/home/.local/share/hestia/watch.json" || fail "the status does not say a file was withheld"
 grep -q "$tok" "$T/home/.local/share/hestia/watch.json" && fail "the status leaked the secret"
 grep -q "$tok" "$T/home/.bashrc" || fail "the original file must be left alone"
+# the rest of the shell file is still backed up; only the secret line is left out
+cap=$(ls -d applications/linux/*/*)/dotfiles/.bashrc
+[ -s "$cap" ] || fail "the shell file should be captured with the secret line left out, not dropped"
+grep -q 'export PATH=' "$cap" || fail "ordinary lines of the shell file were lost"
+grep -q 'looked like a secret' "$cap" || fail "the secret line was not replaced by a placeholder"
+grep -q "$tok" "$cap" && fail "the captured copy still holds the secret"
+# a private key anywhere in a shell file drops the whole captured copy
+printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n' >> "$T/home/.bashrc"; run
+[ ! -e "$cap" ] || fail "a shell file holding a private key must not be captured at all"
 
 # the push target is the URL git will really use: a pushInsteadOf to somewhere else is refused
 git remote add origin https://github.com/someone/private-home.git
