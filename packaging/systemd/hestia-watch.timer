@@ -2,7 +2,7 @@
 Description=Hestia: look for changes to the machine every few minutes
 
 [Timer]
-OnBootSec=3min
+OnActiveSec=1min
 OnUnitActiveSec=15min
 RandomizedDelaySec=30s
 AccuracySec=1min
