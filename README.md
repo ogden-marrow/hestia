@@ -1,8 +1,9 @@
 # Hestia
 
 **The hearth of your computer.** Hestia files your documents for you, shows your computer's
-configuration and history, and lets you travel back in time through your files. Everything stays on
-your machine; nothing is uploaded and no file is read by anything that is not running locally.
+configuration and history, and lets you travel back in time through your files. Files are read only by models
+running on your machine. The one thing that leaves it is your own home repository, pushed to a private
+repository you choose.
 
 Hestia is a native desktop app drawn on the GPU with [Rune](https://github.com/anomalyco/rune),
 backed by **Lifestream**, a read-only ingest and filing engine, and a small menu bar icon. It is written
@@ -17,7 +18,7 @@ Lifestream classifies it with the cheapest tool that works: deterministic rules 
 embeddings, then a small local model, and finally it asks you. In the morning Hestia tells you what
 happened ("214 files filed, 9 need you") and asks only about what it was unsure of. Every answer
 teaches it, so the questions get rarer. Folders are views over the stream, and your files are never
-deleted; moves are journaled in git so they can be undone.
+deleted; every move is logged, and Hestia refuses anything risky instead of guessing.
 
 Everything lives in your **home repository**, an ordinary private git repository (default `~/Home`)
 that holds your domains, folder tree, rules, machine fingerprints and the history of all of it.
