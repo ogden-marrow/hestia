@@ -79,7 +79,7 @@ impl Default for Settings {
         Settings {
             scheme: Scheme::Auto, density: Density::Cozy, text: 1.0, accent: Accent::Blue,
             scan_on: true, scan_time: (2, 30), roots: ["Documents", "Downloads", "Pictures", "Videos"].map(String::from).to_vec(),
-            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: true, clipboard_on: false, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15, home: String::new(), hestia_repo: String::new(),
+            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: false, clipboard_on: false, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15, home: String::new(), hestia_repo: String::new(),
         }
     }
 }
@@ -118,7 +118,7 @@ impl Settings {
                 "brief_time" => s.brief_time = time(v).unwrap_or(s.brief_time),
                 "tray" => s.tray = v != "off",
                 "hidden" => s.hidden = v == "yes",
-                "siblings" => s.siblings = v != "no",
+                "siblings" => s.siblings = v == "yes", // opt-in: a missing or odd value means off (#56)
                 "clipboard_history" => s.clipboard_on = v == "on", // opt-in: only an explicit "on"; the old `clipboard=` key is ignored on purpose
                 "clipboard_max" => s.clipboard_max = v.parse::<u32>().map(|n| n.clamp(10, 1000)).unwrap_or(100),
                 "clipboard_days" => s.clipboard_days = v.parse::<u32>().map(|n| n.clamp(1, 365)).unwrap_or(7),
@@ -190,6 +190,15 @@ mod tests {
         assert!(!Settings::parse("clipboard=on").clipboard_on);
         assert!(Settings { clipboard_on: true, ..Settings::default() }.render().contains("clipboard_history=on"));
         assert!(!Settings::default().render().contains("\nclipboard=") );
+    }
+
+    #[test]
+    fn answering_similar_folders_together_is_opt_in() {
+        assert!(!Settings::default().siblings);
+        for v in ["", "siblings=", "siblings=no", "siblings=YES", "siblings=true", "siblings=1"] {
+            assert!(!Settings::parse(v).siblings, "{v:?}");
+        }
+        assert!(Settings::parse("siblings=yes").siblings);
     }
 
     #[test]
