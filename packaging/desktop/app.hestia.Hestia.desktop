@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=Hestia
+GenericName=Home and files
+Comment=The hearth of your computer: files, history and time
+Exec=@HOME@/.local/bin/hestia
+TryExec=@HOME@/.local/bin/hestia
+# An absolute path, so no icon-theme cache or name lookup can show anything stale
+Icon=@HOME@/.local/share/icons/hicolor/512x512/apps/app.hestia.Hestia.png
+Terminal=false
+Categories=Utility;FileTools;
+Keywords=files;history;time;organize;config;
+StartupWMClass=app.hestia.Hestia
+StartupNotify=true
+Actions=Search;Questions;
+
+[Desktop Action Search]
+Name=Search…
+Exec=@HOME@/.local/bin/hestia --launch
+
+[Desktop Action Questions]
+Name=Answer the questions
+Exec=@HOME@/.local/bin/hestia --questions

@@ -1,0 +1,13 @@
+[Unit]
+Wants=ollama.service
+After=ollama.service
+Description=Lifestream overnight scan (read-only on your files, writes only the stream)
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+CPUWeight=20
+WorkingDirectory=@HOME_REPO@
+ExecStart=%h/.local/bin/lifestream scan %h/Documents %h/Downloads %h/Pictures %h/Videos
+ExecStartPost=%h/.local/bin/lifestream suggest

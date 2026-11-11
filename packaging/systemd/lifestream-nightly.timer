@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Lifestream scan overnight
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15min
+# no Persistent=: if the laptop was off at 02:30, do NOT run during the work day
+
+[Install]
+WantedBy=timers.target

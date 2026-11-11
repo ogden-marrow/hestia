@@ -1,0 +1,6 @@
+[workspace]
+members = ["ui", "tray", "lifestream"]
+resolver = "3"
+
+[profile.release]
+opt-level = 3

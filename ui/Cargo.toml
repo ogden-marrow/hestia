@@ -1,0 +1,17 @@
+[package]
+name = "hestia"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Hestia: the hearth of your computer, drawn with Rune (GPU-native, themeable, headless-testable)"
+
+[[bin]]
+name = "hestia"
+path = "src/main.rs"
+
+[dependencies]
+# Pinned: Rune is pre-release and `dev` is never rewritten.
+rune = { git = "https://github.com/anomalyco/rune", rev = "f18ead891aba2437674cd8c54e238287cceb8b3a" }
+lifestream = { path = "../lifestream" }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+serde_json = "1"

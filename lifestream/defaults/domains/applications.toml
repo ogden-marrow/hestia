@@ -1,0 +1,11 @@
+id = "applications"
+name = "Applications"
+icon = "application"
+folder = "Software"
+description = "Programs and how they are set up: installers, app bundles, libraries, per-app configuration. Grouped by operating system under applications/."
+kinds = ["software/installer", "software/library", "software/app-bundle", "data/config"]
+shape = "by_source"
+
+[backup]
+git_max_mb = 5
+store = "encrypted"

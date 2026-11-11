@@ -1,0 +1,11 @@
+id = "data"
+name = "Data"
+icon = "data"
+folder = "Data"
+description = "Databases, exports, logs, archives and datasets that are not documents or media."
+kinds = ["data/database", "log", "archive"]
+shape = "by_source"
+
+[backup]
+git_max_mb = 1
+store = "encrypted"

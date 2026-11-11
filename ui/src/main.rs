@@ -1,0 +1,888 @@
+//! Hestia, drawn with Rune. `hestia` opens the window;
+//! `hestia --snap out.png --scene dark-pink --size 1280x760` renders headless.
+
+mod clipboard;
+mod design;
+mod explorer;
+mod files;
+mod folders;
+mod history;
+mod icons;
+mod launcher;
+mod machine;
+mod prefs;
+mod questions;
+mod repo;
+mod schedule;
+mod settings;
+mod sidebar;
+mod today;
+mod timeview;
+mod setup;
+mod welcome;
+
+use design::{Design, Surface};
+use settings::{Scheme, Settings};
+use lifestream::bundle::{self, Bundle, Cached};
+use repo::{Change, Commit, DiffLine};
+use lifestream::semantic;
+use lifestream::query::{self, Query};
+use lifestream::{human, load_all, stream_dir, Record};
+use rune::tok::{self, type_, TextStyle};
+use rune::{AppSpec, Color, Cx, El, GrowthSpec, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, oklch, row, text, text_input};
+use std::borrow::Cow;
+use lifestream::system::{self, Status};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Pane {
+    Today,
+    Stream,
+    Questions,
+    System,
+    Ask,
+    History,
+    Files,
+    Time,
+    Folders,
+    Machine,
+    Settings,
+    Welcome,
+}
+
+/// What the background thread hands to the screen.
+struct Fresh {
+    status: Option<(Status, (bool, Color))>, // gathered every other tick
+    repo: String,
+    dir: u64,
+}
+
+struct State {
+    design: Design,
+    recs: Vec<Record>,
+    views: Vec<Query>,
+    view: usize,       // 0 = everything
+    visible: Vec<usize>, // indexes into recs
+    counts: Vec<usize>,
+    sel: usize,
+    stream: Option<PathBuf>, // None in tests: nothing is written
+    ask: TextEdit,
+    teach: TextEdit,
+    ask_hits: Vec<usize>, // record indexes: word matches and meaning matches together
+    asel: usize,
+    msg: String,
+    pane: Pane,
+    status: Status,
+    fresh: Arc<Mutex<Option<Fresh>>>, // written by the background thread, taken by poll
+    repo_dir: PathBuf,
+    repo_status: String,
+    repo_stamp: String,
+    commits: Vec<Commit>,
+    csel: usize,
+    changes: Vec<Change>,
+    fsel: usize,
+    diff: Vec<DiffLine>,
+    cwd: PathBuf,
+    entries: Vec<files::Entry>,
+    esel: usize,
+    dir_stamp: u64,
+    kinds: HashMap<String, String>,
+    watch: Arc<Mutex<PathBuf>>, // the folder the background thread watches
+    days: Vec<timeview::Day>,
+    cum: Vec<usize>,
+    dsel: usize,
+    compare: bool,
+    overnight: (usize, usize, usize),
+    asked: String,
+    apps: Vec<launcher::App>,
+    icons: rune::ImageCache, // app icons for the launcher
+    clips: Vec<clipboard::Entry>,
+    launches: HashMap<String, u32>,
+    copy_text: Option<String>, // set by a click, written to the clipboard by poll
+    close_after: bool,
+    wstep: usize, // welcome tour step
+    launched_ask: bool, // opened as the small launcher window (`hestia --launch`)
+    bundles: Vec<Bundle>,
+    suggestions: HashMap<String, Cached>,
+    qsel: usize,
+    settings: Settings,
+    desktop: (bool, Color),
+    stab: usize,
+    ext_kinds: HashMap<String, (String, usize)>,
+    skipped: Vec<String>,
+    tree: lifestream::tree::Tree,
+    tree_path: PathBuf,
+    tsel: usize,
+    tplan: Option<lifestream::tree::Plan>,
+    confirm_move: bool,
+    f_path: TextEdit,
+    f_kind: TextEdit,
+    f_tag: TextEdit,
+    f_name: TextEdit,
+    f_year: bool,
+    f_new: TextEdit,
+    f_inbox: TextEdit,
+    f_root: TextEdit,
+    f_cap: TextEdit,
+    f_filekind: TextEdit,
+    moving: Option<usize>,
+    pending_move: Option<(String, String)>,
+    mach: Vec<machine::Cat>,
+    mcat: usize,
+    mit: usize,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        let stream = stream_dir(None).ok();
+        let recs = stream.as_deref().and_then(|d| load_all(d).ok()).unwrap_or_default();
+        let views = query::load_views(&home_repo().join("views")).unwrap_or_default();
+        let mut s = State::with(recs, views, stream);
+        s.settings = Settings::load();
+        s.desktop = desktop();
+        s.restyle();
+        if !s.settings.welcomed { s.pane = Pane::Welcome; }
+        let args = rune::extra_args();
+        if let Some(key) = args.iter().find_map(|a| a.strip_prefix("--pane=")) {
+            if let Some(p) = launcher::pane_of(key) {
+                s.pane = p;
+            }
+        }
+        if args.iter().any(|a| a == "--launch") {
+            s.pane = Pane::Ask;
+            s.launched_ask = true;
+            s.ask.focused = true;
+        } else if args.iter().any(|a| a == "--questions") {
+            s.pane = Pane::Questions;
+        }
+        s
+    }
+}
+
+/// Where your home repository lives: `$HESTIA_HOME`, else `~/Home` (the app is launched from the app grid, so cwd means nothing).
+fn home_repo() -> PathBuf {
+    if let Some(d) = std::env::var_os("HESTIA_HOME") {
+        return PathBuf::from(d);
+    }
+    let guess = files::home().join("Home");
+    if guess.join("manifest/rules.toml").exists() { guess } else { std::env::current_dir().unwrap_or(guess) }
+}
+
+/// The desktop's light/dark setting and accent colour (GNOME settings, read-only).
+fn desktop() -> (bool, Color) {
+    let read = |key: &str| -> String {
+        if cfg!(test) {
+            return String::new();
+        }
+        std::process::Command::new("gsettings").args(["get", "org.gnome.desktop.interface", key]).output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().trim_matches('\'').to_string()).unwrap_or_default()
+    };
+    let dark = read("color-scheme") != "prefer-light" && read("color-scheme") != "default";
+    let accent = match read("accent-color").as_str() {
+        "blue" => oklch(0.68, 0.16, 255.0),
+        "teal" => oklch(0.72, 0.11, 190.0),
+        "green" => oklch(0.72, 0.16, 150.0),
+        "yellow" => oklch(0.82, 0.15, 95.0),
+        "orange" => oklch(0.74, 0.16, 55.0),
+        "red" => oklch(0.66, 0.2, 25.0),
+        "purple" => oklch(0.66, 0.17, 305.0),
+        "slate" => oklch(0.66, 0.03, 250.0),
+        _ => oklch(0.7, 0.19, 5.0), // pink, and the fallback
+    };
+    (dark, accent)
+}
+
+pub fn greeting() -> &'static str {
+    use chrono::Timelike;
+    match chrono::Local::now().hour() {
+        0..=4 => "Good night",
+        5..=11 => "Good morning",
+        12..=17 => "Good afternoon",
+        _ => "Good evening",
+    }
+}
+
+fn open_folder(src: &str) {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let p = match src.strip_prefix("~/") {
+        Some(rest) => PathBuf::from(&home).join(rest),
+        None => PathBuf::from(src),
+    };
+    let dir = if p.is_dir() { p } else { p.parent().map(|d| d.to_path_buf()).unwrap_or(p) };
+    if dir.exists() {
+        let _ = std::process::Command::new("xdg-open").arg(&dir)
+            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+    }
+}
+
+impl State {
+    fn with(recs: Vec<Record>, views: Vec<Query>, stream: Option<PathBuf>) -> State {
+        let stream_path = stream.clone().unwrap_or_default();
+        let dir = stream.as_deref().and_then(|d| d.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+        let suggestions = bundle::load_cache(&dir);
+        let mut s = State {
+            design: Design::default(), recs, views, view: 0, visible: vec![], counts: vec![], sel: 0, stream,
+            ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(),
+            pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, close_after: false, wstep: 0, launched_ask: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
+            tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false,
+            f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), f_filekind: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
+        };
+        let _ = stream_path;
+        s.tree_path = home_repo().join("tree.toml");
+        s.tree = lifestream::tree::Tree::load(&s.tree_path).unwrap_or_default();
+        s.select_folder(0);
+        s.refresh_derived();
+        s.commits = repo::log(&s.repo_dir, 1); // just the newest, for the Today tile; History loads the rest
+        s.reload_dir();
+        s.recompute();
+        s
+    }
+    /// Everything computed from the records. Run when the records change, not on every keystroke.
+    fn refresh_derived(&mut self) {
+        self.kinds = files::kinds(&self.recs);
+        let mut by_ext: HashMap<String, HashMap<String, usize>> = HashMap::new();
+        for r in self.recs.iter().filter(|r| r.status == "filed" && !r.kind.starts_with("unknown/") && !r.tags.iter().any(|t| t == "derived")) {
+            if let Some((_, e)) = r.sources.first().and_then(|p| p.rsplit('/').next()).and_then(|n| n.rsplit_once('.')) {
+                *by_ext.entry(format!(".{}", e.to_lowercase())).or_default().entry(r.kind.clone()).or_default() += 1;
+            }
+        }
+        self.ext_kinds = by_ext.into_iter()
+            .filter_map(|(e, k)| k.into_iter().max_by_key(|x| x.1).filter(|x| x.1 >= 3).map(|best| (e, best)))
+            .collect();
+        let live = |r: &Record| r.status != "gone";
+        self.counts = std::iter::once(self.recs.iter().filter(|r| live(r)).count())
+            .chain(self.views.iter().map(|v| self.recs.iter().filter(|r| v.matches(r)).count()))
+            .collect();
+        self.bundles = bundle::bundles(&self.recs);
+        self.order_bundles();
+        self.overnight = today::overnight(&self.recs);
+        self.days = timeview::days(&self.recs);
+        self.cum = timeview::cumulative(&self.days);
+    }
+    /// Skipped folders go to the back of the queue.
+    fn order_bundles(&mut self) {
+        let skipped = self.skipped.clone();
+        self.bundles.sort_by_key(|b| skipped.contains(&b.root));
+        self.qsel = self.qsel.min(self.bundles.len().saturating_sub(1));
+    }
+    fn restyle(&mut self) {
+        self.design = Design::build(&self.settings, self.desktop);
+    }
+    fn change_settings(&mut self, f: impl FnOnce(&mut Settings)) {
+        f(&mut self.settings);
+        self.settings.save();
+        self.restyle();
+        self.reload_dir(); // "show hidden files" and the like take effect at once
+    }
+    /// A setting that changes the system's schedule: save it, then apply it.
+    fn change_schedule(&mut self, f: impl FnOnce(&mut Settings)) {
+        self.change_settings(f);
+        self.msg = schedule::apply(&self.settings);
+    }
+    /// Answer the selected folder (and, if enabled, its similar neighbours): every file in them
+    /// gets this kind, as a human decision.
+    fn answer(&mut self, kind: &str, tags: &[String]) {
+        let Some(b) = self.bundles.get(self.qsel) else { return };
+        let Some(stream) = self.stream.clone() else { self.msg = "no stream to write to".into(); return };
+        let mut ids = b.ids.clone();
+        let mut folders = 1;
+        if self.settings.siblings {
+            for j in questions::siblings(&self.bundles, self.qsel) {
+                ids.extend(self.bundles[j].ids.iter().cloned());
+                folders += 1;
+            }
+        }
+        match lifestream::teach(&stream, &ids, kind, tags) {
+            Ok(recs) => {
+                self.recs = recs;
+                self.refresh_derived();
+                self.teach.clear();
+                self.msg = format!("{} files in {} folder{} → {}", ids.len(), folders, if folders == 1 { "" } else { "s" }, kind.to_lowercase());
+                self.recompute();
+            }
+            Err(e) => self.msg = format!("not saved: {e}"),
+        }
+    }
+    fn recompute(&mut self) {
+        let live = |r: &Record| r.status != "gone";
+        let mut idx: Vec<usize> = (0..self.recs.len())
+            .filter(|&i| {
+                let r = &self.recs[i];
+                if self.view == 0 { live(r) } else { self.views[self.view - 1].matches(r) }
+            })
+            .collect();
+        idx.sort_by(|&a, &b| self.recs[b].mtime.cmp(&self.recs[a].mtime));
+        self.visible = idx;
+        self.sel = self.sel.min(self.visible.len().saturating_sub(1));
+        self.order_bundles();
+    }
+    /// Ask: files whose names, kinds or tags match your words, and files closest in meaning, together.
+    /// Files that match both come first.
+    fn do_ask(&mut self) {
+        let q = self.ask.text.trim().to_string();
+        self.asel = 0;
+        if q.is_empty() {
+            self.ask_hits.clear();
+            self.msg.clear();
+            return;
+        }
+        let words = Query { text: Some(q.clone()), ..Default::default() };
+        let mut lexical: Vec<usize> = (0..self.recs.len()).filter(|&i| self.recs[i].status != "gone" && words.matches(&self.recs[i])).collect();
+        lexical.sort_by(|&a, &b| self.recs[b].mtime.cmp(&self.recs[a].mtime));
+        let dir = self.stream.as_deref().and_then(|d| d.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+        let index: HashMap<&str, usize> = self.recs.iter().enumerate().map(|(i, r)| (r.id.as_str(), i)).collect();
+        let (semantic, note): (Vec<usize>, String) = match lifestream::semantic::search(&self.recs, &dir, lifestream::semantic::DEFAULT_HOST, lifestream::semantic::DEFAULT_MODEL, &q) {
+            Ok(h) => (h.into_iter().take(60).filter_map(|(_, id)| index.get(id.as_str()).copied()).collect(), format!("words and meaning together for “{q}”")),
+            Err(_) => (vec![], format!("word matches for “{q}” (the local model is off, so meaning search is unavailable)")),
+        };
+        let both: Vec<usize> = semantic.iter().copied().filter(|i| lexical.contains(i)).collect();
+        let mut hits = both.clone();
+        hits.extend(lexical.iter().copied().filter(|i| !both.contains(i)).take(100));
+        let extra: Vec<usize> = semantic.iter().copied().filter(|i| !hits.contains(i)).collect();
+        hits.extend(extra);
+        hits.truncate(200);
+        self.ask_hits = hits;
+        self.msg = note;
+    }
+    /// Move through time: +1 = an earlier day, -1 = a later one.
+    fn step_time(&mut self, back: i32) {
+        let last = self.days.len().saturating_sub(1) as i32;
+        self.dsel = (self.dsel as i32 + back).clamp(0, last) as usize;
+    }
+    fn reload_repo(&mut self) {
+        self.repo_status = repo::status_line(&self.repo_dir);
+        self.repo_stamp = repo::stamp(&self.repo_dir);
+        let mut commits = repo::log(&self.repo_dir, 150);
+        if repo::dirty(&self.repo_dir) {
+            commits.insert(0, Commit { hash: repo::WORKTREE.into(), short: "now".into(), subject: "Uncommitted changes".into(), when: String::new(), author: String::new() });
+        }
+        self.commits = commits;
+        self.select_commit(self.csel.min(self.commits.len().saturating_sub(1)));
+    }
+    fn select_commit(&mut self, i: usize) {
+        self.csel = i;
+        self.fsel = 0;
+        self.changes = self.commits.get(i).map(|c| repo::changes(&self.repo_dir, &c.hash)).unwrap_or_default();
+        self.load_diff();
+    }
+    fn load_diff(&mut self) {
+        self.diff = match (self.commits.get(self.csel), self.changes.get(self.fsel)) {
+            (Some(c), Some(ch)) => repo::diff(&self.repo_dir, &c.hash, &ch.path, 800),
+            _ => vec![],
+        };
+    }
+    fn reload_dir(&mut self) {
+        self.entries = files::list(&self.cwd, &self.kinds, self.settings.hidden);
+        self.esel = self.esel.min(self.entries.len().saturating_sub(1));
+        self.dir_stamp = files::fingerprint(&self.cwd);
+        *self.watch.lock().unwrap() = self.cwd.clone();
+    }
+    fn go(&mut self, p: PathBuf) {
+        self.cwd = p;
+        self.esel = 0;
+        self.reload_dir();
+    }
+    fn new_note(&mut self) {
+        match files::new_note(&self.cwd) {
+            Ok(p) => {
+                self.msg = format!("created {}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                self.reload_dir();
+                open_folder(&p.to_string_lossy());
+            }
+            Err(e) => self.msg = format!("could not create a note: {e}"),
+        }
+    }
+    fn view_name(&self, i: usize) -> String {
+        if i == 0 { "All files".into() } else { self.views[i - 1].name.clone().unwrap_or_default() }
+    }
+}
+
+fn style(d: &Design, base: TextStyle) -> TextStyle {
+    d.font(base)
+}
+
+fn base(p: &str) -> &str {
+    p.rsplit('/').next().unwrap_or(p)
+}
+
+fn view(s: &State, _: &mut Cx<State>) -> El {
+    let d = s.design;
+    let t = d.theme();
+    let acc = d.accent_color();
+    let pad = d.pad();
+
+    // ---- header: the morning briefing
+    let needs = s.recs.iter().filter(|r| r.status == "pending").count();
+    let title = match s.pane {
+        Pane::Today => "Today", Pane::Stream => "Files · collection", Pane::Questions => "Questions", Pane::System => "System",
+        Pane::Ask => "Search", Pane::History => "History", Pane::Files => "Files", Pane::Time => "Time",
+        Pane::Folders => "Folders", Pane::Machine => "Machine", Pane::Settings => "Settings", Pane::Welcome => "Welcome",
+    };
+    let header = row().w_full().h(d.size(28.0)).px(pad).center_y().fill(t.card)
+        .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
+        .child(row().w(200.0).gap(d.gap()).center_y()
+            .child(col().size(10.0, 10.0).radius(2.0).fill(acc))
+            .child(text("Hestia").font(style(&d, type_::TITLE)).color(t.text)))
+        .child(text(title).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
+        .child(
+            text(format!("{needs} need you")).key("need-you").font(style(&d, type_::LABEL)).color(if needs > 0 { acc } else { t.text_secondary })
+                .on_press(|s: &mut State| s.pane = Pane::Questions),
+        );
+
+    // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"
+    let info = match s.pane {
+        Pane::Today => format!("{} files in the stream · {} folders waiting", s.counts.first().copied().unwrap_or(0), s.bundles.len()),
+        Pane::Stream => format!("{} files", s.visible.len()),
+        Pane::Questions => format!("{} folders · {} files", s.bundles.len(), s.bundles.iter().map(|b| b.ids.len()).sum::<usize>()),
+        Pane::Files => format!("{} items · {}", s.entries.len(), files::tilde(&s.cwd)),
+        Pane::History => s.repo_status.clone(),
+        Pane::Time => format!("{} days with files", s.days.len()),
+        Pane::Folders => format!("{} folders in the tree · {} inboxes", s.tree.folders.len(), s.tree.inbox.len()),
+        Pane::Machine => format!("{} differences from the capture", s.mach.iter().map(|c| c.drift()).sum::<usize>()),
+        Pane::System => format!("models {}", if s.status.ollama_up { "ready" } else { "off" }),
+        Pane::Ask => "apps, files, clipboard and Hestia, on this computer".into(),
+        Pane::Settings => "changes apply right away".into(),
+        Pane::Welcome => "a short tour".into(),
+    };
+    let footer = row().w_full().h(d.size(24.0)).px(pad).center_y().fill(t.card)
+        .border_sides([1.0, 0.0, 0.0, 0.0], t.card_border)
+        .child(text(info).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0).shrink().min_w(0.0).truncate())
+        ;
+
+    let views = sidebar::panel(s);
+
+    // ---- the stream
+    let rows = col()
+        .key("stream")
+        .w_full()
+        .growth(GrowthSpec::default())
+        .virtual_rows(
+            s.visible.len(),
+            d.row_h(),
+            |s: &State, i| Cow::Owned(s.recs[s.visible[i]].id.clone()),
+            |s: &State, i| {
+                let d = s.design;
+                let t = d.theme();
+                let r = &s.recs[s.visible[i]];
+                let on = i == s.sel;
+                let src = r.sources.first().or(r.was.first()).map(|x| x.as_str()).unwrap_or("");
+                row().h(d.row_h()).px(d.gap()).gap(d.pad()).center_y().radius(d.r(tok::radius::SM))
+                    .fill(if on { t.control_off } else { t.card })
+                    .on_press(move |s: &mut State| s.sel = i)
+                    .child(text(r.mtime.get(..10).unwrap_or("").to_string()).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).w(d.size(78.0)))
+                    .child(text(human(r.size)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).w(d.size(64.0)))
+                    .child(text(r.kind.clone()).font(style(&d, type_::LABEL)).color(if r.status == "pending" { d.accent_color() } else { t.text_secondary }).w(d.size(140.0)))
+                    .child(text(base(src).to_string()).font(style(&d, type_::BODY)).color(t.text).grow(1.0))
+            },
+        );
+    let rows = col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(rows);
+    let stream = col().padding(d.gap()).grow(1.0).panel(&d)
+        .child(text(format!("{} · {} files{}", s.view_name(s.view), s.visible.len(), if s.msg.is_empty() { String::new() } else { format!(" · {}", s.msg) })).font(style(&d, type_::SECTION)).color(t.text_secondary))
+        .child(rows);
+
+    // ---- detail
+    let mut detail = col().w(300.0).padding(pad).gap(d.gap()).panel(&d);
+    if let Some(&i) = s.visible.get(s.sel) {
+        let r = &s.recs[i];
+        detail = detail
+            .child(text(base(r.sources.first().or(r.was.first()).map(|x| x.as_str()).unwrap_or("")).to_string()).font(style(&d, type_::TITLE)).color(t.text))
+            .child(kv(&d, "kind", &r.kind))
+            .child(kv(&d, "size", &human(r.size)))
+            .child(kv(&d, "filed by", &format!("{} · {}", r.by.tier, r.by.name)))
+            .child(kv(&d, "status", &r.status))
+            .child(kv(&d, "tags", &r.tags.join("  ")));
+        for p in r.sources.iter().take(6) {
+            detail = detail.child(text(p.clone()).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary));
+        }
+    }
+
+    if s.pane == Pane::Welcome {
+        return welcome::screen(s);
+    }
+    if s.launched_ask {
+        return col().w_full().h_full().child(launcher::panel(s));
+    }
+    let panes: Vec<El> = match s.pane {
+        Pane::Stream => vec![explorer::left(s), stream, detail],
+        Pane::Questions => questions::panels(s),
+        Pane::System => vec![system_panel(s)],
+        Pane::Today => vec![today::panel(s)],
+        Pane::Settings => prefs::panels(s),
+        Pane::Folders => folders::panels(s),
+        Pane::Machine => machine::panels(s),
+        Pane::Ask => vec![launcher::panel(s)],
+        Pane::History => history::panels(s),
+        Pane::Files => explorer::panels(s),
+        Pane::Time => vec![timeview::panel(s)],
+        Pane::Welcome => vec![],
+    };
+    let mut body = row().w_full().grow(1.0).gap(0.0).min_h(0.0).child(views);
+    for p in panes {
+        body = body.child(p);
+    }
+    col().w_full().h_full().padding(0.0).gap(0.0).backdrop(&d)
+        .child(header)
+        .child(body)
+        .child(footer)
+}
+
+/// Everything that is running: timers and services, models, GPU, pipeline progress.
+fn system_panel(s: &State) -> El {
+    let d = s.design;
+    let t = d.theme();
+    let acc = d.accent_color();
+    let st = &s.status;
+    let bad = rune::Color { r: 0.92, g: 0.35, b: 0.33, a: 1.0 };
+    let card = |title: &str| col().w_full().padding(d.pad()).gap(d.gap()).tile(&d)
+        .child(text(title.to_string()).font(style(&d, type_::SECTION)).color(t.text_secondary));
+    let cell = |txt: String, w: f32, c: rune::Color| text(txt).font(style(&d, type_::LABEL)).color(c).w(d.size(w));
+
+    let scan_now = row().w_full().gap(d.gap()).center_y().tile(&d).padding(d.pad())
+        .child(col().grow(1.0).gap(2.0)
+            .child(text("Overnight scan").font(style(&d, type_::BODY)).color(t.text))
+            .child(text("Reads your folders and updates the stream. The schedule is in Settings.").font(style(&d, type_::LABEL)).color(t.text_secondary)))
+        .child(questions::button(&d, "scan-now", "Scan now".into(), true, |_: &mut State| { let _ = std::process::Command::new("systemctl").args(["--user", "start", "lifestream-nightly.service"]).spawn(); }));
+    let mut timers = card("timers and services").child(
+        row().gap(d.pad()).child(cell("".into(), 14.0, t.text_secondary)).child(cell("unit".into(), 230.0, t.text_secondary))
+            .child(cell("state".into(), 130.0, t.text_secondary)).child(cell("next run".into(), 150.0, t.text_secondary)).child(cell("last run".into(), 150.0, t.text_secondary)),
+    );
+    for u in &st.units {
+        let ok = (u.active.starts_with("active") || u.active == "idle") && (u.result.is_empty() || u.result == "success");
+        timers = timers.child(
+            row().h(d.row_h()).gap(d.pad()).center_y()
+                .child(el().size(8.0, 8.0).radius(4.0).fill(if ok { acc } else { bad }))
+                .child(text(u.what.clone()).font(style(&d, type_::BODY)).color(t.text).w(d.size(230.0)))
+                .child(cell(u.active.clone(), 130.0, if ok { t.text_secondary } else { bad }))
+                .child(cell(u.next.clone(), 150.0, t.text_secondary))
+                .child(cell(u.last.clone(), 150.0, t.text_secondary)),
+        );
+    }
+
+    let role = |m: &str| -> &'static str {
+        if m.starts_with(bundle::MODELS[0].split(':').next().unwrap_or("")) && m.contains("instruct") { "folder suggestions (A)" }
+        else if m.starts_with("qwen3.5") { "folder suggestions (B)" }
+        else if m.starts_with(semantic::DEFAULT_MODEL) { "search by meaning" }
+        else { "installed" }
+    };
+    let mut models = card(if st.ollama_up { "models (ollama is up)" } else { "models (ollama is down)" });
+    for (name, gb) in &st.installed {
+        let live = st.loaded.iter().find(|l| &l.name == name);
+        models = models.child(
+            row().h(d.row_h()).gap(d.pad()).center_y()
+                .child(el().size(8.0, 8.0).radius(4.0).fill(if live.is_some() { acc } else { t.control_off }))
+                .child(text(name.clone()).font(style(&d, type_::BODY)).color(t.text).w(d.size(280.0)))
+                .child(cell(role(name).to_string(), 170.0, t.text_secondary))
+                .child(cell(format!("{gb:.1} GB"), 70.0, t.text_secondary))
+                .child(cell(match live { Some(l) => format!("in GPU memory {} MB · until {}", l.vram_mb, l.expires), None => "not loaded".into() }, 260.0, if live.is_some() { acc } else { t.text_secondary })),
+        );
+    }
+
+    let mut hw = card("graphics card");
+    match &st.gpu {
+        Some(g) => {
+            let frac = g.used_mb as f32 / g.total_mb.max(1) as f32;
+            hw = hw
+                .child(text(format!("memory {} / {} MB · busy {}% · {}°C", g.used_mb, g.total_mb, g.util, g.temp)).font(style(&d, type_::BODY)).color(t.text))
+                .child(el().key("gpu-track").w_full().h(8.0).radius(4.0).fill(t.control_off)
+                    .child(el().key("gpu-bar").w(560.0 * frac).h(8.0).radius(4.0).fill(if frac > 0.9 { bad } else { acc })));
+        }
+        None => hw = hw.child(text("no NVIDIA GPU reported").font(style(&d, type_::BODY)).color(t.text_secondary)),
+    }
+
+    let pipe = card("pipeline")
+        .child(kv(&d, "stream last updated", &st.stream_age))
+        .child(kv(&d, "files waiting for you", &st.pending.to_string()))
+        .child(kv(&d, "folders suggested by the models", &format!("{} of {}", st.suggested, st.folders)));
+
+    let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(row().w_full().gap(d.pad()).child(hw.grow(1.0)).child(pipe.grow(1.0)));
+    col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
+        .child(text("system · live").font(style(&d, type_::TITLE)).color(t.text))
+        .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(inner))
+}
+
+/// Arrow keys move through time on the time view.
+fn on_key(s: &mut State, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+    if s.pane != Pane::Time {
+        return false;
+    }
+    match ev.key {
+        Key::Up | Key::Left => s.step_time(1),
+        Key::Down | Key::Right => s.step_time(-1),
+        _ => return false,
+    }
+    true
+}
+
+fn setup(s: &mut State, wake: rune::Waker) {
+    // Windowed runs only (headless snapshots gather once, at startup).
+    if std::env::args().any(|a| matches!(a.as_str(), "--snap" | "--trace" | "--tree" | "--frames" | "--script" | "--list-scenes")) { return; }
+    s.icons = rune::ImageCache::new(wake.clone());
+    let (slot, stream, repo_dir, watch) = (s.fresh.clone(), s.stream.clone().unwrap_or_default(), s.repo_dir.clone(), s.watch.clone());
+    std::thread::spawn(move || {
+        let mut tick = 0u64;
+        loop {
+            let status = (tick % 2 == 0).then(|| (system::gather(&load_all(&stream).unwrap_or_default(), &stream), desktop()));
+            let cwd = watch.lock().unwrap().clone();
+            *slot.lock().unwrap() = Some(Fresh { status, repo: repo::stamp(&repo_dir), dir: files::fingerprint(&cwd) });
+            wake();
+            tick += 1;
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+    });
+}
+
+fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
+    if let Some(text) = s.copy_text.take() {
+        tx.copy_rich(rune::ClipboardContent::new(text));
+    }
+    if s.close_after {
+        tx.close_window();
+    }
+    let Some(f) = s.fresh.lock().unwrap().take() else { return false };
+    if s.pane == Pane::Ask {
+        s.clips = clipboard::load();
+    }
+    let mut changed = false;
+    if let Some((st, (dark, accent))) = f.status {
+        s.status = st;
+        let before = (s.desktop.0, s.desktop.1.r.to_bits());
+        s.desktop = (dark, accent);
+        if before != (dark, accent.r.to_bits()) {
+            s.restyle();
+            changed = true;
+        }
+        changed |= s.pane == Pane::System;
+    }
+    if f.repo != s.repo_stamp && s.pane == Pane::History {
+        s.reload_repo();
+        changed = true;
+    }
+    if f.dir != s.dir_stamp && s.pane == Pane::Files {
+        s.reload_dir();
+        changed = true;
+    }
+    changed
+}
+
+fn field(d: &Design, key: &str, edit: &TextEdit, hint: &str, get: fn(&mut State) -> &mut TextEdit) -> El {
+    let t = d.theme();
+    text_input(edit, style(d, type_::BODY)).key(key).single_line().w_full().h(d.row_h()).px(d.item_px()).py((d.row_h() - d.size(13.0) * 1.25) / 2.0).radius(d.r(tok::radius::SM))
+        .fill(t.control_track).color(t.text).placeholder(hint, t.text_secondary)
+        .on_edit(get)
+}
+
+fn kv(d: &Design, k: &str, v: &str) -> El {
+    let t = d.theme();
+    col().gap(2.0)
+        .child(text(k.to_string()).font(style(d, type_::SECTION)).color(t.text_secondary))
+        .child(text(v.to_string()).font(style(d, type_::BODY)).color(t.text).wrap_anywhere().shrink())
+}
+
+/// A headless scene: a look and a pane, with whatever data that pane shows.
+fn scene(s: &mut State, pane: Pane) {
+    s.restyle();
+    s.pane = pane;
+    match pane {
+        Pane::System | Pane::Settings => s.status = system::gather(&s.recs, s.stream.as_deref().unwrap_or(std::path::Path::new(""))),
+        Pane::History => s.reload_repo(),
+        Pane::Folders => s.refresh_plan(),
+        Pane::Machine => s.reload_machine(),
+        Pane::Ask => { s.launched_ask = true; s.ask.text = "fi".into(); for a in s.apps.iter().take(40) { let _ = s.icons.app_icon(&a.path, 30.0).wait(); } }
+        _ => {}
+    }
+}
+
+fn main() {
+    if std::env::args().any(|a| a == "--serve") {
+        launcher::serve();
+        return;
+    }
+    // The window's identity: GNOME matches it to hestia.desktop for the taskbar name and icon.
+    rune::set_app_id("app.hestia.Hestia");
+    let launch = rune::extra_args().iter().any(|a| a == "--launch")
+        && !std::env::args().any(|a| matches!(a.as_str(), "--snap" | "--trace" | "--tree" | "--frames" | "--script" | "--list-scenes"));
+    if launch && toggle_launcher() {
+        return; // it was open: this press closed it
+    }
+    let spec = AppSpec::<State> {
+        scenes: &[
+            ("today", |s| scene(s, Pane::Today)),
+            ("stream", |s| scene(s, Pane::Stream)),
+            ("questions", |s| scene(s, Pane::Questions)),
+            ("time", |s| scene(s, Pane::Time)),
+            ("files", |s| scene(s, Pane::Files)),
+            ("history", |s| scene(s, Pane::History)),
+            ("system", |s| scene(s, Pane::System)),
+            ("ask", |s| scene(s, Pane::Ask)),
+            ("folders", |s| scene(s, Pane::Folders)),
+            ("machine", |s| { scene(s, Pane::Machine); s.reload_machine() }),
+            ("welcome", |s| scene(s, Pane::Welcome)),
+            ("welcome-key", |s| { s.wstep = 2; scene(s, Pane::Welcome) }),
+            ("settings", |s| scene(s, Pane::Settings)),
+            ("settings-scanning", |s| { s.stab = 2; scene(s, Pane::Settings) }),
+            ("settings-general", |s| { s.stab = 1; scene(s, Pane::Settings) }),
+            ("light-today", |s| { s.settings.scheme = Scheme::Light; scene(s, Pane::Today) }),
+            ("light-questions", |s| { s.settings.scheme = Scheme::Light; scene(s, Pane::Questions) }),
+            ("time-compare", |s| { s.dsel = 40; s.compare = true; scene(s, Pane::Time) }),
+        ],
+        setup: Some(setup),
+        poll: Some(poll),
+        on_key: Some(on_key),
+        min_size: if launch { None } else { Some((960.0, 620.0)) },
+        ..AppSpec::new("Hestia", if launch { (launcher::LAUNCHER_W, 68.0) } else { (1280.0, 760.0) }, State::default, view)
+    };
+    if launch {
+        // Spotlight: no title bar, no frame, floating above everything, closing when dismissed
+        rune::run_windows(move |_| {
+            vec![rune::WindowSpec::new("launcher", spec).options(rune::WindowOptions {
+                borderless: true, transparent: true, resizable: true, always_on_top: true, min_size: Some((0.0, 0.0)), ..Default::default()
+            })]
+        });
+    } else {
+        rune::run(spec);
+    }
+}
+
+/// Pressing the shortcut while the launcher is open closes it, like Spotlight. Returns true when it did.
+fn toggle_launcher() -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let pidfile = PathBuf::from(&home).join(".cache/hestia/launcher.pid");
+    if let Some(pid) = std::fs::read_to_string(&pidfile).ok().and_then(|t| t.trim().parse::<u32>().ok()) {
+        let cmd = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        let cmd = String::from_utf8_lossy(&cmd);
+        if pid != std::process::id() && cmd.contains("hestia") && cmd.contains("--launch") {
+            let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+            let _ = std::fs::remove_file(&pidfile);
+            return true;
+        }
+    }
+    if let Some(d) = pidfile.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(&pidfile, std::process::id().to_string());
+    false
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lifestream::By;
+    use rune::{Env, Runtime};
+
+    fn rec(id: &str, src: &str) -> Record {
+        Record {
+            id: id.into(), first_seen: "n".into(), mtime: "2025-05-01T00:00:00Z".into(), kind: "unknown/dat".into(), size: 10,
+            sources: vec![src.into()], tags: vec![], summary: None,
+            by: By { tier: "rule".into(), name: "none".into(), confidence: 0.0 }, status: "pending".into(), store: None, future_at: None, was: vec![],
+        }
+    }
+
+    #[test]
+    fn answering_a_folder_files_every_file_in_it_and_empties_the_queue() {
+        let d = std::env::temp_dir().join(format!("ls-ui-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let stream = d.join("stream");
+        let recs = vec![rec("a", "~/Downloads/App/x/1.dat"), rec("b", "~/Downloads/App/x/2.dat"), rec("c", "~/Other/y/3.dat")];
+        lifestream::write_all(&stream, &recs).unwrap();
+        let mut s = State::with(recs, vec![], Some(stream.clone()));
+        assert_eq!(s.bundles.len(), 2);
+        s.pane = Pane::Questions;
+        s.answer("software/app-bundle", &[]); // the biggest folder is selected first
+        assert_eq!(s.bundles.len(), 1, "the answered folder leaves the queue");
+        let back = load_all(&stream).unwrap();
+        let human_filed = back.iter().filter(|r| r.by.tier == "human" && r.kind == "software/app-bundle").count();
+        assert_eq!(human_filed, 2, "both files in the folder are filed");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn the_questions_row_opens_the_queue() {
+        let recs = vec![rec("a", "~/Downloads/App/x/1.dat")];
+        let mut rt = Runtime::new(State::with(recs, vec![], None), view, (1280.0, 760.0), Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        let (x, y) = rt.find("view-q").unwrap();
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(0.1);
+        assert_eq!(rt.state.pane, Pane::Questions);
+        assert!(rt.find("bundle-0").is_some(), "the folder shows as a question");
+    }
+}
+
+
+#[cfg(test)]
+mod look_tests {
+    use super::*;
+    use rune::{Env, Runtime};
+
+    #[test]
+    fn choosing_an_accent_in_settings_restyles_the_whole_app() {
+        let mut rt = Runtime::new(State::with(vec![], vec![], None), view, (1280.0, 760.0), Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        let before = rt.state.design.accent.r.to_bits();
+        let click = |rt: &mut Runtime<State>, key: &str| {
+            let (x, y) = rt.find(key).unwrap_or_else(|| panic!("{key} is on screen"));
+            rt.pointer_down(x, y);
+            rt.pointer_up(x, y);
+            rt.frame(0.1);
+        };
+        click(&mut rt, "nav-settings");
+        assert_eq!(rt.state.pane, Pane::Settings);
+        click(&mut rt, "accent-orange");
+        assert_ne!(rt.state.design.accent.r.to_bits(), before, "choosing an accent restyles the app");
+    }
+}
+
+#[cfg(test)]
+mod today_tests {
+    use super::*;
+    use rune::{Env, Runtime};
+
+    #[test]
+    fn it_opens_on_today_and_the_tiles_lead_somewhere() {
+        let mut rt = Runtime::new(State::with(vec![], vec![], None), view, (1280.0, 800.0), Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        assert_eq!(rt.state.pane, Pane::Today);
+        let (x, y) = rt.find("tile-time").expect("the time tile is on the Today screen");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(0.1);
+        assert_eq!(rt.state.pane, Pane::Time);
+    }
+}
+
+#[cfg(test)]
+mod perf {
+    use super::*;
+
+    /// Run with: cargo test --release perf -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_data_timings() {
+        let t = std::time::Instant::now();
+        let mut s = State::default();
+        eprintln!("State::default            {:>6.1} ms ({} records)", t.elapsed().as_secs_f64() * 1e3, s.recs.len());
+        let t = std::time::Instant::now();
+        for _ in 0..5 { s.recompute(); }
+        eprintln!("recompute (x1)            {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3 / 5.0);
+        let t = std::time::Instant::now();
+        s.reload_repo();
+        eprintln!("reload_repo (git)         {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        let t = std::time::Instant::now();
+        s.reload_dir();
+        eprintln!("reload_dir                {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        let t = std::time::Instant::now();
+        let _ = system::gather(&s.recs, s.stream.as_deref().unwrap());
+        eprintln!("system::gather            {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        let t = std::time::Instant::now();
+        let _ = bundle::bundles(&s.recs);
+        eprintln!("bundles                   {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        let t = std::time::Instant::now();
+        let _ = timeview::days(&s.recs);
+        eprintln!("timeview::days            {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
+    }
+}

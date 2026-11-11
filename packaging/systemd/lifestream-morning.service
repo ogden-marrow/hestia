@@ -1,0 +1,6 @@
+[Unit]
+Description=Morning briefing notification (Hestia)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'b="$(%h/.local/bin/lifestream brief | head -1)"; notify-send -a Hestia -i app.hestia.Hestia "Overnight" "$b"'

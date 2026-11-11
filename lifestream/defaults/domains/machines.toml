@@ -1,0 +1,11 @@
+id = "machines"
+name = "Machines"
+icon = "laptop"
+folder = ""
+description = "The computers you own: a fingerprint of each one, and how it is set up. Kept by Hestia, not by hand, so no files are filed here."
+kinds = []
+shape = "by_machine"
+
+[backup]
+git_max_mb = 5
+store = "none"

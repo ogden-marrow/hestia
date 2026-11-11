@@ -1,0 +1,10 @@
+[package]
+name = "hestia-tray"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Menu bar icon for Hestia (Linux StatusNotifierItem; macOS will use Rune's Tray)"
+
+[dependencies]
+ksni = { version = "0.3", features = ["blocking"] }
+lifestream = { path = "../lifestream" }

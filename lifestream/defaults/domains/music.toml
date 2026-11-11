@@ -1,0 +1,11 @@
+id = "music"
+name = "Music"
+icon = "music"
+folder = "Music"
+description = "Songs, albums, podcasts, audiobooks and other audio you listen to."
+kinds = ["audio"]
+shape = "by_topic"
+
+[backup]
+git_max_mb = 0
+store = "encrypted"

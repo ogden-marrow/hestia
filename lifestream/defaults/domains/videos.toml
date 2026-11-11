@@ -1,0 +1,11 @@
+id = "videos"
+name = "Videos"
+icon = "video"
+folder = "Videos"
+description = "Video files: camera clips, screen recordings, downloaded films and shows."
+kinds = ["video/camera", "video/screen-recording"]
+shape = "by_year"
+
+[backup]
+git_max_mb = 0
+store = "encrypted"

@@ -1,0 +1,10 @@
+target/
+*.bak.*
+.DS_Store
+# secrets: never commit
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.kdbx

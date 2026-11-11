@@ -1,0 +1,8 @@
+{
+  "uuid": "hestia-clipboard@hestia.app",
+  "name": "Hestia",
+  "description": "Hestia's two pieces that must live inside the shell: the launcher (Alt+Space, drawn by the shell so it is centred, instant and closes when you click away) and the clipboard history (text only, never passwords).",
+  "settings-schema": "org.gnome.shell.extensions.hestia-launcher",
+  "shell-version": ["50", "51", "52"],
+  "version": 2
+}

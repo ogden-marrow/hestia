@@ -1,0 +1,12 @@
+[Unit]
+Description=Hestia menu bar icon
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/hestia-tray
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

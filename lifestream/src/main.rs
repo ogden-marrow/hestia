@@ -1,0 +1,237 @@
+//! lifestream command line and interactive screen.
+
+use anyhow::{bail, Result};
+use clap::{Parser, Subcommand};
+use lifestream::*;
+use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(version, about = "lifestream: read-only ingest, search and briefing (the app is Hestia)")]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Scan folders and update the stream. Read-only with respect to the folders.
+    Scan {
+        /// Folders to scan
+        #[arg(required = true)]
+        roots: Vec<PathBuf>,
+        /// Where the stream is written (default: ~/.local/share/lifestream/stream)
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Rules file (default: built-in rules.toml)
+        #[arg(long)]
+        rules: Option<PathBuf>,
+        /// home-repo manifest/rules.toml listing sensitive paths (default: search upward from cwd)
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        /// Compute and print everything but write nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Print statistics for an existing stream
+    Report {
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Search the stream (newest first). Words match path, kind and tags.
+    Find {
+        text: Vec<String>,
+        #[arg(long)]
+        tag: Vec<String>,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        year: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Saved views (substreams) defined in your home repo, views/*.toml
+    Views {
+        #[command(subcommand)]
+        cmd: ViewsCmd,
+    },
+    /// Embed record names/tags with a LOCAL model so `ask` can search by meaning
+    Embed {
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, default_value = lifestream::semantic::DEFAULT_HOST)]
+        host: String,
+        #[arg(long, default_value = lifestream::semantic::DEFAULT_MODEL)]
+        model: String,
+        /// also embed derived files such as thumbnails
+        #[arg(long)]
+        all: bool,
+    },
+    /// Find by meaning, e.g. `ask dark souls save games`
+    Ask {
+        text: Vec<String>,
+        #[arg(long, default_value_t = 15)]
+        limit: usize,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, default_value = lifestream::semantic::DEFAULT_HOST)]
+        host: String,
+        #[arg(long, default_value = lifestream::semantic::DEFAULT_MODEL)]
+        model: String,
+    },
+    /// Ask both local models what each unclassified folder is (cached; run after a scan)
+    Suggest {
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, default_value = semantic::DEFAULT_HOST)]
+        host: String,
+    },
+    /// Show the directory tree (tree.toml); --apply creates its folders
+    Tree {
+        #[arg(long)]
+        tree: Option<PathBuf>,
+        #[arg(long)]
+        apply: bool,
+        /// drag and drop from the shell: move FROM (with its children) to TO, on disk with --apply
+        #[arg(long, num_args = 2, value_names = ["FROM", "TO"])]
+        r#move: Vec<String>,
+    },
+    /// File loose files from the inbox folders into the tree. Dry run unless --apply
+    File {
+        #[arg(long)]
+        tree: Option<PathBuf>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Fingerprint this computer into machines/<name>/machine.toml (--write), or just print it
+    Machine {
+        /// the home repository (default: search upward for tree.toml)
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        #[arg(long)]
+        write: bool,
+    },
+    /// The morning briefing: what happened overnight and what needs me
+    Brief {
+        #[arg(long, default_value_t = 24)]
+        since_hours: i64,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ViewsCmd {
+    /// List views and how many files each matches
+    List {
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Render every view as a folder of symlinks (never moves or copies files)
+    Render {
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// where to put the view folders (default ~/.local/share/lifestream/views)
+        #[arg(long)]
+        into: Option<PathBuf>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+}
+
+fn main() -> Result<()> {
+    let cmd = Cli::parse().cmd;
+    match cmd {
+        Cmd::Tree { tree, apply, r#move } => lifestream::tree::cmd_tree(tree, apply, r#move),
+        Cmd::File { tree, out, manifest, apply } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply),
+        Cmd::Machine { repo, write } => {
+            let m = lifestream::machine::probe(&chrono_today());
+            if write {
+                let repo = repo.or_else(|| lifestream::query::find_up("tree.toml").and_then(|p| p.parent().map(|x| x.to_path_buf()))).ok_or_else(|| anyhow::anyhow!("no home repository found: pass --repo"))?;
+                println!("wrote {}", lifestream::machine::write(&repo, &m)?.display());
+            } else {
+                print!("{}", toml::to_string_pretty(&m)?);
+            }
+            Ok(())
+        }
+        Cmd::Suggest { out, host } => {
+            let stream = stream_dir(out)?;
+            let dir = stream.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| stream.clone());
+            let tree_path = lifestream::query::find_up("tree.toml");
+            let tree = tree_path.as_ref().and_then(|p| lifestream::tree::Tree::load(p).ok());
+            let domains = lifestream::domains::load(tree_path.as_ref().and_then(|p| p.parent()).map(|r| r.join("domains")).as_deref())?;
+            lifestream::bundle::run(&load_all(&stream)?, &dir, &host, &lifestream::bundle::taxonomy(tree.as_ref(), &domains))
+        }
+        Cmd::Find { text, tag, kind, year, status, limit, out } => {
+            let recs = load_all(&stream_dir(out)?)?;
+            let q = lifestream::query::Query {
+                text: if text.is_empty() { None } else { Some(text.join(" ")) },
+                tags_all: tag,
+                kind_prefix: kind,
+                year,
+                status,
+                ..Default::default()
+            };
+            lifestream::query::find(&recs, &q, limit);
+            Ok(())
+        }
+        Cmd::Embed { out, host, model, all } => {
+            let stream = stream_dir(out)?;
+            let recs = load_all(&stream)?;
+            let dir = stream.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| stream.clone());
+            lifestream::semantic::embed(&recs, &dir, &host, &model, all)
+        }
+        Cmd::Ask { text, limit, out, host, model } => {
+            if text.is_empty() {
+                bail!("ask what? e.g. `lifestream ask dark souls save games`");
+            }
+            let stream = stream_dir(out)?;
+            let recs = load_all(&stream)?;
+            let dir = stream.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| stream.clone());
+            lifestream::semantic::ask(&recs, &dir, &host, &model, &text.join(" "), limit)
+        }
+        Cmd::Views { cmd } => match cmd {
+            ViewsCmd::List { dir, out } => {
+                let recs = load_all(&stream_dir(out)?)?;
+                for v in lifestream::query::load_views(&views_dir(dir)?)? {
+                    let n = recs.iter().filter(|r| v.matches(r)).count();
+                    println!("{:20} {:6}  {}", v.name.as_deref().unwrap_or(""), n, v.description.as_deref().unwrap_or(""));
+                }
+                Ok(())
+            }
+            ViewsCmd::Render { dir, into, out } => {
+                let home = home()?;
+                let recs = load_all(&stream_dir(out)?)?;
+                let into = into.unwrap_or_else(|| home.join(".local/share/lifestream/views"));
+                println!("rendering views into {}", into.display());
+                lifestream::query::render(&lifestream::query::load_views(&views_dir(dir)?)?, &recs, &into, &home)
+            }
+        },
+        Cmd::Brief { since_hours, out } => {
+            print!("{}", lifestream::query::brief(&load_all(&stream_dir(out)?)?, since_hours));
+            Ok(())
+        }
+        Cmd::Scan { roots, out, rules, manifest, dry_run } => cmd_scan(roots, out, rules, manifest, dry_run),
+        Cmd::Report { out } => {
+            let out = match out {
+                Some(o) => o,
+                None => home()?.join(".local/share/lifestream/stream"),
+            };
+            print_stats(&load_all(&out)?);
+            Ok(())
+        }
+    }
+}
+
+fn chrono_today() -> String {
+    String::from_utf8_lossy(&std::process::Command::new("date").arg("+%F").output().map(|o| o.stdout).unwrap_or_default()).trim().to_string()
+}

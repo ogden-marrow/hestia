@@ -1,0 +1,11 @@
+id = "documents"
+name = "Documents"
+icon = "document"
+folder = "Documents"
+description = "Anything you read or write: letters, finance, school, work, manuals, scans, spreadsheets."
+kinds = ["document/text", "document/pdf"]
+shape = "by_topic"
+
+[backup]
+git_max_mb = 5
+store = "encrypted"

@@ -1,0 +1,11 @@
+id = "games"
+name = "Games"
+icon = "game"
+folder = "Games"
+description = "Games and what belongs to them: save backups, disc dumps and ROMs, mods, emulator data. Not the Steam library itself, which can be downloaded again."
+kinds = ["game/save-backup", "game/disc-dump"]
+shape = "by_topic"
+
+[backup]
+git_max_mb = 5
+store = "encrypted"

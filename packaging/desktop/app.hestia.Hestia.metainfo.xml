@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.hestia.Hestia</id>
+  <name>Hestia</name>
+  <summary>The hearth of your computer: files, history and time</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>Hestia files your documents for you, shows your computer's configuration and history, and lets you travel back in time through your files. Everything stays on this machine.</p>
+  </description>
+  <launchable type="desktop-id">app.hestia.Hestia.desktop</launchable>
+  <provides><binary>hestia</binary></provides>
+  <categories><category>Utility</category></categories>
+</component>

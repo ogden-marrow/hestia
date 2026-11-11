@@ -1,0 +1,9 @@
+[Unit]
+Description=Hestia: keep the machine capture current (small commits, only when quiet)
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+ExecStart=@HOME_REPO@/applications/linux/ubuntu/26.10/watch.sh

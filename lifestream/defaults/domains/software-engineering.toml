@@ -1,0 +1,11 @@
+id = "software-engineering"
+name = "Software Engineering"
+icon = "code"
+folder = "Code"
+description = "Source code and projects: git repositories, scripts, notebooks, build files, dev tools."
+kinds = ["code", "project/git"]
+shape = "by_project"
+
+[backup]
+git_max_mb = 10
+store = "none"

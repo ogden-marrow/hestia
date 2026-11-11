@@ -1,0 +1,180 @@
+# Deterministic filing rules (tier 1). First rule that sets `kind` wins the kind;
+# every matching rule adds its tags. A rule matches when ALL its criteria match:
+#   ext            file extension, case-insensitive, no dot
+#   name_regex     regex on the file name
+#   path_contains  substring of the ~-relative path
+# Order matters: specific rules first, generic last. Edit freely.
+
+# --- specific patterns (seen in this machine's data) ---
+[[rule]]
+name = "screenshot-name"
+name_regex = '(?i)^(screenshot|screen shot)[ _-]'
+kind = "image/screenshot"
+tags = ["screenshot"]
+
+[[rule]]
+name = "screenshot-dir"
+path_contains = "/Screenshots/"
+ext = ["png", "jpg", "jpeg", "webp"]
+kind = "image/screenshot"
+tags = ["screenshot"]
+
+[[rule]]
+name = "screen-recording"
+name_regex = '^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.(mp4|mkv|mov|webm)$'
+kind = "video/screen-recording"
+tags = ["video", "screen-recording"]
+
+[[rule]]
+name = "camera-video"
+name_regex = '(?i)^(MVI|PNHK|DSC|IMG|VID|MOV)_?\d+\.(mov|mp4)$'
+kind = "video/camera"
+tags = ["video", "camera"]
+
+[[rule]]
+name = "game-save-backup"
+path_contains = "Save Backups"
+kind = "game/save-backup"
+tags = ["game", "save", "backup"]
+
+[[rule]]
+name = "game-save"
+ext = ["sl2"]
+kind = "game/save"
+tags = ["game", "save"]
+
+[[rule]]
+name = "disc-dump"
+ext = ["wbfs", "rvz", "wbf1", "gcm", "nkit"]
+kind = "game/disc-dump"
+tags = ["game", "disc-dump"]
+
+[[rule]]
+name = "game-archive-data"
+ext = ["dcx", "tpfbdt", "hkxbdt", "bdt", "bnd", "fsb"]
+kind = "game/data"
+tags = ["game", "game-data"]
+
+[[rule]]
+name = "thumbnail"
+path_contains = "/thumbs/"
+ext = ["jpg", "jpeg", "png", "webp"]
+kind = "image/thumbnail"
+tags = ["derived", "thumbnail"]
+
+[[rule]]
+name = "database"
+ext = ["db", "sqlite", "sqlite3", "db-wal", "db-shm"]
+kind = "data/database"
+tags = ["data", "database"]   # databases can hold secrets: never read their contents
+
+# --- media ---
+[[rule]]
+name = "raw-photo"
+ext = ["dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2"]
+kind = "image/raw"
+tags = ["photo", "raw"]
+
+[[rule]]
+name = "image"
+ext = ["jpg", "jpeg", "png", "webp", "gif", "heic", "bmp", "tif", "tiff", "avif", "svg"]
+kind = "image"
+tags = ["image"]
+
+[[rule]]
+name = "video"
+ext = ["mp4", "mkv", "mov", "webm", "avi", "m4v", "wmv"]
+kind = "video"
+tags = ["video"]
+
+[[rule]]
+name = "audio"
+ext = ["mp3", "flac", "ogg", "opus", "wav", "m4a", "aac", "wma"]
+kind = "audio"
+tags = ["audio"]
+
+# --- documents ---
+[[rule]]
+name = "pdf"
+ext = ["pdf"]
+kind = "document/pdf"
+tags = ["document"]
+
+[[rule]]
+name = "word-processing"
+ext = ["doc", "docx", "odt", "rtf", "pages"]
+kind = "document/text"
+tags = ["document"]
+
+[[rule]]
+name = "plain-text"
+ext = ["txt", "md", "markdown", "rst"]
+kind = "document/text"
+tags = ["document", "text"]
+
+[[rule]]
+name = "spreadsheet"
+ext = ["xls", "xlsx", "ods", "csv", "tsv"]
+kind = "document/spreadsheet"
+tags = ["document", "data"]
+
+[[rule]]
+name = "presentation"
+ext = ["ppt", "pptx", "odp", "key"]
+kind = "document/presentation"
+tags = ["document"]
+
+[[rule]]
+name = "ebook"
+ext = ["epub", "mobi", "azw3"]
+kind = "document/ebook"
+tags = ["document", "book"]
+
+# --- software & data ---
+[[rule]]
+name = "installer"
+ext = ["exe", "msi", "deb", "rpm", "appimage", "flatpakref", "snap", "dmg"]
+kind = "software/installer"
+tags = ["software", "installer"]
+
+[[rule]]
+name = "archive"
+ext = ["zip", "7z", "rar", "tar", "gz", "xz", "bz2", "tgz", "zst"]
+kind = "archive"
+tags = ["archive"]
+
+[[rule]]
+name = "disk-image"
+ext = ["iso", "img", "vhd", "vhdx", "qcow2"]
+kind = "disk-image"
+tags = ["disk-image"]
+
+[[rule]]
+name = "font"
+ext = ["ttf", "otf", "woff", "woff2"]
+kind = "font"
+tags = ["font"]
+
+[[rule]]
+name = "source-code"
+ext = ["rs", "py", "js", "ts", "tsx", "jsx", "c", "h", "cpp", "hpp", "go", "java", "kt", "sh", "lua", "rb", "cs", "swift"]
+kind = "code"
+tags = ["code"]
+
+[[rule]]
+name = "structured-data"
+ext = ["json", "toml", "yaml", "yml", "xml", "ini", "cfg", "conf"]
+kind = "data/config"
+tags = ["data"]
+
+[[rule]]
+name = "log"
+ext = ["log"]
+kind = "log"
+tags = ["log"]
+
+[[rule]]
+name = "library"
+ext = ["dll", "so", "a", "lib", "dylib"]
+kind = "software/library"
+tags = ["software", "library"]

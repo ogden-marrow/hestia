@@ -1,0 +1,8 @@
+[Unit]
+Description=Show the overnight briefing in the morning
+
+[Timer]
+OnCalendar=*-*-* 07:30:00
+
+[Install]
+WantedBy=timers.target

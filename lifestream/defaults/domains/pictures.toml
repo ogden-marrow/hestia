@@ -1,0 +1,11 @@
+id = "pictures"
+name = "Pictures"
+icon = "picture"
+folder = "Pictures"
+description = "Photos and images: camera originals (RAW), exports, screenshots, saved pictures. Not thumbnails or app artwork."
+kinds = ["image", "image/raw", "image/screenshot", "image/thumbnail"]
+shape = "by_year"
+
+[backup]
+git_max_mb = 1
+store = "encrypted"

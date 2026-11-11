@@ -1,0 +1,47 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libfontconfig1-dev libdbus-1-dev pkg-config
+      - run: cargo build --release --locked
+      - run: cargo test --release --locked
+      - name: Package tarball
+        run: |
+          name=hestia-linux-x86_64
+          mkdir -p "$name/bin"
+          cp target/release/{hestia,hestia-tray,lifestream} "$name/bin/"
+          cp -r packaging install.sh LICENSE README.md "$name/"
+          tar czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+      - name: Package .deb
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          d="hestia_${v}_amd64"
+          install -Dm755 target/release/hestia target/release/hestia-tray target/release/lifestream -t "$d/usr/bin"
+          install -Dm644 packaging/desktop/app.hestia.Hestia.svg -t "$d/usr/share/icons/hicolor/scalable/apps"
+          install -Dm644 packaging/desktop/app.hestia.Hestia-symbolic.svg -t "$d/usr/share/icons/hicolor/symbolic/apps"
+          install -Dm644 packaging/desktop/app.hestia.Hestia.metainfo.xml -t "$d/usr/share/metainfo"
+          sed 's|@HOME@/.local/bin/||g' packaging/desktop/app.hestia.Hestia.desktop | sed 's|^Icon=.*|Icon=app.hestia.Hestia|;/^TryExec/d' > app.desktop
+          install -Dm644 app.desktop "$d/usr/share/applications/app.hestia.Hestia.desktop"
+          mkdir -p "$d/usr/share/gnome-shell/extensions"
+          cp -r packaging/gnome-extension/hestia-clipboard@hestia.app "$d/usr/share/gnome-shell/extensions/"
+          glib-compile-schemas "$d/usr/share/gnome-shell/extensions/hestia-clipboard@hestia.app/schemas"
+          mkdir -p "$d/DEBIAN"
+          printf 'Package: hestia\nVersion: %s\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: Hestia authors <noreply@example.invalid>\nDescription: The hearth of your computer: files, history and time\n' "$v" > "$d/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "$d"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            hestia-linux-x86_64.tar.gz
+            hestia-linux-x86_64.tar.gz.sha256
+            hestia_*_amd64.deb

@@ -1,0 +1,5 @@
+[
+  {"t": 0.1, "type": "tap", "key": "filter"},
+  {"t": 0.3, "type": "type", "text": "save"},
+  {"t": 0.6, "type": "tap", "key": "view-0"}
+]
