@@ -32,8 +32,11 @@ for f in /etc/apt/sources.list.d/*.list; do
 done
 
 # --- GNOME / dconf ---------------------------------------------------------
+# Only an allowlist of sections is kept (see dconf-filter.sh): `dconf dump /` also holds recent documents,
+# last-used folders, clock locations and account data, which are private and not settings.
 # timestamps change by themselves and say nothing about your settings
-{ dconf dump / 2>/dev/null || true; } | { grep -vE '(^|-)timestamp=' || true; } > dconf.ini
+libexec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+{ dconf dump / 2>/dev/null || true; } | { grep -vE '(^|-)timestamp=' || true; } | "$libexec/dconf-filter.sh" > dconf.ini
 
 # --- dotfiles and config, from capture-paths.txt --------------------------
 # Each line is a path under ~. ~/.config/X goes to config/X, other ~/X to dotfiles/X.

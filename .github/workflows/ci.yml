@@ -24,6 +24,8 @@ jobs:
       - run: cargo test --release --locked
       - name: Clipboard extension never records secrets
         run: node tests/clipboard-filter.js
+      - name: Desktop settings are captured by allowlist
+        run: bash tests/dconf-filter.sh
       - name: Bootstrap restores a machine safely
         run: bash tests/bootstrap.sh
       - name: The watch timer fires after install, not only after a reboot
