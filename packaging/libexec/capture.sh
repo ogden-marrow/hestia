@@ -38,7 +38,12 @@ done
 # --- dotfiles and config, from capture-paths.txt --------------------------
 # Each line is a path under ~. ~/.config/X goes to config/X, other ~/X to dotfiles/X.
 # Secret-looking paths are refused even if listed.
-rm -rf dotfiles config && mkdir -p dotfiles config
+# Built beside the old copy and swapped in only when it is complete, so a failure never leaves the repository
+# with files missing. A live file that resolves into this repository (a bootstrap symlink) is copied from what it
+# points at, so capturing it can never delete it. A capture that would drop most of what was captured before is refused.
+repo_root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")"; repo_root="$(readlink -f "$repo_root")"
+new=".capture-new.$$"; rm -rf "$new"; mkdir -p "$new/dotfiles" "$new/config"
+trap 'rm -rf "$new"' EXIT
 while IFS= read -r line; do
   p="${line%%#*}"; p="$(echo "$p" | xargs)"
   [ -z "$p" ] && continue
@@ -48,10 +53,20 @@ while IFS= read -r line; do
       echo "REFUSED (secret-looking): $p" >&2; continue ;;
   esac
   [ -e ~/"$rel" ] || continue
-  case "$rel" in .config/*) dest="config/${rel#.config/}" ;; *) dest="dotfiles/$rel" ;; esac
+  case "$rel" in .config/*) dest="$new/config/${rel#.config/}" ;; *) dest="$new/dotfiles/$rel" ;; esac
   mkdir -p "$(dirname "$dest")"
-  cp -a ~/"$rel" "$dest"
+  real="$(readlink -f ~/"$rel")"
+  case "$real" in
+    "$repo_root"/*) cp -aL "$real" "$dest" ;;  # symlinked into this repository: copy what it points at
+    *) cp -a ~/"$rel" "$dest" ;;
+  esac
 done < capture-paths.txt
+before=$( { find dotfiles config -type f 2>/dev/null || true; } | wc -l); after=$( { find "$new/dotfiles" "$new/config" -type f 2>/dev/null || true; } | wc -l)
+if [ "$before" -ge 4 ] && [ "$((after * 2))" -lt "$before" ]; then
+  echo "REFUSED: this capture has $after files where the last had $before; keeping the last one. Check capture-paths.txt." >&2
+  exit 1
+fi
+rm -rf dotfiles config && mv "$new/dotfiles" dotfiles && mv "$new/config" config
 
 # --- identity & hardware notes --------------------------------------------
 {
