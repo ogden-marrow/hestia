@@ -159,6 +159,11 @@ pub const ALL: [&str; 15] = ["no-keyring", "signed-out", "waiting", "looking", "
 /// An event arrives (a button, or a line from the engine): move the flow, then start whatever the
 /// new state needs. The engine is only ever started from here, so there is one place to read.
 pub fn apply(s: &mut State, e: Event) {
+    match &e {
+        Event::Known(u) | Event::Approved(u) => s.account_user = Some(u.clone()),
+        Event::SignedOut => s.account_user = None,
+        _ => {}
+    }
     let Some(before) = s.auth.clone() else { return };
     let after = next(&before, e.clone());
     if after == before {
@@ -174,6 +179,48 @@ pub fn apply(s: &mut State, e: Event) {
         (_, Auth::Ready { .. }, _) => s.adopted(),
         _ => {}
     }
+}
+
+/// "git@github.com:ada/home.git" or "https://github.com/ada/home" becomes "ada/home".
+pub fn repo_name(remote: &str) -> Option<String> {
+    let rest = remote.trim().strip_prefix("git@github.com:").or_else(|| remote.trim().split_once("github.com/").map(|x| x.1))?;
+    let name = rest.trim_end_matches('/').trim_end_matches(".git");
+    (name.split('/').count() == 2 && !name.contains(' ')).then(|| name.to_string())
+}
+
+/// Open the flow from Settings (Sign in / Switch); finishing or leaving returns there.
+pub fn open_from_settings(s: &mut State, switch: bool) {
+    s.flow_return = Some(super::Pane::Settings);
+    s.msg.clear();
+    s.wstep = 2;
+    s.pane = super::Pane::Welcome;
+    begin(s);
+    if let (true, Some(user)) = (switch, s.auth.as_ref().and_then(user_of)) {
+        s.auth = Some(Auth::Looking { user });
+        crate::engine::run(s, &["home", "discover", "--json"]);
+    }
+}
+
+/// Leave the flow: back to Settings if it was opened from there, else on with the tour.
+pub fn done(s: &mut State) {
+    match s.flow_return.take() {
+        Some(pane) => { s.msg.clear(); s.pane = pane; }
+        None => crate::welcome::advance(s),
+    }
+}
+
+pub fn sign_out(s: &mut State) {
+    crate::engine::run(s, &["auth", "logout", "--json"]);
+}
+
+/// Who is signed in, as the engine last said (the Settings page asks again when it opens).
+pub fn user(s: &State) -> Option<String> {
+    s.account_user.clone().or_else(|| s.auth.as_ref().and_then(user_of))
+}
+
+/// Ask who is signed in without starting the flow (Settings > Account).
+pub fn refresh_status(s: &mut State) {
+    crate::engine::run(s, &["auth", "status", "--json"]);
 }
 
 /// Start the flow when the person reaches it: look at whether they are already signed in.
@@ -287,7 +334,7 @@ pub fn view(s: &State) -> Option<View> {
                 .child(card(&d, vec![text(repo.clone()).font(d.text(Role::Title)).color(t.text), text("Private. Hestia keeps it up to date.".to_string()).font(d.text(Role::Label)).color(t.text_secondary)]))
                 .child(para(&d, SHORT))
                 .child(para(&d, "You can switch repositories or sign out any time in Settings, under Account.")),
-            actions: vec![primary(&d, "acct-done", "Continue", |s: &mut State| crate::welcome::advance(s))] },
+            actions: vec![primary(&d, "acct-done", "Continue", |s: &mut State| done(s))] },
         Auth::Failed { why, user } => {
             let (problem, title, body, action): (&'static str, &str, String, El) = match why {
                 Fail::Offline => ("No connection", "You're offline", "Hestia can't reach GitHub. Check your internet connection, then try again. Nothing was changed.".into(), retry("Try again")),
@@ -398,6 +445,34 @@ mod tests {
                 assert!(!line.contains(bad), "{bad:?} in {line:?}");
             }
         }
+    }
+
+    #[test]
+    fn repository_names_come_out_of_remote_addresses() {
+        assert_eq!(repo_name("https://github.com/ada/home.git"), Some("ada/home".into()));
+        assert_eq!(repo_name("git@github.com:ada/home.git"), Some("ada/home".into()));
+        assert_eq!(repo_name("https://github.com/ada/home/"), Some("ada/home".into()));
+        assert_eq!(repo_name("https://example.org/ada/home"), None);
+        assert_eq!(repo_name(""), None);
+    }
+
+    #[test]
+    fn who_is_signed_in_follows_the_engine_and_sign_out_clears_it() {
+        let mut s = State::default();
+        apply(&mut s, Event::Known("ada".into()));
+        assert_eq!(user(&s), Some("ada".into()));
+        apply(&mut s, Event::SignedOut);
+        assert_eq!(user(&s), None);
+    }
+
+    #[test]
+    fn leaving_the_flow_returns_to_settings_when_it_started_there() {
+        let mut s = State::default();
+        s.flow_return = Some(crate::Pane::Settings);
+        s.pane = crate::Pane::Welcome;
+        done(&mut s);
+        assert_eq!(s.pane, crate::Pane::Settings);
+        assert!(s.flow_return.is_none());
     }
 
     #[test]

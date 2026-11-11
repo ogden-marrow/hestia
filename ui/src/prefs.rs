@@ -6,7 +6,7 @@ use crate::settings::{root_ok, Accent, Scheme, Settings};
 use rune::tok::{self, type_};
 use rune::{col, row, text, El, ScrollSpec, Tx};
 
-const TABS: [&str; 8] = ["Appearance", "General", "Launcher", "Scanning", "Questions", "Files", "Domains", "About"];
+const TABS: [&str; 9] = ["Appearance", "General", "Launcher", "Scanning", "Questions", "Files", "Domains", "Account", "About"];
 
 pub(crate) fn segmented<F: Fn(&mut State, usize) + Clone + 'static>(d: &Design, key: &str, labels: &[&str], on: usize, f: F) -> El {
     let t = d.theme();
@@ -113,7 +113,7 @@ pub fn panels(s: &State) -> Vec<El> {
         tabs = tabs.child(
             row().key(format!("tab-{i}")).h(d.row_h()).px(d.item_px()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { t.control_off } else { rune::Color::TRANSPARENT })
-                .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) } })
+                .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) } if i == 7 { crate::account::refresh_status(s) } })
                 .child(text(name.to_string()).font(style(&d, type_::LABEL)).color(t.text)),
         );
     }
@@ -204,9 +204,22 @@ pub fn panels(s: &State) -> Vec<El> {
                         .child(crate::questions::button(&d, "clip-clear", "Clear history".into(), false, |s: &mut State| { crate::clipboard::clear(); s.clips.clear(); s.msg = "clipboard history cleared".into(); }))))
                 .child(setting(&d, "Shortcut: Alt+Space", "Opens the launcher from anywhere. It is drawn by the Hestia extension, so it works once the extension is on (use Turn on above, then log out and in once).", text("").font(style(&d, type_::LABEL))));
         }
+        7 => {
+            let user = crate::account::user(s);
+            let remote = lifestream::home::remote(&s.repo_dir).and_then(|r| crate::account::repo_name(&r));
+            body = body
+                .child(setting(&d, "GitHub", &match &user { Some(u) => format!("Signed in as {u}."), None => "Not signed in.".to_string() },
+                    match user {
+                        Some(_) => crate::questions::button(&d, "acct-out", "Sign out".into(), false, |s: &mut State| crate::account::sign_out(s)),
+                        None => crate::questions::button(&d, "acct-in", "Sign in…".into(), true, |s: &mut State| crate::account::open_from_settings(s, false)),
+                    }))
+                .child(setting(&d, "Home repository", &match &remote { Some(r) => format!("{r}. Private. Hestia keeps it up to date."), None => "Not connected to GitHub yet.".to_string() },
+                    if user.is_some() { crate::questions::button(&d, "acct-switch", "Switch…".into(), false, |s: &mut State| crate::account::open_from_settings(s, true)) } else { text("").font(style(&d, type_::LABEL)).into() }))
+                .child(setting(&d, "No Hestia account", crate::account::SHORT, text("").font(style(&d, type_::LABEL))));
+        }
         _ => {
             body = body
-                .child(setting(&d, "Hestia", "The hearth of your computer: files, history and time. Everything stays on this machine.", text(env!("CARGO_PKG_VERSION")).font(style(&d, type_::LABEL)).color(t.text_secondary)))
+                .child(setting(&d, "Hestia", "The hearth of your computer: files, history and time.", text(env!("CARGO_PKG_VERSION")).font(style(&d, type_::LABEL)).color(t.text_secondary)))
                 .child(setting(&d, "Your repository", &s.repo_dir.to_string_lossy(), text("").font(style(&d, type_::LABEL))))
                 .child(setting(&d, "Settings file", "~/.config/hestia/settings. Schedules are applied as small overrides in ~/.config/systemd/user, so removing them restores the defaults.", text("").font(style(&d, type_::LABEL))))
                 .child(setting(&d, "Welcome tour", "The short introduction shown the first time Hestia opens.",
