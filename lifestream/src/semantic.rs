@@ -144,7 +144,8 @@ fn embed_batch(host: &str, model: &str, inputs: &[String]) -> Result<Vec<Vec<f32
 /// What gets embedded: names and labels only, never contents.
 pub fn doc_text(r: &Record) -> String {
     let src = r.sources.first().or(r.was.first()).map(|s| s.as_str()).unwrap_or("");
-    format!("search_document: {} | {} | {}", src, r.kind, r.tags.join(" "))
+    // names are other people's text: cleaned and capped before they reach any model (ordinary names are unchanged)
+    format!("search_document: {} | {} | {}", crate::bundle::clean(src, 300), crate::bundle::clean(&r.kind, 60), crate::bundle::clean(&r.tags.join(" "), 200))
 }
 
 fn text_hash(t: &str) -> String {
