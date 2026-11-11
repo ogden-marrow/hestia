@@ -35,7 +35,9 @@ export class Launcher {
     // ---- the engine
     _ensureEngine() {
         if (this._proc) return;
-        const exe = GLib.build_filenamev([GLib.get_home_dir(), '.cargo', 'bin', 'hestia']);
+        // installed to ~/.local/bin by install.sh; ~/.cargo/bin when built with cargo install; else whatever PATH finds
+        const exe = ['.local/bin', '.cargo/bin'].map(d => GLib.build_filenamev([GLib.get_home_dir(), d, 'hestia']))
+            .find(p => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE)) ?? 'hestia';
         try {
             this._proc = Gio.Subprocess.new([exe, '--serve'], Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
         } catch (e) {
