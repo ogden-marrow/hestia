@@ -85,6 +85,14 @@ if [ -z "$(git -C "$repo" ls-files -- "$rel" | head -1)" ]; then
   git -C "$repo" add -A -- "$rel" 2>/dev/null
   git -C "$repo" commit -q -m "machine: first capture of this computer" -m "Captured automatically when the computer was quiet." -- "$rel" && made=$((made+1))
 fi
+# Files that are new since the first capture (the desktop-settings file once it is allowed, the capture list,
+# anything a later Hestia starts capturing) would otherwise stay untracked for ever: commit them, scanned already.
+mapfile -t fresh < <(git -C "$repo" ls-files --others --exclude-standard -- "$rel" | grep -E "^$rel/[^/]+$" || true)
+if [ "${#fresh[@]}" -gt 0 ]; then
+  git -C "$repo" add -- "${fresh[@]}" 2>/dev/null
+  names=$(printf '%s\n' "${fresh[@]}" | sed "s#^$rel/##" | head -3 | paste -sd, -)
+  git -C "$repo" commit -q -m "machine: new files captured ($names)" -m "Captured automatically when the computer was quiet." -- "${fresh[@]}" && made=$((made+1))
+fi
 for f in apt-manual.txt snap.txt flatpak.txt cargo-bins.txt docker-images.txt; do
   p="$rel/$f"; git -C "$repo" add -A -- "$p" 2>/dev/null
   git -C "$repo" diff --cached --quiet -- "$p" && continue
