@@ -5,7 +5,7 @@ Description=Hestia: look for changes to the machine every few minutes
 OnBootSec=3min
 OnUnitActiveSec=15min
 RandomizedDelaySec=30s
-AccuracyIntervalSec=1min
+AccuracySec=1min
 
 [Install]
 WantedBy=timers.target
