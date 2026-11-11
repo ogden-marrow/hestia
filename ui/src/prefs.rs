@@ -176,7 +176,7 @@ pub fn panels(s: &State) -> Vec<El> {
                     .child(field(&d, "root-add", &s.f_root, "add a folder under your home folder, like Music ↵", |s: &mut State| &mut s.f_root).on_submit(|s: &mut State, _: &mut Tx| add_root(s))));
         }
         4 => {
-            body = body.child(setting(&d, "Answer similar folders together", "When you answer a folder, also answer the other folders in the same project.",
+            body = body.child(setting(&d, "Answer similar folders together", "Off by default. When on, answering one folder also applies your answer to similar folders in the same project, so check the folder names before you confirm.",
                 on_off(&d, "siblings", s.settings.siblings, |s, on| s.change_settings(|st| st.siblings = on))));
         }
         5 => {

@@ -79,7 +79,7 @@ impl Default for Settings {
         Settings {
             scheme: Scheme::Auto, density: Density::Cozy, text: 1.0, accent: Accent::Blue,
             scan_on: true, scan_time: (2, 30), roots: ["Documents", "Downloads", "Pictures", "Videos"].map(String::from).to_vec(),
-            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: true, clipboard_on: false, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15, home: String::new(), hestia_repo: String::new(),
+            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: false, clipboard_on: false, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15, home: String::new(), hestia_repo: String::new(),
         }
     }
 }
@@ -118,7 +118,7 @@ impl Settings {
                 "brief_time" => s.brief_time = time(v).unwrap_or(s.brief_time),
                 "tray" => s.tray = v != "off",
                 "hidden" => s.hidden = v == "yes",
-                "siblings" => s.siblings = v != "no",
+                "batch_similar" => s.siblings = v == "yes", // opt-in: only an explicit yes; the old `siblings=` key is ignored on purpose (#56)
                 "clipboard_history" => s.clipboard_on = v == "on", // opt-in: only an explicit "on"; the old `clipboard=` key is ignored on purpose
                 "clipboard_max" => s.clipboard_max = v.parse::<u32>().map(|n| n.clamp(10, 1000)).unwrap_or(100),
                 "clipboard_days" => s.clipboard_days = v.parse::<u32>().map(|n| n.clamp(1, 365)).unwrap_or(7),
@@ -137,7 +137,7 @@ impl Settings {
     pub fn render(&self) -> String {
         let onoff = |b: bool| if b { "on" } else { "off" };
         format!(
-            "scheme={}\ndensity={}\ntext={}\naccent={}\nscan={}\nscan_time={:02}:{:02}\nroots={}\nbrief={}\nbrief_time={:02}:{:02}\ntray={}\nhidden={}\nsiblings={}\nclipboard_history={}\nclipboard_max={}\nclipboard_days={}\ndismissed={}\nwelcomed={}\nwatch={}\nwatch_mins={}\nhome={}\nhestia_repo={}\n",
+            "scheme={}\ndensity={}\ntext={}\naccent={}\nscan={}\nscan_time={:02}:{:02}\nroots={}\nbrief={}\nbrief_time={:02}:{:02}\ntray={}\nhidden={}\nbatch_similar={}\nclipboard_history={}\nclipboard_max={}\nclipboard_days={}\ndismissed={}\nwelcomed={}\nwatch={}\nwatch_mins={}\nhome={}\nhestia_repo={}\n",
             match self.scheme { Scheme::Auto => "auto", Scheme::Light => "light", Scheme::Dark => "dark" },
             match self.density { Density::Compact => "compact", Density::Cozy => "cozy", Density::Airy => "airy" },
             self.text, self.accent.name(), onoff(self.scan_on), self.scan_time.0, self.scan_time.1, self.roots.join(","),
@@ -190,6 +190,19 @@ mod tests {
         assert!(!Settings::parse("clipboard=on").clipboard_on);
         assert!(Settings { clipboard_on: true, ..Settings::default() }.render().contains("clipboard_history=on"));
         assert!(!Settings::default().render().contains("\nclipboard=") );
+    }
+
+    #[test]
+    fn answering_similar_folders_together_is_opt_in() {
+        assert!(!Settings::default().siblings);
+        for v in ["", "batch_similar=", "batch_similar=no", "batch_similar=YES", "batch_similar=true", "batch_similar=1"] {
+            assert!(!Settings::parse(v).siblings, "{v:?}");
+        }
+        assert!(Settings::parse("batch_similar=yes").siblings);
+        // anyone saved as "yes" by the old default (`siblings=yes`) is off until they choose
+        assert!(!Settings::parse("siblings=yes").siblings);
+        assert!(Settings { siblings: true, ..Settings::default() }.render().contains("batch_similar=yes"));
+        assert!(!Settings::default().render().contains("\nsiblings="));
     }
 
     #[test]
