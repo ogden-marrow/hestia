@@ -27,12 +27,12 @@ Alignment rule: text in a list shares one left edge; numbers share one right edg
 
 ## Type scale
 
-Six roles, three weights (400 / 500 / 600), the Ubuntu Sans family, mono only for `Caption`.
+Six roles, three weights (400 / 500 / 600); large titles are Medium (Apple's are Regular) and Semibold is for 15 and below (`docs/design-research/apple-hig.md`), the Ubuntu Sans family, mono only for `Caption`.
 
 | Role | Size / weight | Used for |
 |---|---|---|
-| `Display` | 28 / 600 | First launch and designed empty states; at most one per screen |
-| `Heading` | 20 / 600 | The pane's single title |
+| `Display` | 28 / 500 | First launch and designed empty states; at most one per screen |
+| `Heading` | 20 / 500 | The pane's single title |
 | `Title` | 15 / 600 | A group or card name |
 | `Body` | 13 / 400 | Reading text, row names |
 | `Label` | 12 / 500 | Secondary text, button labels, column heads |
@@ -42,7 +42,7 @@ Rules: one heading per pane; never a title that repeats the sidebar item or the 
 
 ## Colour roles
 
-Neutral surfaces, one accent. The accent is the user's choice and appears in exactly four places: the primary button, the selected row tint, the focus ring, and the "needs you" count.
+Neutral surfaces, one accent. The accent is the user's choice and appears in a few places only: the primary button, the selected row tint, the focus ring, the "needs you" count, and sidebar icons (Apple's default, so the user's accent reaches them).
 
 | Role | Source |
 |---|---|
