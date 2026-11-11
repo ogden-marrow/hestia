@@ -20,7 +20,18 @@ teaches it, so the questions get rarer. Folders are views over the stream, and y
 deleted; moves are journaled in git so they can be undone.
 
 Everything lives in your **home repository**, an ordinary private git repository (default `~/Home`)
-that holds your folder tree, views, rules, machine fingerprints and the history of all of it.
+that holds your domains, folder tree, rules, machine fingerprints and the history of all of it.
+Hestia's welcome tour creates it for you and can add Hestia itself to it as a submodule, so the tool is
+tracked by the thing it manages:
+
+```
+domains/        what each part of your computer is for (edit in Settings, Domains)
+machines/       one fingerprint (machine.toml) per computer you use
+applications/   what runs where and how it is set up, grouped by operating system
+manifest/       what must never be read, and what is backed up where
+tree.toml       where each kind of file is filed
+hestia/         Hestia itself, as a submodule
+```
 
 ## Domains
 
@@ -40,12 +51,30 @@ its shape, and how it is backed up:
 | Data | datasets, exports, archives |
 | Machines | one fingerprint and capture per computer you use |
 
+Domains drive the classifier, the folders on disk and the backup policy (small things go in git, large
+ones to an encrypted store). The **Files** screen shows them together: each domain, its folders with
+their rules, and the contents of the folder you pick. Change them in **Settings, Domains**.
+
+## Machines
+
+`lifestream machine --write` fingerprints the computer (distro, version, hardware) into
+`machines/<name>/machine.toml` in your home repository, and the **Machine** screen compares what was
+captured under `applications/<os>/<distro>/<version>` with what is installed now. A load-aware watcher
+(`hestia-watch.timer`) re-captures every few minutes, only when the computer is quiet and the battery
+is fine, in small commits. It never pushes.
+
+## The launcher
+
+A GNOME Shell extension (`packaging/gnome-extension`) draws the **Alt+Space** launcher inside the shell,
+so it is centred, instant and closes when you click away. It finds apps, files, things you copied and
+Hestia itself. The same extension records a text-only clipboard history. The welcome tour turns it on.
+
 ## What's in the box
 
 | Crate / folder | |
 |---|---|
-| [`ui`](ui) (`hestia`) | the desktop app: Today, Search, Time, Files, History, Machine, Questions, Folders, System, Settings |
-| [`tray`](tray) (`hestia-tray`) | the menu bar icon (StatusNotifierItem) |
+| [`ui`](ui) (`hestia`) | the desktop app: Today, Search, Time, Files, History, Machine, Questions, System, Settings |
+| [`tray`](tray) (`hestia-tray`) | the animated menu bar icon (StatusNotifierItem) |
 | [`lifestream`](lifestream) | the engine and CLI: `scan`, `find`, `ask`, `brief`, `file`, `machine`, ... |
 | [`packaging`](packaging) | GNOME Shell extension (Alt+Space launcher and clipboard history), systemd user units, desktop entry, icons |
 
@@ -81,9 +110,9 @@ Log out and in once so the launcher and the setting take effect.
 
 ## First run
 
-Open Hestia from the app grid. The welcome tour walks through choosing your home repository (created
-if missing), the folders to watch, the overnight and morning schedule, and turning on the launcher and
-clipboard history. Then try:
+Open Hestia from the app grid. The welcome tour walks through naming your home repository (a folder
+inside your home folder, like `Home`; created if missing, with an optional Hestia submodule), the folders
+to watch, the overnight and morning schedule, and turning on the launcher and clipboard history. Then try:
 
 ```bash
 lifestream scan ~/Documents ~/Pictures --dry-run   # preview, writes nothing
@@ -95,7 +124,8 @@ lifestream brief                                   # the morning briefing
 
 | Setting | Where | Default |
 |---|---|---|
-| Home repository | `HESTIA_HOME` environment variable (`install.sh` writes `~/.config/environment.d/hestia.conf`) | `~/Home` |
+| Home repository | `HESTIA_HOME` (absolute path; `install.sh` writes `~/.config/environment.d/hestia.conf`), else the `home` setting (folder name under your home folder) | `~/Home` |
+| Hestia's public repository | the `hestia_repo` setting (URL used for the submodule) | unset |
 | App settings | `~/.config/hestia/settings`, edited in Settings | |
 | Stream | `~/.local/share/lifestream/stream` | |
 

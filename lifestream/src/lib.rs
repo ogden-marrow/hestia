@@ -7,6 +7,7 @@
 
 pub mod bundle;
 pub mod domains;
+pub mod home;
 pub mod machine;
 pub mod query;
 pub mod rules;

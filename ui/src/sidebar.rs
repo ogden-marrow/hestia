@@ -32,12 +32,11 @@ pub fn panel(s: &State) -> El {
         .child(nav(&d, "view-ask", Some(&icons::ASK), "Search", String::new(), p == Pane::Ask, |s| { s.pane = Pane::Ask; s.ask.focused = true }))
         .child(heading(&d, "EXPLORE"))
         .child(nav(&d, "view-time", Some(&icons::TIME), "Time", String::new(), p == Pane::Time, |s| s.pane = Pane::Time))
-        .child(nav(&d, "view-files", Some(&icons::FOLDER), "Files", String::new(), p == Pane::Files || p == Pane::Stream, |s| { s.pane = Pane::Files; s.reload_dir() }))
+        .child(nav(&d, "view-files", Some(&icons::FOLDER), "Files", s.tree.folders.len().to_string(), p == Pane::Files, |s| { s.pane = Pane::Files; s.open_files() }))
         .child(nav(&d, "view-hist", Some(&icons::HISTORY), "History", "git".into(), p == Pane::History, |s| { s.pane = Pane::History; s.reload_repo() }))
         .child(nav(&d, "view-machine", Some(&icons::LAPTOP), "Machine", String::new(), p == Pane::Machine, |s| { s.pane = Pane::Machine; s.reload_machine() }))
         .child(heading(&d, "ORGANIZE"))
         .child(nav(&d, "view-q", Some(&icons::QUESTIONS), "Questions", s.bundles.len().to_string(), p == Pane::Questions, |s| s.pane = Pane::Questions))
-        .child(nav(&d, "view-folders", Some(&icons::TREE), "Folders", s.tree.folders.len().to_string(), p == Pane::Folders, |s| { s.pane = Pane::Folders; s.refresh_plan() }))
         .child(nav(&d, "view-sys", Some(&icons::SYSTEM), "System", if s.status.ollama_up { "●".into() } else { "○".into() }, p == Pane::System, |s| s.pane = Pane::System))
         ;
     col().w(220.0).padding(d.gap()).gap(d.gap()).side(&d)

@@ -15,3 +15,4 @@ rune = { git = "https://github.com/anomalyco/rune", rev = "f18ead891aba2437674cd
 lifestream = { path = "../lifestream" }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 serde_json = "1"
+toml = "0.8"

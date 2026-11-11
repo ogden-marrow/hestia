@@ -7,7 +7,7 @@ use crate::questions::button;
 use rune::tok::type_;
 use rune::{col, el, row, text, El};
 
-const STEPS: usize = 4;
+const STEPS: usize = 5;
 
 fn line(s: &State, head: &str, body: &str) -> El {
     let d = s.design;
@@ -42,10 +42,23 @@ pub fn screen(s: &State) -> El {
             .child(line(s, "Everything stays here.", "Nothing leaves this computer, and Hestia never deletes a file."))),
         1 => ("Where things are", col().w_full().gap(d.pad())
             .child(line(s, "Questions", "Folders it could not place. Your answer teaches it."))
-            .child(line(s, "Folders", "The tree your files are filed into. Drag it into shape."))
+            .child(line(s, "Files", "Everything you own, grouped by what it is for, with each folder's rule and contents."))
             .child(line(s, "Time and History", "Look back at any day, or at the history of a project."))
             .child(line(s, "Machine", "Your settings and installed apps, captured so a new computer can be rebuilt."))),
         2 => {
+            let found = lifestream::home::is_home(&s.repo_dir);
+            let mut b = col().w_full().gap(d.pad());
+            if found {
+                b = b.child(line(s, "Found your home repository.", &format!("{} holds your domains, machines and applications. Hestia keeps it up to date.", crate::files::tilde(&s.repo_dir))));
+            } else {
+                b = b.child(line(s, "Everything of yours lives in one private git repository.", "Documents, pictures, machines, applications and the folder tree, with Hestia itself added as a submodule so the tool is tracked too. Pick a new folder name inside your home folder."))
+                    .child(super::field(&d, "w-home", &s.home_field, "folder, like Home", |s: &mut State| &mut s.home_field))
+                    .child(super::field(&d, "w-hestia", &s.hestia_field, "Hestia's repository address (optional until it is published)", |s: &mut State| &mut s.hestia_field))
+                    .child(button(&d, "w-create", "Create it".into(), true, |s: &mut State| s.create_home()));
+            }
+            ("Your home repository", b)
+        }
+        3 => {
             let state = crate::clipboard::extension_state();
             let on = state == "recording";
             ("Hestia Search and clipboard", col().w_full().gap(d.pad())
@@ -59,7 +72,7 @@ pub fn screen(s: &State) -> El {
             .child(line(s, "That is all.", "Your first scan runs tonight. Until then Hestia shows what it already knows."))
             .child(line(s, "Everything you chose is in Settings.", "You can run this tour again from Settings, About."))),
     };
-    if !s.msg.is_empty() && (step == 2) {
+    if !s.msg.is_empty() && (step == 2 || step == 3) {
         body = body.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink());
     }
 

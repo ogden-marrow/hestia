@@ -1,4 +1,5 @@
-//! The folder tree: where your files live, as a tree you can see, edit and reorganise. Suggested
+//! Files: where your files live, grouped by domain (documents, pictures, ...), as a tree you can see, edit and
+//! reorganise, with each folder's contents beside its rule. One screen for folders and files. Suggested
 //! folders (from the two models) appear dashed in the tree; the right side says what each folder
 //! accepts and what would land in it tonight. Nothing moves on disk without a confirmed click.
 
@@ -82,7 +83,8 @@ impl State {
     pub(crate) fn select_folder(&mut self, i: usize) {
         self.tsel = i;
         self.msg.clear();
-        if let Some(f) = self.tree.folders.get(i) {
+        if let Some(f) = self.tree.folders.get(i).cloned() {
+            self.go(super::files::home().join(&f.path));
             self.f_path = TextEdit::new(f.path.rsplit('/').next().unwrap_or(&f.path));
             self.f_kind = TextEdit::new(&csv(&f.kind));
             self.f_tag = TextEdit::new(&csv(&f.tag));
@@ -157,7 +159,6 @@ impl State {
             Ok(()) => {
                 self.recs = lifestream::load_all(&stream).unwrap_or_default();
                 self.refresh_derived();
-                self.recompute();
                 self.refresh_plan();
                 self.msg = format!("moved ~/{from} → ~/{to}, the folder and the tree together");
             }
@@ -269,7 +270,6 @@ impl State {
             Ok((n, failed)) => {
                 self.recs = lifestream::load_all(&stream).unwrap_or_default();
                 self.refresh_derived();
-                self.recompute();
                 self.refresh_plan();
                 self.msg = format!("moved {n} files{}", if failed.is_empty() { String::new() } else { format!(", {} failed", failed.len()) });
             }
@@ -320,26 +320,52 @@ pub fn panels(s: &State) -> Vec<El> {
         );
     }
     let mut tree_col = col().w_full().gap(1.0);
-    for (n, dir) in s.tree.dirs().into_iter().enumerate() {
-        let idx = s.tree.folders.iter().position(|f| f.path == dir);
-        let on = idx.is_some() && idx == Some(s.tsel);
-        let depth = dir.matches('/').count() as f32;
-        let name = dir.rsplit('/').next().unwrap_or(&dir).to_string();
-        let count = tonight.get(&dir).copied().unwrap_or(0);
-        let moving_here = s.moving.is_some();
-        let target = dir.clone();
-        tree_col = tree_col.child(
-            row().key(format!("dir-{n}")).w_full().h(d.row_h()).pl(d.item_px() + depth * 16.0).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
-                .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
-                .border(1.0, if moving_here { acc.alpha(0.45) } else { rune::Color::TRANSPARENT })
-                .on_press(move |s: &mut State| {
-                    if s.moving.is_some() { s.finish_move(&target) } else if let Some(i) = idx { s.select_folder(i) }
-                })
-                .child(rune::icon(&icons::FOLDER, d.size(16.0)).color(if idx.is_some() { acc } else { t.text_secondary }))
-                .child(text(name).font(style(&d, type_::BODY)).color(if idx.is_some() { t.text } else { t.text_secondary }).grow(1.0).shrink().min_w(0.0).truncate())
-                .child(text(idx.map(|i| summary(&s.tree.folders[i])).unwrap_or_default()).font(style(&d, type_::LABEL)).color(t.text_secondary).truncate())
-                .child(text(if count > 0 { format!("{count} tonight") } else { String::new() }).font(style(&d, type_::LABEL)).color(acc)),
-        );
+    let all_dirs = s.tree.dirs();
+    let mut shown: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // domains first, each with the folders under it; anything left over goes under "Other"
+    let mut groups: Vec<(String, String, Vec<String>)> = Vec::new();
+    for dm in s.domains.iter().filter(|x| !x.folder.is_empty()) {
+        let list: Vec<String> = all_dirs.iter().filter(|p| **p == dm.folder || p.starts_with(&format!("{}/", dm.folder))).cloned().collect();
+        groups.push((dm.name.clone(), dm.description.clone(), list));
+    }
+    let rest: Vec<String> = all_dirs.iter().filter(|p| !groups.iter().any(|g| g.2.contains(p))).cloned().collect();
+    if !rest.is_empty() {
+        groups.push(("Other".into(), "Folders that belong to no domain yet.".into(), rest));
+    }
+    let mut n = 0usize;
+    for (gname, gdesc, list) in groups {
+        if list.is_empty() {
+            continue;
+        }
+        tree_col = tree_col.child(col().w_full().px(d.item_px()).pt(d.pad()).pb(d.gap() * 0.5).gap(2.0)
+            .child(text(gname.to_uppercase()).font(style(&d, type_::SECTION)).color(t.text_secondary))
+            .child(text(gdesc).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
+        for dir in list {
+            if !shown.insert(dir.clone()) {
+                continue;
+            }
+            n += 1;
+            let idx = s.tree.folders.iter().position(|f| f.path == dir);
+            let on = idx.is_some() && idx == Some(s.tsel);
+            let top = dir.split('/').next().unwrap_or("");
+            let depth = dir.matches('/').count().saturating_sub(if top.is_empty() { 0 } else { usize::from(s.domains.iter().any(|x| x.folder == top)) * 0 }) as f32;
+            let name = dir.rsplit('/').next().unwrap_or(&dir).to_string();
+            let count = tonight.get(&dir).copied().unwrap_or(0);
+            let moving_here = s.moving.is_some();
+            let target = dir.clone();
+            tree_col = tree_col.child(
+                row().key(format!("dir-{n}")).w_full().h(d.row_h()).pl(d.item_px() + depth * 16.0).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
+                    .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
+                    .border(1.0, if moving_here { acc.alpha(0.45) } else { rune::Color::TRANSPARENT })
+                    .on_press(move |s: &mut State| {
+                        if s.moving.is_some() { s.finish_move(&target) } else if let Some(i) = idx { s.select_folder(i) }
+                    })
+                    .child(rune::icon(&icons::FOLDER, d.size(16.0)).color(if idx.is_some() { acc } else { t.text_secondary }))
+                    .child(text(name).font(style(&d, type_::BODY)).color(if idx.is_some() { t.text } else { t.text_secondary }).grow(1.0).shrink().min_w(0.0).truncate())
+                    .child(text(idx.map(|i| summary(&s.tree.folders[i])).unwrap_or_default()).font(style(&d, type_::LABEL)).color(t.text_secondary).truncate())
+                    .child(text(if count > 0 { format!("{count} tonight") } else { String::new() }).font(style(&d, type_::LABEL)).color(acc)),
+            );
+        }
     }
     // suggested folders: dashed, one click to accept
     let sugg = suggestions(s);
@@ -381,8 +407,8 @@ pub fn panels(s: &State) -> Vec<El> {
 
     let mut center = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(col().w_full().px(d.item_px()).py(d.gap() * 0.5).gap(d.gap())
-            .child(text("Folders").font(style(&d, type_::TITLE)).color(t.text))
-            .child(text("Where your files live. Files loose in an inbox are filed by this tree; nothing inside a project or a curated folder is taken apart.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
+            .child(text("Files").font(style(&d, type_::TITLE)).color(t.text))
+            .child(text("Everything you own, grouped by what it is for. Pick a folder to see its rule and what is inside. Files loose in an inbox are filed by this tree; nothing inside a project or a curated folder is taken apart.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
             .child(heading(&d, "INBOXES: where loose files get filed (click to remove)"))
             .child(inbox)
             .child(field(&d, "inbox-add", &s.f_inbox, "add an inbox folder, like Downloads ↵", |s: &mut State| &mut s.f_inbox).on_submit(|s: &mut State, _: &mut Tx| s.add_inbox())));
@@ -413,6 +439,7 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(button(&d, "f-move", "Move to another folder…".into(), false, |s: &mut State| s.moving = Some(s.tsel)))
                 .child(button(&d, "f-delete", "Remove from tree".into(), false, |s: &mut State| s.delete_folder()))));
     }
+    body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "CONTENTS")).child(super::contents::list(s)));
     body = body.child(col().w_full().gap(d.gap())
         .child(heading(&d, "ADD A FOLDER"))
         .child(field(&d, "f-new", &s.f_new, "Documents/Taxes ↵", |s: &mut State| &mut s.f_new).on_submit(|s: &mut State, _: &mut Tx| s.add_folder())));
@@ -469,7 +496,7 @@ pub fn panels(s: &State) -> Vec<El> {
     if !s.msg.is_empty() {
         body = body.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink());
     }
-    let detail = col().w(420.0).padding(d.pad()).gap(d.pad()).panel(&d)
+    let detail = col().w(460.0).padding(d.pad()).gap(d.pad()).panel(&d)
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body));
     vec![center, detail]
 }

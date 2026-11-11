@@ -69,6 +69,9 @@ pub struct Settings {
     // keep the machine capture current: look every N minutes (when quiet) and commit changes
     pub watch_on: bool,
     pub watch_mins: u32,
+    // where the home repository lives, relative to the home folder ("" = not chosen), and Hestia's public repository
+    pub home: String,
+    pub hestia_repo: String,
 }
 
 impl Default for Settings {
@@ -76,7 +79,7 @@ impl Default for Settings {
         Settings {
             scheme: Scheme::Auto, density: Density::Cozy, text: 1.0, accent: Accent::Blue,
             scan_on: true, scan_time: (2, 30), roots: ["Documents", "Downloads", "Pictures", "Videos"].map(String::from).to_vec(),
-            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: true, clipboard_on: true, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15,
+            brief_on: true, brief_time: (7, 30), tray: true, hidden: false, siblings: true, clipboard_on: true, clipboard_max: 100, clipboard_days: 7, dismissed: vec![], welcomed: false, watch_on: true, watch_mins: 15, home: String::new(), hestia_repo: String::new(),
         }
     }
 }
@@ -120,6 +123,8 @@ impl Settings {
                 "clipboard_max" => s.clipboard_max = v.parse::<u32>().map(|n| n.clamp(10, 1000)).unwrap_or(100),
                 "clipboard_days" => s.clipboard_days = v.parse::<u32>().map(|n| n.clamp(1, 365)).unwrap_or(7),
                 "welcomed" => s.welcomed = v == "yes",
+                "home" => s.home = v.trim().to_string(),
+                "hestia_repo" => s.hestia_repo = v.trim().to_string(),
                 "watch" => s.watch_on = v != "off",
                 "watch_mins" => s.watch_mins = match v.parse::<u32>() { Ok(5) => 5, Ok(60) => 60, _ => 15 },
                 "dismissed" => s.dismissed = v.split(',').map(str::trim).filter(|x| !x.is_empty()).map(String::from).collect(),
@@ -132,12 +137,12 @@ impl Settings {
     pub fn render(&self) -> String {
         let onoff = |b: bool| if b { "on" } else { "off" };
         format!(
-            "scheme={}\ndensity={}\ntext={}\naccent={}\nscan={}\nscan_time={:02}:{:02}\nroots={}\nbrief={}\nbrief_time={:02}:{:02}\ntray={}\nhidden={}\nsiblings={}\nclipboard={}\nclipboard_max={}\nclipboard_days={}\ndismissed={}\nwelcomed={}\nwatch={}\nwatch_mins={}\n",
+            "scheme={}\ndensity={}\ntext={}\naccent={}\nscan={}\nscan_time={:02}:{:02}\nroots={}\nbrief={}\nbrief_time={:02}:{:02}\ntray={}\nhidden={}\nsiblings={}\nclipboard={}\nclipboard_max={}\nclipboard_days={}\ndismissed={}\nwelcomed={}\nwatch={}\nwatch_mins={}\nhome={}\nhestia_repo={}\n",
             match self.scheme { Scheme::Auto => "auto", Scheme::Light => "light", Scheme::Dark => "dark" },
             match self.density { Density::Compact => "compact", Density::Cozy => "cozy", Density::Airy => "airy" },
             self.text, self.accent.name(), onoff(self.scan_on), self.scan_time.0, self.scan_time.1, self.roots.join(","),
             onoff(self.brief_on), self.brief_time.0, self.brief_time.1, onoff(self.tray),
-            if self.hidden { "yes" } else { "no" }, if self.siblings { "yes" } else { "no" }, onoff(self.clipboard_on), self.clipboard_max, self.clipboard_days, self.dismissed.join(","), if self.welcomed { "yes" } else { "no" }, onoff(self.watch_on), self.watch_mins,
+            if self.hidden { "yes" } else { "no" }, if self.siblings { "yes" } else { "no" }, onoff(self.clipboard_on), self.clipboard_max, self.clipboard_days, self.dismissed.join(","), if self.welcomed { "yes" } else { "no" }, onoff(self.watch_on), self.watch_mins, self.home, self.hestia_repo,
         )
     }
 
@@ -167,7 +172,7 @@ mod tests {
     fn settings_round_trip_and_tolerate_junk() {
         let s = Settings {
             scheme: Scheme::Dark, density: Density::Airy, text: 1.1, accent: Accent::Orange, scan_on: false, scan_time: (3, 15),
-            roots: vec!["Documents".into(), "Music/Albums".into()], brief_on: false, brief_time: (6, 45), tray: false, hidden: true, siblings: false, clipboard_on: false, clipboard_max: 200, clipboard_days: 30, dismissed: vec!["software/app-bundle".into()], welcomed: true, watch_on: false, watch_mins: 60,
+            roots: vec!["Documents".into(), "Music/Albums".into()], brief_on: false, brief_time: (6, 45), tray: false, hidden: true, siblings: false, clipboard_on: false, clipboard_max: 200, clipboard_days: 30, dismissed: vec!["software/app-bundle".into()], welcomed: true, watch_on: false, watch_mins: 60, home: "Home".into(), hestia_repo: "https://example.org/hestia".into(),
         };
         assert_eq!(Settings::parse(&s.render()), s);
         assert_eq!(Settings::parse("nonsense\naccent=???\ntext=abc\nscan_time=99:99\n"), Settings::default());

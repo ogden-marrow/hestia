@@ -73,7 +73,7 @@ pub fn panel(s: &State) -> El {
     let commit = s.commits.iter().find(|c| c.hash != crate::repo::WORKTREE).map(|c| format!("{} · {}", c.subject, c.when)).unwrap_or_else(|| "no commits".into());
     let tiles = row().w_full().gap(d.pad())
         .child(tile(&d, "tile-time", &icons::TIME, "Time", day, |s| s.pane = Pane::Time))
-        .child(tile(&d, "tile-files", &icons::FOLDER, "Files", format!("{} items in your home folder, kept current", s.entries.len()), |s| { s.pane = Pane::Files; s.reload_dir() }))
+        .child(tile(&d, "tile-files", &icons::FOLDER, "Files", format!("{} folders in the tree", s.tree.folders.len()), |s| { s.pane = Pane::Files; s.open_files() }))
         .child(tile(&d, "tile-history", &icons::HISTORY, "History", commit, |s| { s.pane = Pane::History; s.reload_repo() }))
         .child(tile(&d, "tile-ask", &icons::ASK, "Search", "apps, files, clipboard and Hestia in one box".into(), |s| { s.pane = Pane::Ask; s.ask.focused = true }));
 

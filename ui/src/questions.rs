@@ -203,7 +203,6 @@ pub fn panels(s: &State) -> Vec<El> {
         let root = b.root.clone();
         body = body.child(row().w_full().gap(d.gap()).child(button(&d, &format!("skip-{}", b.root), "Skip for now".into(), false, move |s: &mut State| {
             s.skipped.push(root.clone());
-            s.recompute();
         })));
         detail = detail.child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body));
     } else {

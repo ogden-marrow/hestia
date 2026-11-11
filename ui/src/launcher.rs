@@ -126,15 +126,15 @@ pub struct Hit {
     pub sub: String,
 }
 
-pub const SCREENS: [(&str, &str); 10] = [
+pub const SCREENS: [(&str, &str); 9] = [
     ("Today", "today"), ("Time", "time"), ("Files", "files"), ("History", "history"), ("Machine", "machine"),
-    ("Questions", "questions"), ("Folders", "folders"), ("System", "system"), ("Settings", "settings"), ("Search", "search"),
+    ("Questions", "questions"), ("System", "system"), ("Settings", "settings"), ("Search", "search"),
 ];
 
 pub fn pane_of(key: &str) -> Option<Pane> {
     Some(match key {
         "today" => Pane::Today, "time" => Pane::Time, "files" => Pane::Files, "history" => Pane::History, "machine" => Pane::Machine,
-        "questions" => Pane::Questions, "folders" => Pane::Folders, "system" => Pane::System, "settings" => Pane::Settings, "search" => Pane::Ask,
+        "questions" => Pane::Questions, "system" => Pane::System, "settings" => Pane::Settings, "search" => Pane::Ask,
         _ => return None,
     })
 }
@@ -238,10 +238,9 @@ impl State {
                 if let Some(p) = pane_of(key) {
                     self.pane = p;
                     match p {
-                        Pane::Files => self.reload_dir(),
+                        Pane::Files => self.open_files(),
                         Pane::History => self.reload_repo(),
                         Pane::Machine => self.reload_machine(),
-                        Pane::Folders => self.refresh_plan(),
                         _ => {}
                     }
                 }

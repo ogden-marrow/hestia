@@ -6,9 +6,9 @@ use crate::settings::{root_ok, Accent, Scheme, Settings};
 use rune::tok::{self, type_};
 use rune::{col, row, text, El, ScrollSpec, Tx};
 
-const TABS: [&str; 7] = ["Appearance", "General", "Launcher", "Scanning", "Questions", "Files", "About"];
+const TABS: [&str; 8] = ["Appearance", "General", "Launcher", "Scanning", "Questions", "Files", "Domains", "About"];
 
-fn segmented<F: Fn(&mut State, usize) + Clone + 'static>(d: &Design, key: &str, labels: &[&str], on: usize, f: F) -> El {
+pub(crate) fn segmented<F: Fn(&mut State, usize) + Clone + 'static>(d: &Design, key: &str, labels: &[&str], on: usize, f: F) -> El {
     let t = d.theme();
     let acc = d.accent_color();
     let mut r = row().gap(0.0).radius(d.r(tok::radius::SM)).border(1.0, t.card_border);
@@ -24,7 +24,7 @@ fn segmented<F: Fn(&mut State, usize) + Clone + 'static>(d: &Design, key: &str, 
     r
 }
 
-fn setting(d: &Design, title: &str, desc: &str, control: El) -> El {
+pub(crate) fn setting(d: &Design, title: &str, desc: &str, control: El) -> El {
     let t = d.theme();
     row().w_full().gap(d.pad()).center_y().py(d.gap()).border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
         .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
@@ -76,7 +76,7 @@ fn clock<F: Fn(&mut State, i32, i32) + Clone + 'static>(d: &Design, key: &str, (
         .child(step("+", format!("{key}-m+"), 0, 5, f))
 }
 
-fn on_off<F: Fn(&mut State, bool) + Clone + 'static>(d: &Design, key: &str, on: bool, f: F) -> El {
+pub(crate) fn on_off<F: Fn(&mut State, bool) + Clone + 'static>(d: &Design, key: &str, on: bool, f: F) -> El {
     segmented(d, key, &["Off", "On"], on as usize, move |s, i| f(s, i == 1))
 }
 
@@ -104,7 +104,7 @@ pub fn panels(s: &State) -> Vec<El> {
         tabs = tabs.child(
             row().key(format!("tab-{i}")).h(d.row_h()).px(d.item_px()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { acc } else { rune::Color::TRANSPARENT })
-                .on_press(move |s: &mut State| s.stab = i)
+                .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) } })
                 .child(text(name.to_string()).font(style(&d, type_::LABEL)).color(if on { d.on_accent() } else { t.text })),
         );
     }
@@ -162,7 +162,7 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(setting(&d, "Scan time", "When the overnight scan starts. Its status and a Scan now button are on the System screen.",
                     clock(&d, "scan-time", s.settings.scan_time, |s, dh, dm| s.change_schedule(|st| st.scan_time = bump(st.scan_time, dh, dm)))))
                 .child(col().w_full().py(d.gap()).gap(d.gap())
-                    .child(text("Folders Hestia reads (click one to remove it). Inboxes in Folders must be inside these.").font(style(&d, type_::BODY)).color(t.text))
+                    .child(text("Folders Hestia reads (click one to remove it). Inboxes in Files must be inside these.").font(style(&d, type_::BODY)).color(t.text))
                     .child(chips)
                     .child(field(&d, "root-add", &s.f_root, "add a folder under your home folder, like Music ↵", |s: &mut State| &mut s.f_root).on_submit(|s: &mut State, _: &mut Tx| add_root(s))));
         }
@@ -173,6 +173,9 @@ pub fn panels(s: &State) -> Vec<El> {
         5 => {
             body = body.child(setting(&d, "Show hidden files", "Files whose names start with a dot, like .config.",
                 on_off(&d, "hidden", s.settings.hidden, |s, on| s.change_settings(|st| st.hidden = on))));
+        }
+        6 => {
+            body = body.child(crate::domains_ui::tab(s));
         }
         2 => {
             let state = crate::clipboard::extension_state();

@@ -3,7 +3,8 @@
 
 mod clipboard;
 mod design;
-mod explorer;
+mod contents;
+mod domains_ui;
 mod files;
 mod folders;
 mod history;
@@ -26,11 +27,10 @@ use settings::{Scheme, Settings};
 use lifestream::bundle::{self, Bundle, Cached};
 use repo::{Change, Commit, DiffLine};
 use lifestream::semantic;
-use lifestream::query::{self, Query};
-use lifestream::{human, load_all, stream_dir, Record};
+use lifestream::query::Query;
+use lifestream::{load_all, stream_dir, Record};
 use rune::tok::{self, type_, TextStyle};
-use rune::{AppSpec, Color, Cx, El, GrowthSpec, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, oklch, row, text, text_input};
-use std::borrow::Cow;
+use rune::{AppSpec, Color, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, oklch, row, text, text_input};
 use lifestream::system::{self, Status};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -39,14 +39,12 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Pane {
     Today,
-    Stream,
     Questions,
     System,
     Ask,
     History,
     Files,
     Time,
-    Folders,
     Machine,
     Settings,
     Welcome,
@@ -62,11 +60,17 @@ struct Fresh {
 struct State {
     design: Design,
     recs: Vec<Record>,
-    views: Vec<Query>,
-    view: usize,       // 0 = everything
-    visible: Vec<usize>, // indexes into recs
-    counts: Vec<usize>,
-    sel: usize,
+    total: usize, // live files in the stream
+    home_field: TextEdit,
+    hestia_field: TextEdit,
+    dom_sel: usize,
+    dom_edit: lifestream::domains::Domain,
+    d_name: TextEdit,
+    d_desc: TextEdit,
+    d_kinds: TextEdit,
+    d_folder: TextEdit,
+    d_new: TextEdit,
+    domains: Vec<lifestream::domains::Domain>,
     stream: Option<PathBuf>, // None in tests: nothing is written
     ask: TextEdit,
     teach: TextEdit,
@@ -138,8 +142,7 @@ impl Default for State {
     fn default() -> Self {
         let stream = stream_dir(None).ok();
         let recs = stream.as_deref().and_then(|d| load_all(d).ok()).unwrap_or_default();
-        let views = query::load_views(&home_repo().join("views")).unwrap_or_default();
-        let mut s = State::with(recs, views, stream);
+        let mut s = State::with(recs, stream);
         s.settings = Settings::load();
         s.desktop = desktop();
         s.restyle();
@@ -165,6 +168,12 @@ impl Default for State {
 fn home_repo() -> PathBuf {
     if let Some(d) = std::env::var_os("HESTIA_HOME") {
         return PathBuf::from(d);
+    }
+    if !cfg!(test) {
+        let chosen = Settings::load().home;
+        if !chosen.is_empty() {
+            return files::home().join(chosen);
+        }
     }
     let guess = files::home().join("Home");
     if guess.join("manifest/rules.toml").exists() { guess } else { std::env::current_dir().unwrap_or(guess) }
@@ -218,12 +227,12 @@ fn open_folder(src: &str) {
 }
 
 impl State {
-    fn with(recs: Vec<Record>, views: Vec<Query>, stream: Option<PathBuf>) -> State {
+    fn with(recs: Vec<Record>, stream: Option<PathBuf>) -> State {
         let stream_path = stream.clone().unwrap_or_default();
         let dir = stream.as_deref().and_then(|d| d.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
-            design: Design::default(), recs, views, view: 0, visible: vec![], counts: vec![], sel: 0, stream,
+            design: Design::default(), recs, total: 0, home_field: TextEdit::new("Home"), hestia_field: TextEdit::new(""), dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
             ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, close_after: false, wstep: 0, launched_ask: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false,
@@ -236,7 +245,6 @@ impl State {
         s.refresh_derived();
         s.commits = repo::log(&s.repo_dir, 1); // just the newest, for the Today tile; History loads the rest
         s.reload_dir();
-        s.recompute();
         s
     }
     /// Everything computed from the records. Run when the records change, not on every keystroke.
@@ -252,9 +260,7 @@ impl State {
             .filter_map(|(e, k)| k.into_iter().max_by_key(|x| x.1).filter(|x| x.1 >= 3).map(|best| (e, best)))
             .collect();
         let live = |r: &Record| r.status != "gone";
-        self.counts = std::iter::once(self.recs.iter().filter(|r| live(r)).count())
-            .chain(self.views.iter().map(|v| self.recs.iter().filter(|r| v.matches(r)).count()))
-            .collect();
+        self.total = self.recs.iter().filter(|r| live(r)).count();
         self.bundles = bundle::bundles(&self.recs);
         self.order_bundles();
         self.overnight = today::overnight(&self.recs);
@@ -300,23 +306,9 @@ impl State {
                 self.refresh_derived();
                 self.teach.clear();
                 self.msg = format!("{} files in {} folder{} → {}", ids.len(), folders, if folders == 1 { "" } else { "s" }, kind.to_lowercase());
-                self.recompute();
             }
             Err(e) => self.msg = format!("not saved: {e}"),
         }
-    }
-    fn recompute(&mut self) {
-        let live = |r: &Record| r.status != "gone";
-        let mut idx: Vec<usize> = (0..self.recs.len())
-            .filter(|&i| {
-                let r = &self.recs[i];
-                if self.view == 0 { live(r) } else { self.views[self.view - 1].matches(r) }
-            })
-            .collect();
-        idx.sort_by(|&a, &b| self.recs[b].mtime.cmp(&self.recs[a].mtime));
-        self.visible = idx;
-        self.sel = self.sel.min(self.visible.len().saturating_sub(1));
-        self.order_bundles();
     }
     /// Ask: files whose names, kinds or tags match your words, and files closest in meaning, together.
     /// Files that match both come first.
@@ -384,6 +376,41 @@ impl State {
         self.esel = 0;
         self.reload_dir();
     }
+    /// Open the Files screen: the plan for tonight, and the folder you were last in.
+    /// First-run: make the home repository in the folder the tour asked about, and start using it.
+    fn create_home(&mut self) {
+        let rel = self.home_field.text.trim().trim_start_matches("~/").trim_matches('/').to_string();
+        if rel.is_empty() || rel.contains("..") {
+            self.msg = "choose a folder name inside your home folder, like Home".into();
+            return;
+        }
+        let dir = files::home().join(&rel);
+        let url = self.hestia_field.text.trim().to_string();
+        let today = chrono::Local::now().format("%F").to_string();
+        match lifestream::home::create(&dir, Some(&url), &today) {
+            Ok(steps) => {
+                self.change_settings(|st| { st.home = rel.clone(); st.hestia_repo = url.clone(); });
+                self.repo_dir = dir.clone();
+                self.tree_path = dir.join("tree.toml");
+                self.tree = lifestream::tree::Tree::load(&self.tree_path).unwrap_or_default();
+                self.reload_domains();
+                self.msg = steps.join(" · ");
+            }
+            Err(e) => self.msg = format!("{e:#}"),
+        }
+    }
+    fn open_files(&mut self) {
+        self.refresh_plan();
+        self.reload_dir();
+    }
+    /// Go to a real folder; if the tree knows it, select it so its rule shows beside its contents.
+    fn go_folder(&mut self, p: PathBuf) {
+        let rel = p.strip_prefix(files::home()).ok().map(|r| r.to_string_lossy().into_owned());
+        self.go(p);
+        if let Some(i) = rel.and_then(|r| self.tree.folders.iter().position(|f| f.path == r)) {
+            self.select_folder(i);
+        }
+    }
     fn new_note(&mut self) {
         match files::new_note(&self.cwd) {
             Ok(p) => {
@@ -394,18 +421,12 @@ impl State {
             Err(e) => self.msg = format!("could not create a note: {e}"),
         }
     }
-    fn view_name(&self, i: usize) -> String {
-        if i == 0 { "All files".into() } else { self.views[i - 1].name.clone().unwrap_or_default() }
-    }
 }
 
 fn style(d: &Design, base: TextStyle) -> TextStyle {
     d.font(base)
 }
 
-fn base(p: &str) -> &str {
-    p.rsplit('/').next().unwrap_or(p)
-}
 
 fn view(s: &State, _: &mut Cx<State>) -> El {
     let d = s.design;
@@ -416,9 +437,9 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     // ---- header: the morning briefing
     let needs = s.recs.iter().filter(|r| r.status == "pending").count();
     let title = match s.pane {
-        Pane::Today => "Today", Pane::Stream => "Files · collection", Pane::Questions => "Questions", Pane::System => "System",
+        Pane::Today => "Today", Pane::Questions => "Questions", Pane::System => "System",
         Pane::Ask => "Search", Pane::History => "History", Pane::Files => "Files", Pane::Time => "Time",
-        Pane::Folders => "Folders", Pane::Machine => "Machine", Pane::Settings => "Settings", Pane::Welcome => "Welcome",
+        Pane::Machine => "Machine", Pane::Settings => "Settings", Pane::Welcome => "Welcome",
     };
     let header = row().w_full().h(d.size(28.0)).px(pad).center_y().fill(t.card)
         .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
@@ -433,13 +454,11 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
 
     // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"
     let info = match s.pane {
-        Pane::Today => format!("{} files in the stream · {} folders waiting", s.counts.first().copied().unwrap_or(0), s.bundles.len()),
-        Pane::Stream => format!("{} files", s.visible.len()),
+        Pane::Today => format!("{} files in the stream · {} folders waiting", s.total, s.bundles.len()),
         Pane::Questions => format!("{} folders · {} files", s.bundles.len(), s.bundles.iter().map(|b| b.ids.len()).sum::<usize>()),
-        Pane::Files => format!("{} items · {}", s.entries.len(), files::tilde(&s.cwd)),
+        Pane::Files => format!("{} folders in the tree · {} inboxes · {}", s.tree.folders.len(), s.tree.inbox.len(), files::tilde(&s.cwd)),
         Pane::History => s.repo_status.clone(),
         Pane::Time => format!("{} days with files", s.days.len()),
-        Pane::Folders => format!("{} folders in the tree · {} inboxes", s.tree.folders.len(), s.tree.inbox.len()),
         Pane::Machine => format!("{} differences from the capture", s.mach.iter().map(|c| c.drift()).sum::<usize>()),
         Pane::System => format!("models {}", if s.status.ollama_up { "ready" } else { "off" }),
         Pane::Ask => "apps, files, clipboard and Hestia, on this computer".into(),
@@ -453,51 +472,6 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
 
     let views = sidebar::panel(s);
 
-    // ---- the stream
-    let rows = col()
-        .key("stream")
-        .w_full()
-        .growth(GrowthSpec::default())
-        .virtual_rows(
-            s.visible.len(),
-            d.row_h(),
-            |s: &State, i| Cow::Owned(s.recs[s.visible[i]].id.clone()),
-            |s: &State, i| {
-                let d = s.design;
-                let t = d.theme();
-                let r = &s.recs[s.visible[i]];
-                let on = i == s.sel;
-                let src = r.sources.first().or(r.was.first()).map(|x| x.as_str()).unwrap_or("");
-                row().h(d.row_h()).px(d.gap()).gap(d.pad()).center_y().radius(d.r(tok::radius::SM))
-                    .fill(if on { t.control_off } else { t.card })
-                    .on_press(move |s: &mut State| s.sel = i)
-                    .child(text(r.mtime.get(..10).unwrap_or("").to_string()).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).w(d.size(78.0)))
-                    .child(text(human(r.size)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).w(d.size(64.0)))
-                    .child(text(r.kind.clone()).font(style(&d, type_::LABEL)).color(if r.status == "pending" { d.accent_color() } else { t.text_secondary }).w(d.size(140.0)))
-                    .child(text(base(src).to_string()).font(style(&d, type_::BODY)).color(t.text).grow(1.0))
-            },
-        );
-    let rows = col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(rows);
-    let stream = col().padding(d.gap()).grow(1.0).panel(&d)
-        .child(text(format!("{} · {} files{}", s.view_name(s.view), s.visible.len(), if s.msg.is_empty() { String::new() } else { format!(" · {}", s.msg) })).font(style(&d, type_::SECTION)).color(t.text_secondary))
-        .child(rows);
-
-    // ---- detail
-    let mut detail = col().w(300.0).padding(pad).gap(d.gap()).panel(&d);
-    if let Some(&i) = s.visible.get(s.sel) {
-        let r = &s.recs[i];
-        detail = detail
-            .child(text(base(r.sources.first().or(r.was.first()).map(|x| x.as_str()).unwrap_or("")).to_string()).font(style(&d, type_::TITLE)).color(t.text))
-            .child(kv(&d, "kind", &r.kind))
-            .child(kv(&d, "size", &human(r.size)))
-            .child(kv(&d, "filed by", &format!("{} · {}", r.by.tier, r.by.name)))
-            .child(kv(&d, "status", &r.status))
-            .child(kv(&d, "tags", &r.tags.join("  ")));
-        for p in r.sources.iter().take(6) {
-            detail = detail.child(text(p.clone()).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary));
-        }
-    }
-
     if s.pane == Pane::Welcome {
         return welcome::screen(s);
     }
@@ -505,16 +479,14 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         return col().w_full().h_full().child(launcher::panel(s));
     }
     let panes: Vec<El> = match s.pane {
-        Pane::Stream => vec![explorer::left(s), stream, detail],
         Pane::Questions => questions::panels(s),
         Pane::System => vec![system_panel(s)],
         Pane::Today => vec![today::panel(s)],
         Pane::Settings => prefs::panels(s),
-        Pane::Folders => folders::panels(s),
         Pane::Machine => machine::panels(s),
         Pane::Ask => vec![launcher::panel(s)],
         Pane::History => history::panels(s),
-        Pane::Files => explorer::panels(s),
+        Pane::Files => folders::panels(s),
         Pane::Time => vec![timeview::panel(s)],
         Pane::Welcome => vec![],
     };
@@ -687,7 +659,7 @@ fn scene(s: &mut State, pane: Pane) {
     match pane {
         Pane::System | Pane::Settings => s.status = system::gather(&s.recs, s.stream.as_deref().unwrap_or(std::path::Path::new(""))),
         Pane::History => s.reload_repo(),
-        Pane::Folders => s.refresh_plan(),
+        Pane::Files => s.open_files(),
         Pane::Machine => s.reload_machine(),
         Pane::Ask => { s.launched_ask = true; s.ask.text = "fi".into(); for a in s.apps.iter().take(40) { let _ = s.icons.app_icon(&a.path, 30.0).wait(); } }
         _ => {}
@@ -709,20 +681,20 @@ fn main() {
     let spec = AppSpec::<State> {
         scenes: &[
             ("today", |s| scene(s, Pane::Today)),
-            ("stream", |s| scene(s, Pane::Stream)),
             ("questions", |s| scene(s, Pane::Questions)),
             ("time", |s| scene(s, Pane::Time)),
             ("files", |s| scene(s, Pane::Files)),
             ("history", |s| scene(s, Pane::History)),
             ("system", |s| scene(s, Pane::System)),
             ("ask", |s| scene(s, Pane::Ask)),
-            ("folders", |s| scene(s, Pane::Folders)),
             ("machine", |s| { scene(s, Pane::Machine); s.reload_machine() }),
             ("welcome", |s| scene(s, Pane::Welcome)),
-            ("welcome-key", |s| { s.wstep = 2; scene(s, Pane::Welcome) }),
+            ("welcome-home", |s| { s.wstep = 2; s.repo_dir = PathBuf::from("/nonexistent/none"); scene(s, Pane::Welcome) }),
+            ("welcome-key", |s| { s.wstep = 3; scene(s, Pane::Welcome) }),
             ("settings", |s| scene(s, Pane::Settings)),
             ("settings-scanning", |s| { s.stab = 2; scene(s, Pane::Settings) }),
             ("settings-general", |s| { s.stab = 1; scene(s, Pane::Settings) }),
+            ("settings-domains", |s| { s.stab = 6; s.select_domain(0); scene(s, Pane::Settings) }),
             ("light-today", |s| { s.settings.scheme = Scheme::Light; scene(s, Pane::Today) }),
             ("light-questions", |s| { s.settings.scheme = Scheme::Light; scene(s, Pane::Questions) }),
             ("time-compare", |s| { s.dsel = 40; s.compare = true; scene(s, Pane::Time) }),
@@ -788,7 +760,7 @@ mod tests {
         let stream = d.join("stream");
         let recs = vec![rec("a", "~/Downloads/App/x/1.dat"), rec("b", "~/Downloads/App/x/2.dat"), rec("c", "~/Other/y/3.dat")];
         lifestream::write_all(&stream, &recs).unwrap();
-        let mut s = State::with(recs, vec![], Some(stream.clone()));
+        let mut s = State::with(recs, Some(stream.clone()));
         assert_eq!(s.bundles.len(), 2);
         s.pane = Pane::Questions;
         s.answer("software/app-bundle", &[]); // the biggest folder is selected first
@@ -802,7 +774,7 @@ mod tests {
     #[test]
     fn the_questions_row_opens_the_queue() {
         let recs = vec![rec("a", "~/Downloads/App/x/1.dat")];
-        let mut rt = Runtime::new(State::with(recs, vec![], None), view, (1280.0, 760.0), Env { system_dark: true, scale: 1.0 });
+        let mut rt = Runtime::new(State::with(recs, None), view, (1280.0, 760.0), Env { system_dark: true, scale: 1.0 });
         rt.frame(0.0);
         let (x, y) = rt.find("view-q").unwrap();
         rt.pointer_down(x, y);
@@ -821,7 +793,7 @@ mod look_tests {
 
     #[test]
     fn choosing_an_accent_in_settings_restyles_the_whole_app() {
-        let mut rt = Runtime::new(State::with(vec![], vec![], None), view, (1280.0, 760.0), Env { system_dark: true, scale: 1.0 });
+        let mut rt = Runtime::new(State::with(vec![], None), view, (1280.0, 760.0), Env { system_dark: true, scale: 1.0 });
         rt.frame(0.0);
         let before = rt.state.design.accent.r.to_bits();
         let click = |rt: &mut Runtime<State>, key: &str| {
@@ -844,7 +816,7 @@ mod today_tests {
 
     #[test]
     fn it_opens_on_today_and_the_tiles_lead_somewhere() {
-        let mut rt = Runtime::new(State::with(vec![], vec![], None), view, (1280.0, 800.0), Env { system_dark: true, scale: 1.0 });
+        let mut rt = Runtime::new(State::with(vec![], None), view, (1280.0, 800.0), Env { system_dark: true, scale: 1.0 });
         rt.frame(0.0);
         assert_eq!(rt.state.pane, Pane::Today);
         let (x, y) = rt.find("tile-time").expect("the time tile is on the Today screen");
@@ -867,7 +839,7 @@ mod perf {
         let mut s = State::default();
         eprintln!("State::default            {:>6.1} ms ({} records)", t.elapsed().as_secs_f64() * 1e3, s.recs.len());
         let t = std::time::Instant::now();
-        for _ in 0..5 { s.recompute(); }
+        for _ in 0..5 { s.order_bundles(); }
         eprintln!("recompute (x1)            {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3 / 5.0);
         let t = std::time::Instant::now();
         s.reload_repo();
