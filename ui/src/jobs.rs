@@ -20,6 +20,8 @@ pub struct Jobs {
 
 impl Jobs {
     pub fn set_waker(&mut self, w: rune::Waker) { self.wake = Some(w); }
+    /// A handle other threads use to wake the UI when they have news (streamed engine events).
+    pub fn waker(&self) -> Option<rune::Waker> { self.wake.clone() }
     pub fn any(&self) -> bool { !self.running.is_empty() }
     pub fn running(&self, key: &str) -> bool { self.running.contains(&key) }
 
