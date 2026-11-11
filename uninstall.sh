@@ -18,6 +18,7 @@ systemctl --user daemon-reload
 
 pkill -x hestia 2>/dev/null; pkill -x hestia-tray 2>/dev/null
 rm -f "$prefix/bin/hestia" "$prefix/bin/hestia-tray" "$prefix/bin/lifestream"
+rm -rf "$prefix/libexec/hestia"
 rm -f "$share/applications/app.hestia.Hestia.desktop" "$share/metainfo/app.hestia.Hestia.metainfo.xml"
 rm -f "$share"/icons/hicolor/*/apps/app.hestia.Hestia*.{svg,png}
 gtk-update-icon-cache -q -f -t "$share/icons/hicolor" 2>/dev/null

@@ -49,16 +49,20 @@ glib-compile-schemas "$share/gnome-shell/extensions/hestia-clipboard@hestia.app/
 mkdir -p "$HOME/.config/environment.d"
 printf 'HESTIA_HOME=%s\n' "$home_repo" > "$HOME/.config/environment.d/hestia.conf"
 
+# the machine capture scripts ship with Hestia, never from the home repository
+libexec="$prefix/libexec/hestia"
+rm -rf "$libexec"; mkdir -p "$libexec"
+cp "$pk"/libexec/* "$libexec/" && chmod +x "$libexec"/*.sh
+
 # systemd user units: overnight scan (~02:30), morning notification (07:30), machine watch
 unit="$HOME/.config/systemd/user"
 mkdir -p "$unit"
 for f in "$pk"/systemd/*; do
-  sed -e "s|@HOME_REPO@|$home_repo|g" -e "s|%h/\.local/bin|${prefix/#"$HOME"/%h}/bin|g" "$f" > "$unit/$(basename "$f")"
+  sed -e "s|@HOME_REPO@|$home_repo|g" -e "s|@LIBEXEC@|$libexec|g" -e "s|%h/\.local/bin|${prefix/#"$HOME"/%h}/bin|g" "$f" > "$unit/$(basename "$f")"
 done
 systemctl --user daemon-reload
 systemctl --user enable --now hestia-tray.service lifestream-nightly.timer lifestream-morning.timer
-# the machine watch runs a script from your home repository: only turn it on when the repository has it
-if [ -x "$home_repo/applications/linux/ubuntu/26.10/watch.sh" ]; then systemctl --user enable --now hestia-watch.timer; fi
+systemctl --user enable --now hestia-watch.timer
 
 echo "Hestia is installed. Log out and in once so the launcher and the home repository setting take effect."
 systemctl --user list-timers 'lifestream-*' 'hestia-*' || true

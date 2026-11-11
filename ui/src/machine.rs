@@ -194,15 +194,17 @@ impl State {
         self.mcat = self.mcat.min(self.mach.len().saturating_sub(1));
         self.mit = self.mit.min(self.mach.get(self.mcat).map(|c| c.items.len().saturating_sub(1)).unwrap_or(0));
     }
+    /// "Capture now" is the same thing the watcher does, started by hand: capture, then commit each kind of change.
     fn capture_now(&mut self) {
-        let d = dir(&self.repo_dir);
-        if !d.join("capture.sh").exists() {
-            self.msg = format!("there is no capture.sh in {}; this home repository has no machine capture yet", d.display());
+        let script = std::env::current_exe().ok().and_then(|e| e.parent().and_then(|p| p.parent()).map(|p| p.join("libexec/hestia/watch.sh")));
+        let Some(script) = script.filter(|p| p.exists()) else {
+            self.msg = "the capture script is not installed: run Hestia's install.sh again".into();
             return;
-        }
+        };
+        let repo = self.repo_dir.clone();
         self.msg = "capturing this machine…".into();
         self.jobs.start("capture", Some(|s: &mut State| s.reload_machine()),
-            move || super::jobs::run(Command::new("bash").arg("capture.sh").current_dir(&d), "the capture").map(|_| "captured. History shows what changed".to_string()));
+            move || super::jobs::run(Command::new("bash").arg(&script).arg(&repo).env("HESTIA_NOW", "1"), "the capture").map(|_| "captured. History shows what changed".to_string()));
     }
     fn add_capture(&mut self) {
         let d = dir(&self.repo_dir);

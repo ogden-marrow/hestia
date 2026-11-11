@@ -1,0 +1,30 @@
+# capture-paths.txt: what capture.sh copies from your home folder into this repo.
+# Edited in Hestia (Machine screen) or by hand. One path per line, under ~.
+#   ~/.config/...  is stored in config/      other ~/... files are stored in dotfiles/
+# NEVER listed (secrets, keys, sessions, caches): ~/.ssh  ~/.gnupg  ~/.config/gh  browser profiles,
+# keyrings, mail, online accounts, anything with "token", "secret" or "password" in its name.
+# capture.sh also refuses those even if they are added here, and scans what it copied for secrets.
+
+# shell and git
+~/.bashrc
+~/.profile
+~/.bash_logout
+~/.gitconfig
+~/.nvidia-settings-rc
+
+# desktop and apps
+~/.config/mimeapps.list
+~/.config/user-dirs.dirs
+~/.config/monitors.xml
+~/.config/gtk-3.0
+~/.config/gtk-4.0
+~/.config/mpv
+~/.config/htop
+~/.config/nautilus
+~/.config/autostart
+~/.config/powerlimit
+~/.config/johncast
+
+# Hestia itself: its settings and the scan/briefing/tray schedules it manages
+~/.config/hestia
+~/.config/systemd/user
