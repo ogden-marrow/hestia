@@ -21,15 +21,33 @@ pub struct Row {
     pub vec: Vec<f32>,
 }
 
+/// File names must never leave this machine: the model host has to be this computer, spelled plainly.
+/// Strict on purpose: no user info (`http://127.0.0.1@evil.com`), no odd characters, a real loopback address.
 pub fn ensure_local(host: &str) -> Result<()> {
-    let rest = host.trim_start_matches("http://").trim_start_matches("https://");
-    let hostname = rest.split(['/', ':']).next().unwrap_or("");
-    let hostname = if rest.starts_with('[') { "[::1]" } else { hostname };
-    if ["127.0.0.1", "localhost", "[::1]"].contains(&hostname) {
-        Ok(())
-    } else {
-        bail!("refusing non-local embedding host '{host}': file names must not leave this machine")
+    let refuse = || bail!("refusing non-local model host '{host}': file names must not leave this machine");
+    let Some(rest) = host.strip_prefix("http://").or_else(|| host.strip_prefix("https://")) else { return refuse() };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() || authority.contains(['@', '\\', ' ', '%']) || !authority.is_ascii() {
+        return refuse();
     }
+    let (name, port) = if let Some(v6) = authority.strip_prefix('[') {
+        let Some((ip, after)) = v6.split_once(']') else { return refuse() };
+        (ip, after.strip_prefix(':').or(if after.is_empty() { Some("") } else { None }))
+    } else {
+        match authority.split_once(':') { Some((n, p)) => (n, Some(p)), None => (authority, Some("")) }
+    };
+    if !port.is_some_and(|p| p.chars().all(|c| c.is_ascii_digit())) {
+        return refuse();
+    }
+    let local = name.eq_ignore_ascii_case("localhost")
+        || name.parse::<std::net::Ipv4Addr>().is_ok_and(|a| a.is_loopback())
+        || name.parse::<std::net::Ipv6Addr>().is_ok_and(|a| a.is_loopback());
+    if local { Ok(()) } else { refuse() }
+}
+
+/// A client for the local model server: it never follows a redirect, so a server on this machine cannot send file names elsewhere.
+pub fn local_agent(timeout: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new().timeout(timeout).redirects(0).build()
 }
 
 fn store_paths(dir: &Path, model: &str) -> (PathBuf, PathBuf) {
@@ -95,7 +113,7 @@ fn normalize(mut v: Vec<f32>) -> Vec<f32> {
 
 fn embed_batch(host: &str, model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>> {
     ensure_local(host)?;
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(300)).build();
+    let agent = local_agent(Duration::from_secs(300));
     let mut last = None;
     for _ in 0..2 {
         let resp = agent
@@ -213,6 +231,18 @@ mod tests {
         assert!(ensure_local("http://192.168.1.5:11434").is_err());
         assert!(ensure_local("https://api.example.com").is_err());
         assert!(ensure_local("http://127.0.0.1.evil.com").is_err());
+    }
+
+    #[test]
+    fn disguised_hosts_are_refused() {
+        for h in ["http://127.0.0.1:80@evil.example", "http://127.0.0.1@evil.example", "http://localhost@evil.example/", "http://[fd00::5]:11434",
+                  "http://[::1]x@evil.example", "http://localhost.evil.example", "http://0x7f.1@evil.example", "http://127.0.0.1:abc", "http://",
+                  "ftp://127.0.0.1", "127.0.0.1:11434", "http://127.0.0.1\\@evil.example", "http://[::ffff:8.8.8.8]:11434", "http://10.0.0.1", "http://localhost%2f@evil.example"] {
+            assert!(ensure_local(h).is_err(), "should refuse {h}");
+        }
+        for h in ["http://127.0.0.1", "http://127.0.0.1:11434/", "http://LOCALHOST:11434", "http://127.1.2.3:80", "http://[::1]", "https://localhost/api"] {
+            assert!(ensure_local(h).is_ok(), "should allow {h}");
+        }
     }
 
     #[test]
