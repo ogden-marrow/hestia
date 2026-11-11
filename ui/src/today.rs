@@ -1,12 +1,10 @@
 //! Today: the screen Hestia opens on. What happened while you were away, what needs you,
 //! and where to jump back in.
 
-use super::{greeting, icons, style, Pane, State};
-use crate::design::{Design, Surface};
-use crate::timeview;
-use lifestream::human;
+use super::{greeting, style, Pane, State};
+use crate::design::{Role, Surface};
 use rune::tok::type_;
-use rune::{col, row, text, El, ScrollSpec, TextStyle};
+use rune::{col, row, text, El, ScrollSpec};
 
 /// (new in the last 24 hours, how many of those are filed, how many files vanished)
 pub fn overnight(recs: &[lifestream::Record]) -> (usize, usize, usize) {
@@ -16,21 +14,6 @@ pub fn overnight(recs: &[lifestream::Record]) -> (usize, usize, usize) {
     };
     let new: Vec<&lifestream::Record> = recs.iter().filter(recent).collect();
     (new.len(), new.iter().filter(|r| r.status == "filed").count(), recs.iter().filter(|r| r.status == "gone").count())
-}
-
-fn tile<F: Fn(&mut State) + 'static>(d: &Design, key: &str, glyph: &'static rune::Icon, title: &str, line: String, press: F) -> El {
-    let t = d.theme();
-    col().key(key.to_string()).grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.gap()).tile(d).on_press(press)
-        .child(rune::icon(glyph, d.size(22.0)).color(d.accent_color()))
-        .child(text(title.to_string()).font(style(d, type_::TITLE)).color(t.text))
-        .child(text(line).font(style(d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
-}
-
-fn stat(d: &Design, big: String, label: &str) -> El {
-    let t = d.theme();
-    col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(2.0).tile(d)
-        .child(text(big).font(TextStyle { size: d.size(26.0), ..style(d, type_::TITLE) }).color(d.accent_color()))
-        .child(text(label.to_string()).font(style(d, type_::LABEL)).color(t.text_secondary))
 }
 
 /// A new install has nothing to show yet: a short checklist of what to do first, gone once it is all done.
@@ -63,59 +46,97 @@ fn get_started(s: &State) -> Option<El> {
             (!launcher).then(|| crate::questions::action(&d, "gs-ext", "Turn on", "Turning on…", true, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search())))))
 }
 
+/// "1 file", "2 files", with thousands separated: 1,463.
+pub fn count(n: usize, one: &str, many: &str) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    format!("{out} {}", if n == 1 { one } else { many })
+}
+
+/// The one sentence under the greeting: what happened, in plain words.
+pub fn summary(filed: usize, waiting: usize) -> String {
+    let did = if filed == 0 { "Nothing new arrived while you were away.".to_string() } else { format!("While you were away, Hestia filed {}.", count(filed, "file", "files")) };
+    if waiting == 0 { format!("{did} Everything is where it belongs.") } else { format!("{did} A few things need your say.") }
+}
+
 pub fn panel(s: &State) -> El {
     let d = s.design;
     let t = d.theme();
     let (_, filed, vanished) = s.overnight;
-    let pending = s.recs.iter().filter(|r| r.status == "pending").count();
     let live = s.recs.iter().filter(|r| r.status != "gone").count();
-    let agreed = s.suggestions.values().filter(|c| c.agree()).count();
+    let folders = s.bundles.len();
 
-    let big = TextStyle { size: d.size(34.0), ..style(&d, type_::TITLE) };
+    // One calm focal point: the greeting and a single sentence.
     let hero = col().gap(d.gap())
-        .child(text(greeting().to_string()).font(big).color(t.text))
-        .child(text(format!("While you were away, Hestia filed {} files. {} files in {} folders need you; everything else is handled.", filed, pending, s.bundles.len()))
-            .font(TextStyle { size: d.size(15.0), ..style(&d, type_::BODY) }).color(t.text_secondary).wrap_anywhere().shrink());
+        .child(text(greeting().to_string()).font(d.text(Role::Display)).color(t.text))
+        .child(text(summary(filed, folders)).font(d.text(Role::Body)).color(t.text_secondary).wrap_anywhere().shrink());
 
-    let stats = row().w_full().gap(d.pad())
-        .child(stat(&d, format!("{live}"), "files in your stream"))
-        .child(stat(&d, format!("{pending}"), "waiting for you"))
-        .child(stat(&d, format!("{agreed} of {}", s.bundles.len().max(s.suggestions.len())), "folders both models agree on"))
-        .child(stat(&d, format!("{vanished}"), "files gone, kept in history"));
+    // What needs you: the one primary action on this screen, only when something does.
+    let needs = if folders == 0 {
+        col().w_full().gap(d.gap())
+            .child(text("Nothing needs you.").font(d.text(Role::Title)).color(t.text))
+            .child(text("Hestia will ask when it is unsure.").font(d.text(Role::Body)).color(t.text_secondary))
+    } else {
+        let mut list = col().w_full().tile(&d);
+        for (i, b) in s.bundles.iter().take(3).enumerate() {
+            list = list.child(
+                row().w_full().h(d.row_h() + d.gap()).px(d.item_px()).gap(d.pad()).center_y()
+                    .border_sides([if i == 0 { 0.0 } else { 1.0 }, 0.0, 0.0, 0.0], t.card_border)
+                    .child(text(b.root.rsplit('/').next().unwrap_or(&b.root).to_string()).font(d.text(Role::Body)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
+                    .child(text(count(b.ids.len(), "file", "files")).font(d.text(Role::Label)).color(t.text_secondary)),
+            );
+        }
+        col().w_full().gap(d.pad())
+            .child(text(format!("{} to look at", count(folders, "folder", "folders"))).font(d.text(Role::Title)).color(t.text))
+            .child(list)
+            .child(row().child(crate::questions::button(&d, "today-answer", "Answer questions".into(), true, |s| s.pane = Pane::Questions)))
+    };
 
-    // ---- needs you: what is waiting. Answering happens in one place, Questions.
-    let mut asks = col().w_full().gap(d.gap());
-    for b in s.bundles.iter().take(3) {
-        asks = asks.child(
-            row().w_full().px(d.item_px()).py(d.gap()).gap(d.pad()).center_y().tile(&d)
-                .child(text(b.root.trim_start_matches("~/").to_string()).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-                .child(text(format!("{} files · {}", b.ids.len(), human(b.size))).font(style(&d, type_::LABEL)).color(t.text_secondary)),
-        );
-    }
-    let needs = col().w_full().gap(d.gap())
-        .child(row().w_full().center_y()
-            .child(text("Needs you").font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
-            .child(text(format!("{} folders wait in Questions", s.bundles.len())).font(style(&d, type_::LABEL)).color(t.text_secondary)))
-        .child(asks);
+    // The numbers, quietly: one line, not a dashboard.
+    let facts = text(format!("{} in your stream  ·  {} kept in history", count(live, "file", "files"), count(vanished, "file", "files")))
+        .font(d.text(Role::Label)).color(t.text_secondary).wrap_anywhere().shrink();
 
-    // ---- jump back in
-    let day = s.days.first().map(|x| format!("{} · {} files", timeview::long_date(&x.date), x.idx.len())).unwrap_or_else(|| "nothing yet".into());
-    let commit = s.commits.iter().find(|c| c.hash != crate::repo::WORKTREE).map(|c| format!("{} · {}", c.subject, c.when)).unwrap_or_else(|| "no commits".into());
-    let tiles = row().w_full().gap(d.pad())
-        .child(tile(&d, "tile-time", &icons::TIME, "Time", day, |s| s.pane = Pane::Time))
-        .child(tile(&d, "tile-files", &icons::FOLDER, "Files", format!("{} folders in the tree", s.tree.folders.len()), |s| { s.pane = Pane::Files; s.open_files() }))
-        .child(tile(&d, "tile-history", &icons::HISTORY, "History", commit, |s| { s.pane = Pane::History; s.reload_repo() }))
-        .child(tile(&d, "tile-ask", &icons::ASK, "Search", "apps, files, clipboard and Hestia in one box".into(), |s| { s.pane = Pane::Ask; s.ask.focused = true }));
-
-    let mut body = col().w_full().gap(d.pad() * 1.3);
+    let mut body = col().w_full().gap(d.section());
     if let Some(g) = get_started(s) {
         body = body.child(g);
     }
     if !s.msg.is_empty() {
-        body = body.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(d.accent_color()).wrap_anywhere().shrink());
+        body = body.child(text(s.msg.clone()).font(d.text(Role::Label)).color(d.accent_color()).wrap_anywhere().shrink());
     }
-    let body = body.child(hero).child(stats).child(needs)
-        .child(col().w_full().gap(d.gap()).child(text("Jump back in").font(style(&d, type_::TITLE)).color(t.text)).child(tiles));
-    col().grow(1.0).shrink().min_w(0.0).padding(d.pad() * 1.3).panel(&d)
-        .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(body))
+    let body = body.child(hero).child(needs).child(facts);
+    col().grow(1.0).shrink().min_w(0.0).padding(d.pad() * 2.0).panel(&d)
+        .child(col().w_full().max_w(d.size(640.0)).scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_are_plural_and_grouped() {
+        assert_eq!(count(1, "file", "files"), "1 file");
+        assert_eq!(count(0, "file", "files"), "0 files");
+        assert_eq!(count(1463, "file", "files"), "1,463 files");
+        assert_eq!(count(2_815_000, "file", "files"), "2,815,000 files");
+    }
+
+    #[test]
+    fn summary_is_calm_in_every_state() {
+        assert_eq!(summary(0, 0), "Nothing new arrived while you were away. Everything is where it belongs.");
+        assert!(summary(1, 0).starts_with("While you were away, Hestia filed 1 file."));
+        assert!(summary(12, 3).ends_with("A few things need your say."));
+    }
+
+    #[test]
+    fn renders_with_nothing_waiting_and_with_many() {
+        let mut s = State::default();
+        s.bundles.clear();
+        let _ = panel(&s);
+    }
 }
