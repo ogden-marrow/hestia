@@ -1,6 +1,6 @@
 // Hestia clipboard: when the clipboard changes, append the text to ~/.local/share/hestia/clipboard.jsonl.
-// Settings come from ~/.config/hestia/settings (clipboard=on|off, clipboard_max, clipboard_days).
-// OFF unless clipboard=on. Text only. Skipped: empty, huge, anything a password manager marks with its password hint,
+// Settings come from ~/.config/hestia/settings (clipboard_history=on|off, clipboard_max, clipboard_days).
+// OFF unless clipboard_history=on (the old 'clipboard' key is ignored on purpose, so nobody stays opted in by an old default). Text only. Skipped: empty, huge, anything a password manager marks with its password hint,
 // and text that looks like a secret or a one-time code. Turning it off deletes the history; old entries are pruned on a timer.
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
@@ -25,7 +25,7 @@ function settings() {
         if (!ok) return s;
         for (const line of new TextDecoder().decode(bytes).split('\n')) {
             const [k, v] = line.split('=');
-            if (k === 'clipboard') s.on = v === 'on';
+            if (k === 'clipboard_history') s.on = v === 'on';
             if (k === 'clipboard_max') s.max = Math.min(1000, Math.max(10, parseInt(v) || 100));
             if (k === 'clipboard_days') s.days = Math.min(365, Math.max(1, parseInt(v) || 7));
         }
