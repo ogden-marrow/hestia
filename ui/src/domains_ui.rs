@@ -45,6 +45,10 @@ impl State {
         d.description = self.d_desc.text.trim().to_string();
         d.kinds = self.d_kinds.text.split([',', ' ']).map(str::trim).filter(|x| !x.is_empty()).map(String::from).collect();
         d.folder = self.d_folder.text.trim().trim_matches('/').to_string();
+        if !d.folder.is_empty() && !lifestream::tree::rel_ok(&d.folder) {
+            self.msg = "the folder must be a visible folder inside your home folder: no hidden folders, no .. and no empty parts".into();
+            return;
+        }
         if d.name.is_empty() || d.description.is_empty() {
             self.msg = "a domain needs a name and a description: the description is what the classifier reads".into();
             return;

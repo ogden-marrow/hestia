@@ -79,6 +79,9 @@ pub fn load(dir: Option<&Path>) -> Result<Vec<Domain>> {
             if !slug_ok(&d.id) {
                 bail!("{}: id '{}' must be lowercase letters, digits and dashes", f.display(), d.id);
             }
+            if !d.folder.is_empty() && !crate::tree::rel_ok(&d.folder) {
+                bail!("{}: folder '{}' must be a visible folder inside your home folder", f.display(), d.folder);
+            }
             match all.iter().position(|x| x.id == d.id) {
                 Some(i) => all[i] = d,
                 None => all.push(d),

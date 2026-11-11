@@ -52,8 +52,16 @@ fn under(p: &str, root: &str) -> bool {
     p == root || p.strip_prefix(root).is_some_and(|r| r.starts_with('/'))
 }
 
-fn rel_ok(p: &str) -> bool {
-    !p.is_empty() && !p.starts_with('/') && !p.starts_with('~') && !p.split('/').any(|c| c.is_empty() || c == "." || c == "..")
+/// A place files may be filed into: inside the home folder, never hidden. Hidden folders (`.config/autostart`,
+/// `.local/share/applications`, `.ssh`) are where a moved file would run at login or unlock something,
+/// so no tree, inbox or domain may name one.
+pub fn rel_ok(p: &str) -> bool {
+    !p.is_empty()
+        && !p.starts_with('/')
+        && !p.starts_with('~')
+        && !p.contains(['\\', '\0'])
+        && !p.chars().any(|c| c.is_control())
+        && !p.split('/').any(|c| c.is_empty() || c.starts_with('.'))
 }
 
 impl Tree {
@@ -75,7 +83,7 @@ impl Tree {
     pub fn validate(&self) -> Result<()> {
         for p in self.inbox.iter().chain(self.folders.iter().map(|f| &f.path)) {
             if !rel_ok(p) {
-                bail!("bad path {p:?}: use a path relative to your home folder, no .. or empty parts");
+                bail!("bad path {p:?}: use a visible folder inside your home folder (no hidden folders, no .. or empty parts)");
             }
         }
         for f in &self.folders {
@@ -453,6 +461,19 @@ pub fn cmd_tree(tree_path: Option<PathBuf>, apply_it: bool, mv: Vec<String>) -> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hidden_and_odd_destinations_are_refused() {
+        for p in [".config/autostart", ".local/share/applications", ".ssh", "Documents/.hidden", "Documents/..", "Documents//x", "/etc", "~/x", "a\\b", "a\nb", "", ".", "Docs/./x"] {
+            assert!(!super::rel_ok(p), "should refuse {p:?}");
+        }
+        for p in ["Documents", "Pictures/2026/Trips", "Games/Dark Souls", "Software/app-bundles"] {
+            assert!(super::rel_ok(p), "should allow {p:?}");
+        }
+        let bad_inbox = super::Tree { inbox: vec![".ssh".into()], ..Default::default() };
+        assert!(bad_inbox.validate().is_err());
+        let bad_folder = super::Tree { folders: vec![super::Folder { path: ".config/autostart".into(), ..Default::default() }], ..Default::default() };
+        assert!(bad_folder.validate().is_err());
+    }
     use super::*;
     use crate::By;
 
