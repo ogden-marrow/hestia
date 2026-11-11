@@ -60,7 +60,7 @@ pub fn screen(s: &State) -> El {
                 .child(row_kv("On this computer", crate::files::tilde(&local)))
                 .child(row_kv("On GitHub", if remote.is_some() { "already connected".to_string() } else { target }))
                 .child(row_kv("Remote (origin)", url))
-                .child(row_kv("Pushes", "only when you press Publish. Nothing is pushed by itself.".to_string()));
+                .child(row_kv("Pushes", "automatically, every few minutes, once published. Only to a private repository, and never if something looks like a secret.".to_string()));
             let labeled = |label: &str, f: El| col().w_full().gap(3.0).child(text(label.to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary)).child(f);
             let mut b = col().w_full().gap(d.pad());
             b = b.child(line(s, if found { "Found your home repository." } else { "Everything of yours lives in one private git repository." },
