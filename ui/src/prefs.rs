@@ -191,7 +191,7 @@ pub fn panels(s: &State) -> Vec<El> {
                         |s, i| s.change_settings(|st| st.clipboard_days = [1, 7, 30][i]))))
                 .child(setting(&d, &format!("Recording: {state}"), &format!("{n} items in the history. GNOME does not let apps watch the clipboard in the background, so a small Hestia extension does it. A newly turned-on extension starts after you log out and in once."),
                     row().gap(d.gap())
-                        .child(crate::questions::button(&d, "clip-on", "Turn on".into(), false, |s: &mut State| s.msg = crate::setup::enable_extension()))
+                        .child(crate::questions::action(&d, "clip-on", "Turn on", "Turning on…", false, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search()))
                         .child(crate::questions::button(&d, "clip-clear", "Clear history".into(), false, |s: &mut State| { crate::clipboard::clear(); s.clips.clear(); s.msg = "clipboard history cleared".into(); }))))
                 .child(setting(&d, "Shortcut: Alt+Space", "Opens the launcher from anywhere. It is drawn by the Hestia extension, so it works once the extension is on (use Turn on above, then log out and in once).", text("").font(style(&d, type_::LABEL))));
         }

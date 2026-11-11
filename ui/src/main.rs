@@ -425,6 +425,10 @@ impl State {
         self.jobs.start("publish", None, move || lifestream::home::publish(&dir, &a, &r)
             .map(|url| format!("created the private repository {url} and pushed the first commit")).map_err(|e| format!("not published: {e:#}")));
     }
+    fn turn_on_search(&mut self) {
+        self.msg = "turning on Hestia Search…".into();
+        self.jobs.start("search-on", None, || Ok(setup::enable_extension()));
+    }
     fn start_scan(&mut self) {
         self.msg = "scanning your folders: this can take a few minutes".into();
         self.jobs.start("scan", Some(|s: &mut State| { if let Some(p) = &s.stream { s.recs = lifestream::load_all(p).unwrap_or_default(); s.refresh_derived(); s.total = s.recs.len(); } }),
@@ -498,8 +502,13 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     };
     let footer = row().w_full().h(d.size(24.0)).px(pad).center_y().fill(t.card)
         .border_sides([1.0, 0.0, 0.0, 0.0], t.card_border)
-        .child(text(info).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0).shrink().min_w(0.0).truncate())
-        ;
+        .child(if s.msg.is_empty() && !s.jobs.any() {
+            text(info).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0).shrink().min_w(0.0).truncate()
+        } else {
+            // one status strip on every screen: what is happening, or what just happened (press to dismiss)
+            text(format!("{}{}", if s.jobs.any() { "●  " } else { "" }, s.msg)).key("status").font(style(&d, type_::LABEL)).color(acc).grow(1.0).shrink().min_w(0.0).truncate()
+                .on_press(|s: &mut State| if !s.jobs.any() { s.msg.clear() })
+        });
 
     let views = sidebar::panel(s);
 

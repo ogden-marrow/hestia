@@ -20,6 +20,7 @@ pub struct Jobs {
 
 impl Jobs {
     pub fn set_waker(&mut self, w: rune::Waker) { self.wake = Some(w); }
+    pub fn any(&self) -> bool { !self.running.is_empty() }
     pub fn running(&self, key: &str) -> bool { self.running.contains(&key) }
 
     /// Run `work` on its own thread. `then` runs on the UI thread when it succeeds.

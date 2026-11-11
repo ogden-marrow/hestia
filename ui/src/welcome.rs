@@ -97,7 +97,7 @@ pub fn screen(s: &State) -> El {
                 .child(line(s, &format!("Press {} anywhere and type.", crate::setup::SHORTCUT_NAME), "Find apps, files, things you copied and Hestia itself. Type clipboard to browse what you copied: text only, kept on this computer, never passwords."))
                 .child(line(s, "A small part of Hestia lives in the desktop.", "GNOME only lets the shell draw the launcher and watch the clipboard, so Hestia adds one extension. Turn it on here; you log out and in once."))
                 .child(row().gap(d.pad()).center_y()
-                    .child(button(&d, "w-ext", "Turn on".into(), !on, |s: &mut State| s.msg = crate::setup::enable_extension()))
+                    .child(crate::questions::action(&d, "w-ext", "Turn on", "Turning on…", !on, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search()))
                     .child(text(if on { "on".to_string() } else { format!("not yet: {state}") }).font(style(&d, type_::LABEL)).color(if on { acc } else { t.text_secondary }))))
         }
         _ => ("You are set", col().w_full().gap(d.pad())

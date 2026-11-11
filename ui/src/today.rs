@@ -60,7 +60,7 @@ fn get_started(s: &State) -> Option<El> {
         .child(step(2, scanned, "Run your first scan", "Reads your folders and builds the stream. It never changes a file, and it runs by itself every night.",
             (home && !scanned).then(|| crate::questions::action(&d, "gs-scan", "Scan now", "Scanning…", true, s.jobs.running("scan"), |s: &mut State| s.start_scan()))))
         .child(step(3, launcher, "Turn on Hestia Search", "Alt+Space from anywhere, and clipboard history. GNOME needs one log out and in after you turn it on.",
-            (!launcher).then(|| go("gs-ext", "Turn on", |s| s.msg = crate::setup::enable_extension())))))
+            (!launcher).then(|| crate::questions::action(&d, "gs-ext", "Turn on", "Turning on…", true, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search())))))
 }
 
 pub fn panel(s: &State) -> El {
