@@ -80,6 +80,15 @@ pub(crate) fn on_off<F: Fn(&mut State, bool) + Clone + 'static>(d: &Design, key:
     segmented(d, key, &["Off", "On"], on as usize, move |s, i| f(s, i == 1))
 }
 
+/// Turning clipboard history off also deletes what was recorded.
+pub(crate) fn set_clipboard(s: &mut State, on: bool) {
+    s.change_settings(|st| st.clipboard_on = on);
+    if !on {
+        crate::clipboard::clear();
+        s.clips.clear();
+    }
+}
+
 fn add_root(s: &mut State) {
     let r = s.f_root.text.trim().trim_matches('/').to_string();
     if !root_ok(&r) {
@@ -181,8 +190,8 @@ pub fn panels(s: &State) -> Vec<El> {
             let state = crate::clipboard::extension_state();
             let n = s.clips.len();
             body = body
-                .child(setting(&d, "Clipboard history", "Hestia remembers what you copy, so you can find and paste it again from the launcher. Text only, kept on this computer. Anything a password manager marks as a password is never recorded.",
-                    on_off(&d, "clip", s.settings.clipboard_on, |s, on| s.change_settings(|st| st.clipboard_on = on))))
+                .child(setting(&d, "Clipboard history", &format!("Remember what you copy, so you can find and paste it again from the launcher. {}", crate::clipboard::PRIVACY),
+                    on_off(&d, "clip", s.settings.clipboard_on, |s, on| set_clipboard(s, on))))
                 .child(setting(&d, "Keep the last", "How many copied items to remember.",
                     segmented(&d, "clipmax", &["50", "100", "200"], match s.settings.clipboard_max { 50 => 0, 200 => 2, _ => 1 },
                         |s, i| s.change_settings(|st| st.clipboard_max = [50, 100, 200][i]))))

@@ -1,7 +1,10 @@
 //! Clipboard history. GNOME on Wayland does not let a background program watch the clipboard, so a
 //! tiny Shell extension (packaging/gnome-extension) records it into a private file; this
-//! reads that file. Text only, newest first, capped, and never recorded when the source marks it
-//! as a password.
+//! reads that file. Opt-in and off by default. Text only, newest first, capped; the extension skips
+//! password managers and text that looks like a key or a code, which is a filter, not a guarantee.
+
+/// What the person is told before they turn it on (Welcome and Settings say the same thing).
+pub const PRIVACY: &str = "Off until you turn it on. Text only, kept only on this computer, and deleted when you turn it off. It skips password managers and anything that looks like a key or a code, but that is a filter, not a guarantee.";
 
 use std::path::PathBuf;
 
