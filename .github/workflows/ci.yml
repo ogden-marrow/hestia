@@ -16,7 +16,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libfontconfig1-dev libdbus-1-dev pkg-config
+        timeout-minutes: 5
+        run: |
+          o='-o Acquire::Retries=5 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15'
+          sudo apt-get $o update && sudo apt-get $o install -y libxkbcommon-dev libwayland-dev libvulkan-dev libfontconfig1-dev libdbus-1-dev pkg-config
       - run: cargo build --release --locked
       - run: cargo test --release --locked
       - name: Watcher on a fresh home repository
