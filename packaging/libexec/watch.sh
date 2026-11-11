@@ -37,13 +37,30 @@ LS="${LIFESTREAM:-$(command -v lifestream 2>/dev/null || echo "$HOME/.local/bin/
 # ---- capture at the lowest priority
 nice -n 19 ionice -c 3 "$libexec/capture.sh" "$here" >/dev/null 2>"$state/watch.err" || { note "capture failed: see watch.err"; exit 1; }
 
-# ---- withhold anything that looks like a secret. The captured copy is dropped (the original on this
-# computer is never touched) and the file names are listed in watch.json; the secret itself never is.
-withheld=0
-while IFS= read -r f; do
-  [ -n "$f" ] && [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1))
-done < <(find "$here" -type f -not -path '*/.git/*' -print0 | xargs -0 -r "$LS" secret-scan 2>/dev/null | sed -E 's/:[0-9]+: .*$//' | sort -u)
-[ "$withheld" -gt 0 ] && withheld_note="; $withheld file(s) withheld: possible secrets"
+# ---- withhold anything that looks like a secret. Nothing is ever changed on this computer: only the captured
+# copy. A shell startup file keeps everything except the lines that look like secrets (each becomes a comment);
+# any other file with a hit is left out whole, and so is any file holding a private key. The status lists counts,
+# never values.
+withheld=0; redacted=0
+declare -A drop redact
+scan_out=$(find "$here" -type f -not -path '*/.git/*' -print0 | xargs -0 -r "$LS" secret-scan 2>/dev/null || true)
+while IFS= read -r l; do
+  [[ "$l" =~ ^(.*):([0-9]+):\ (.*)$ ]] || continue
+  f="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"; r="${BASH_REMATCH[3]}"
+  case "$f" in
+    */dotfiles/.bashrc|*/dotfiles/.profile|*/dotfiles/.bash_profile|*/dotfiles/.bash_logout|*/dotfiles/.zshrc|*/dotfiles/.zprofile|*/dotfiles/.zshenv|*/dotfiles/.zlogout)
+      if [ "$r" = "private key" ]; then drop["$f"]=1; else redact["$f"]+=" $n"; fi ;;
+    *) drop["$f"]=1 ;;
+  esac
+done <<< "$scan_out"
+for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)); done
+for f in "${!redact[@]}"; do
+  [ -f "$f" ] && [ -z "${drop[$f]:-}" ] || continue
+  for n in $(printf '%s\n' ${redact[$f]} | sort -un); do
+    sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f" && redacted=$((redacted+1))
+  done
+done
+[ "$withheld" -gt 0 ] || [ "$redacted" -gt 0 ] && withheld_note="; $withheld file(s) and $redacted line(s) withheld: possible secrets"
 
 # ---- who is this machine (machines/<name>/machine.toml)
 lifestream machine --repo "$repo" --write >/dev/null 2>>"$state/watch.err" || true
