@@ -216,6 +216,78 @@ pub fn adopt(out: &mut dyn Write, token: &str, ep: &Endpoints, git_base: &str, f
     true
 }
 
+/// Everything in this repository's history is about to become reachable on GitHub: look first.
+pub fn guard_history(dir: &Path) -> Result<()> {
+    let found = crate::secrets::scan_git(dir, crate::secrets::Scope::AllHistory)?;
+    if !found.is_empty() {
+        let list: Vec<String> = found.iter().take(5).map(|(f, x)| format!("{f} ({})", x.rule)).collect();
+        bail!("not published: {} possible secret(s) in the history: {}. Nothing was sent.", found.len(), list.join(", "));
+    }
+    Ok(())
+}
+
+/// Make a new PRIVATE repository on GitHub for the person's home, create the local home repository, and push it.
+/// Order matters: nothing is sent until the whole history has been scanned, and a name that is already taken is reported
+/// (`exists`) rather than reused.
+pub fn create(out: &mut dyn Write, token: &str, ep: &Endpoints, git_base: &str, name: &str, dest: &Path, settings: &Path, exe: &Path, today: &str) -> bool {
+    if !valid_full_name(&format!("x/{name}")) {
+        return other(out, "that is not a repository name (letters, digits, - _ and . only)");
+    }
+    let Some(user) = who(out, ep, token) else { return false };
+    let full = format!("{user}/{name}");
+    if dest.exists() && std::fs::read_dir(dest).map(|mut d| d.next().is_some()).unwrap_or(true) {
+        return other(out, &format!("{} already has files in it; choose an empty place", dest.display()));
+    }
+    let helper = match helper_for(exe) {
+        Ok(h) => h,
+        Err(e) => return other(out, &e.to_string()),
+    };
+    // 1. the repository on GitHub: private, no extras
+    let body = json!({"name": name, "private": true, "description": "My home repository, managed by Hestia", "has_issues": false, "has_wiki": false, "has_projects": false});
+    match crate::auth::agent().post(&format!("{}/user/repos", ep.api)).set("Authorization", &format!("Bearer {token}")).set("Accept", "application/vnd.github+json").send_json(body) {
+        Ok(_) => {}
+        Err(ureq::Error::Status(422, _)) => {
+            failed(out, "exists", Some(("repo", &full)));
+            return false;
+        }
+        Err(ureq::Error::Status(401, _)) => return other(out, "you are not signed in to GitHub"),
+        Err(ureq::Error::Status(403, r)) if r.header("x-github-sso").is_none() => return other(out, "GitHub did not allow creating a repository with this sign-in"),
+        Err(e) => {
+            fail_http(out, e);
+            return false;
+        }
+    }
+    // 2. the local repository, then the guard, then the push
+    if let Err(e) = crate::home::create(dest, None, today) {
+        return other(out, &format!("the repository was created on GitHub as {full} but the local copy failed: {e:#}"));
+    }
+    if let Err(e) = guard_history(dest) {
+        return other(out, &e.to_string());
+    }
+    let d = dest.to_string_lossy().to_string();
+    let url = format!("{git_base}/{full}.git");
+    for args in [vec!["-C", d.as_str(), "remote", "add", "origin", url.as_str()], vec!["-C", d.as_str(), "config", "credential.https://github.com.helper", helper.as_str()]] {
+        if let Err(e) = git_ok(&args, None) {
+            return other(out, &e.to_string());
+        }
+    }
+    if let Err(e) = git_ok(&["-C", &d, "push", "--quiet", "-u", "origin", "main"], Some(&helper)) {
+        let m = e.to_string();
+        if m.contains("Could not resolve") || m.contains("unable to access") {
+            failed(out, "offline", None);
+            return false;
+        }
+        return other(out, &format!("created {full} but could not send the first copy: {}", m.replace(token, "***")));
+    }
+    // 3. tag it so it is found again on any computer (best effort: discover also matches the name)
+    let _ = crate::auth::agent().put(&format!("{}/repos/{full}/topics", ep.api)).set("Authorization", &format!("Bearer {token}")).set("Accept", "application/vnd.github+json").send_json(json!({"names": [TOPIC]}));
+    if let Err(e) = set_home_setting(settings, dest) {
+        return other(out, &e.to_string());
+    }
+    emit(out, json!({"event": "created", "repo": full, "path": d}));
+    true
+}
+
 /// Where the settings file lives for the CLI.
 pub fn default_settings() -> Option<PathBuf> {
     settings_path()
@@ -247,7 +319,11 @@ mod tests {
                     let n = s.read(&mut chunk).unwrap_or(0);
                     if n == 0 { break }
                     data.extend_from_slice(&chunk[..n]);
-                    if String::from_utf8_lossy(&data).contains("\r\n\r\n") { break }
+                    let text = String::from_utf8_lossy(&data).to_string();
+                    if let Some(h) = text.find("\r\n\r\n") {
+                        let want = text[..h].lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok())).unwrap_or(0);
+                        if data.len() >= h + 4 + want { break }
+                    }
                 }
                 let req = String::from_utf8_lossy(&data).to_string();
                 let path = req.split_whitespace().nth(1).unwrap_or("").to_string();
@@ -408,5 +484,78 @@ mod tests {
         assert!(!dest2.exists() && !root2.join(".home.hestia-part").exists());
         std::fs::remove_dir_all(&root).unwrap();
         std::fs::remove_dir_all(&root2).unwrap();
+    }
+    fn create_routes(post_status: u16) -> Vec<(String, u16, String)> {
+        vec![me(), ("/user/repos".into(), post_status, "{}".into()), ("/repos/ada/home/topics".into(), 200, "{}".into())]
+    }
+
+    /// The git side already holds an empty bare repository, as GitHub does right after creating one.
+    fn empty_remote(tag: &str) -> (PathBuf, String, PathBuf) {
+        let root = std::env::temp_dir().join(format!("ls-ghrepo-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bare = root.join("git/ada/home.git");
+        std::fs::create_dir_all(&bare).unwrap();
+        git(&root, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
+        (root.clone(), format!("file://{}", root.join("git").display()), bare)
+    }
+
+    #[test]
+    fn create_makes_the_private_repo_pushes_it_tags_it_and_sets_home_once() {
+        for (k, v) in [("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t.t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t.t")] { unsafe { std::env::set_var(k, v) } }
+        let (root, base, bare) = empty_remote("create");
+        let (ep, seen) = fake(create_routes(201));
+        let dest = root.join("Home");
+        let settings = root.join("cfg/settings");
+        let mut out = Vec::new();
+        let ok = create(&mut out, &tok(), &ep, &base, "home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11");
+        let o = String::from_utf8(out).unwrap();
+        assert!(ok, "{o}");
+        assert!(o.contains(r#""event":"created""#) && o.contains("ada/home") && !o.contains("gho_"), "{o}");
+        assert!(crate::home::is_home(&dest));
+        let pushed = Command::new("git").arg("-C").arg(&bare).args(["show", "main:tree.toml"]).output().unwrap();
+        assert!(pushed.status.success(), "the first copy reached the remote");
+        let reqs = seen.lock().unwrap().join("\n");
+        assert!(reqs.contains("POST /user/repos") && reqs.contains(r#""private":true"#), "must ask for a PRIVATE repository");
+        assert!(reqs.contains("PUT /repos/ada/home/topics") && reqs.contains("hestia-home"), "tagged so it is found again");
+        assert!(std::fs::read_to_string(&settings).unwrap().contains(&format!("home={}", dest.display())));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn create_reports_a_taken_name_and_a_busy_folder_before_changing_anything() {
+        let (root, base, _) = empty_remote("create-no");
+        let settings = root.join("cfg/settings");
+        let dest = root.join("Home");
+        let (ep, _) = fake(create_routes(422));
+        let mut out = Vec::new();
+        assert!(!create(&mut out, &tok(), &ep, &base, "home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11"));
+        let o = String::from_utf8(out).unwrap();
+        assert!(o.contains(r#""kind":"exists""#) && o.contains("ada/home") && !dest.exists(), "{o}");
+        // a folder with files: refused without even contacting GitHub's create endpoint
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("mine.txt"), "keep me").unwrap();
+        let (ep, seen) = fake(create_routes(201));
+        let mut out = Vec::new();
+        assert!(!create(&mut out, &tok(), &ep, &base, "home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11"));
+        assert!(String::from_utf8(out).unwrap().contains("already has files"));
+        assert!(!seen.lock().unwrap().iter().any(|r| r.starts_with("POST")), "must not create anything on GitHub");
+        assert_eq!(std::fs::read_to_string(dest.join("mine.txt")).unwrap(), "keep me");
+        assert!(!settings.exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_history_guard_refuses_a_secret_before_anything_is_sent() {
+        for (k, v) in [("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t.t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t.t")] { unsafe { std::env::set_var(k, v) } }
+        let d = std::env::temp_dir().join(format!("ls-ghrepo-guard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        crate::home::create(&d, None, "2026-01-01").unwrap();
+        guard_history(&d).unwrap();
+        std::fs::write(d.join("notes.txt"), format!("API_TOKEN={}\n", "aB1cD2eF3g".repeat(4))).unwrap();
+        git(&d, &["add", "-A"]);
+        git(&d, &["commit", "-q", "-m", "oops"]);
+        let e = guard_history(&d).unwrap_err().to_string();
+        assert!(e.contains("possible secret") && e.contains("notes.txt") && !e.contains("aB1cD2eF3g"), "{e}");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }

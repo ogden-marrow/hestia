@@ -169,6 +169,17 @@ enum HomeCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Make a new private home repository on GitHub, set it up here, and send the first copy
+    Create {
+        /// the repository name (default: home)
+        #[arg(long, default_value = "home")]
+        name: String,
+        /// where to put it on this computer (default ~/Home); must be empty or missing
+        #[arg(long)]
+        into: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -255,6 +266,12 @@ fn main() -> Result<()> {
             };
             let ok = match what {
                 HomeCmd::Discover { .. } => ghrepo::discover(&mut out, &token, &ep),
+                HomeCmd::Create { name, into, .. } => {
+                    let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
+                    let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));
+                    let exe = std::env::current_exe()?;
+                    ghrepo::create(&mut out, &token, &ep, "https://github.com", &name, &dest, &settings, &exe, &chrono_today())
+                }
                 HomeCmd::Adopt { repo, into, .. } => {
                     let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
                     let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));
