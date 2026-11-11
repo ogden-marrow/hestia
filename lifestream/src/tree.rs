@@ -282,12 +282,28 @@ pub fn plan(recs: &[Record], tree: &Tree, home: &Path, excluded: &[PathBuf], ope
     plan
 }
 
+/// Only a plain file may be moved, and only into a real directory: a symlink at either end could
+/// redirect the move somewhere the plan never meant (a sensitive folder, another disk).
+fn check_ends(from: &Path, to: &Path) -> Result<()> {
+    let m = fs::symlink_metadata(from).with_context(|| format!("{} is gone", from.display()))?;
+    if !m.file_type().is_file() {
+        bail!("{} is not a plain file (symlink or special): not moved", from.display());
+    }
+    if let Some(d) = to.parent() {
+        if fs::symlink_metadata(d).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            bail!("{} is a symlink: not moved into it", d.display());
+        }
+    }
+    Ok(())
+}
+
 /// Same-filesystem: hard-link then unlink (atomic, refuses to overwrite). Otherwise copy,
 /// verify the hash, then remove the original.
 pub fn move_file(from: &Path, to: &Path) -> Result<()> {
     if let Some(d) = to.parent() {
         fs::create_dir_all(d)?;
     }
+    check_ends(from, to)?;
     match fs::hard_link(from, to) {
         Ok(()) => {
             fs::remove_file(from)?;
@@ -299,20 +315,30 @@ pub fn move_file(from: &Path, to: &Path) -> Result<()> {
 }
 
 pub fn copy_move(from: &Path, to: &Path) -> Result<()> {
-    if to.exists() {
-        bail!("{} already exists", to.display());
-    }
+    check_ends(from, to)?;
     let tmp = to.with_file_name(format!(".{}.lifestream-part", to.file_name().and_then(|n| n.to_str()).unwrap_or("file")));
-    fs::copy(from, &tmp)?;
-    let ok = sha256_file(from)? == sha256_file(&tmp)?;
-    if !ok {
+    let before = sha256_file(from)?;
+    // The temp is created exclusively, so a pre-planted file or link at that name is an error.
+    {
+        let mut src = fs::File::open(from)?;
+        let mut dst = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        std::io::copy(&mut src, &mut dst)?;
+    }
+    if before != sha256_file(&tmp)? || before != sha256_file(from)? {
         let _ = fs::remove_file(&tmp);
-        bail!("copy of {} did not verify", from.display());
+        bail!("copy of {} did not verify (or it changed while copying)", from.display());
     }
     if let Ok(m) = fs::metadata(from).and_then(|m| m.modified()) {
         let _ = fs::File::options().write(true).open(&tmp).and_then(|f| f.set_modified(m));
     }
-    fs::rename(&tmp, to)?;
+    // Publish without replacing: hard_link fails if `to` appeared in the meantime.
+    let linked = fs::hard_link(&tmp, to);
+    let _ = fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => bail!("{} already exists", to.display()),
+        Err(e) => return Err(e.into()),
+    }
     fs::remove_file(from)?;
     Ok(())
 }
@@ -585,6 +611,21 @@ mod tests {
         let again = plan(&load_all(&stream).unwrap(), &tree(), &h, &[], &HashSet::new());
         assert!(again.moves.is_empty() && again.skipped.is_empty());
         fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn move_refuses_symlinks_at_either_end() {
+        use std::os::unix::fs::symlink;
+        let p = &sandbox("symlinks");
+        fs::write(p.join("real"), b"x").unwrap();
+        symlink(p.join("real"), p.join("link")).unwrap();
+        assert!(move_file(&p.join("link"), &p.join("out")).is_err());
+        assert!(p.join("link").exists() && !p.join("out").exists());
+        fs::create_dir(p.join("dir")).unwrap();
+        symlink(p.join("dir"), p.join("dirlink")).unwrap();
+        assert!(move_file(&p.join("real"), &p.join("dirlink/real")).is_err());
+        assert!(p.join("real").exists());
+        assert!(copy_move(&p.join("real"), &p.join("dirlink/real")).is_err());
     }
 
     #[test]
