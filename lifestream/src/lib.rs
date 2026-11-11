@@ -5,6 +5,7 @@
 //! (JSON Lines shards by the file's own month). It NEVER writes inside the
 //! scanned folders and skips every path the sensitive list covers.
 
+pub mod auth;
 pub mod bundle;
 pub mod domains;
 pub mod home;
