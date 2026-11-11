@@ -702,7 +702,34 @@ fn kv(d: &Design, k: &str, v: &str) -> El {
 }
 
 /// A headless scene: a look and a pane, with whatever data that pane shows.
+/// `HESTIA_LOOK=dark,orange,1.25,airy` styles a snapshot without touching saved settings, so one
+/// scene name covers the whole look matrix (`ui/scripts/snap-matrix.sh`).
+fn apply_look(settings: &mut Settings, look: &str) {
+    use settings::Accent as A;
+    for w in look.split(',').map(str::trim) {
+        match w {
+            "auto" => settings.scheme = Scheme::Auto,
+            "light" => settings.scheme = Scheme::Light,
+            "dark" => settings.scheme = Scheme::Dark,
+            "compact" => settings.density = design::Density::Compact,
+            "cozy" => settings.density = design::Density::Cozy,
+            "airy" => settings.density = design::Density::Airy,
+            "blue" => settings.accent = A::Blue,
+            "teal" => settings.accent = A::Teal,
+            "green" => settings.accent = A::Green,
+            "orange" => settings.accent = A::Orange,
+            "purple" => settings.accent = A::Purple,
+            "pink" => settings.accent = A::Pink,
+            "graphite" => settings.accent = A::Graphite,
+            n => if let Ok(t) = n.parse::<f32>() { settings.text = t.clamp(0.8, 1.4) },
+        }
+    }
+}
+
 fn scene(s: &mut State, pane: Pane) {
+    if let Ok(look) = std::env::var("HESTIA_LOOK") {
+        apply_look(&mut s.settings, &look);
+    }
     s.restyle();
     s.pane = pane;
     match pane {
@@ -744,8 +771,6 @@ fn main() {
             ("settings-scanning", |s| { s.stab = 2; scene(s, Pane::Settings) }),
             ("settings-general", |s| { s.stab = 1; scene(s, Pane::Settings) }),
             ("settings-domains", |s| { s.stab = 6; s.select_domain(0); scene(s, Pane::Settings) }),
-            ("light-today", |s| { s.settings.scheme = Scheme::Light; scene(s, Pane::Today) }),
-            ("light-questions", |s| { s.settings.scheme = Scheme::Light; scene(s, Pane::Questions) }),
             ("time-compare", |s| { s.dsel = 40; s.compare = true; scene(s, Pane::Time) }),
         ],
         setup: Some(setup),
