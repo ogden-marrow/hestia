@@ -159,7 +159,7 @@ pub fn suggest(host: &str, model: &str, b: &Bundle, tax: &Taxonomy) -> Result<Su
         "options": { "temperature": 0, "num_ctx": 4096, "num_predict": 400 },
         "messages": [ {"role": "system", "content": system(tax)}, {"role": "user", "content": b.prompt()} ]
     });
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(300)).build();
+    let agent = semantic::local_agent(Duration::from_secs(300));
     let resp: serde_json::Value = agent
         .post(&format!("{}/api/chat", host.trim_end_matches('/')))
         .send_json(body)
