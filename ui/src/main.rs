@@ -6,6 +6,7 @@ mod design;
 mod contents;
 mod domains_ui;
 mod files;
+mod fixture;
 mod folders;
 mod history;
 mod icons;
@@ -727,11 +728,19 @@ fn apply_look(settings: &mut Settings, look: &str) {
 }
 
 fn scene(s: &mut State, pane: Pane) {
+    // HESTIA_FIXTURE=1: generic data, folders waiting. HESTIA_FIXTURE=calm: nothing waiting.
+    let fixture = std::env::var("HESTIA_FIXTURE").ok();
+    if let Some(f) = &fixture {
+        fixture::apply(s, f != "calm");
+    }
     if let Ok(look) = std::env::var("HESTIA_LOOK") {
         apply_look(&mut s.settings, &look);
     }
     s.restyle();
     s.pane = pane;
+    if fixture.is_some() {
+        return; // the panes that read this machine stay empty rather than show someone's files
+    }
     match pane {
         Pane::System | Pane::Settings => s.status = system::gather(&s.recs, s.stream.as_deref().unwrap_or(std::path::Path::new(""))),
         Pane::History => s.reload_repo(),
