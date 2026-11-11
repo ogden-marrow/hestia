@@ -25,12 +25,20 @@ fn timer(unit: &str, (h, m): (u8, u8)) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The watcher's repeat interval. systemd keeps ALL of a timer's start rules (OnActiveSec, OnBootSec,
+/// OnUnitActiveSec, ...) in one list, and an empty assignment to any of them clears the whole list. So after the
+/// reset BOTH the first-run rule and the repeat rule must be set again, or the timer never fires: the repeat rule
+/// only counts from a first run that nothing would ever start.
+fn watch_timer(mins: u32) -> String {
+    format!("[Timer]\nOnActiveSec=\nOnActiveSec=1min\nOnUnitActiveSec={mins}min\n")
+}
+
 /// Write everything the settings say, reload, and report what happened in one line.
 pub fn apply(s: &Settings) -> String {
     let steps = (|| -> std::io::Result<()> {
         timer("lifestream-nightly.timer", s.scan_time)?;
         timer("lifestream-morning.timer", s.brief_time)?;
-        drop_in("hestia-watch.timer", &format!("[Timer]\nOnUnitActiveSec=\nOnUnitActiveSec={}min\n", s.watch_mins))?;
+        drop_in("hestia-watch.timer", &watch_timer(s.watch_mins))?;
         let roots: Vec<String> = s.roots.iter().map(|r| format!("%h/{r}")).collect();
         drop_in(
             "lifestream-nightly.service",
@@ -51,6 +59,16 @@ pub fn apply(s: &Settings) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_watch_timer_keeps_a_first_run_after_the_reset() {
+        let t = watch_timer(5);
+        let reset = t.find("OnActiveSec=\n").expect("resets the list");
+        let first = t.find("OnActiveSec=1min").expect("sets a first run");
+        let repeat = t.find("OnUnitActiveSec=5min").expect("sets the repeat");
+        assert!(reset < first && reset < repeat, "both rules must come after the reset");
+        assert!(!t.contains("OnUnitActiveSec=\n"), "a second reset would wipe the first-run rule");
+    }
 
     /// Touches the real user units (writes drop-ins equal to the defaults).
     /// Run with: cargo test --release schedule -- --ignored --nocapture
