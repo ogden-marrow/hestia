@@ -33,6 +33,36 @@ fn stat(d: &Design, big: String, label: &str) -> El {
         .child(text(label.to_string()).font(style(d, type_::LABEL)).color(t.text_secondary))
 }
 
+/// A new install has nothing to show yet: a short checklist of what to do first, gone once it is all done.
+fn get_started(s: &State) -> Option<El> {
+    let d = s.design;
+    let t = d.theme();
+    let acc = d.accent_color();
+    let home = lifestream::home::is_home(&s.repo_dir);
+    let scanned = s.total > 0;
+    let launcher = crate::clipboard::extension_state() == "recording";
+    if home && scanned && launcher {
+        return None;
+    }
+    let step = |n: u8, done: bool, title: &str, why: &str, action: Option<El>| -> El {
+        row().w_full().gap(d.pad()).center_y().py(d.gap() * 0.6)
+            .child(text(if done { "✓".to_string() } else { n.to_string() }).font(style(&d, type_::TITLE)).color(if done { acc } else { t.text_secondary }).w(d.size(22.0)))
+            .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
+                .child(text(title.to_string()).font(style(&d, type_::BODY)).color(if done { t.text_secondary } else { t.text }))
+                .child(text(why.to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()))
+            .child(action.unwrap_or_else(|| col().size(1.0, 1.0)))
+    };
+    let go = |key: &str, label: &str, f: fn(&mut State)| crate::questions::button(&d, key, label.to_string(), true, f);
+    Some(col().w_full().padding(d.pad()).gap(d.gap() * 0.4).tile(&d)
+        .child(text("Get started").font(style(&d, type_::TITLE)).color(t.text))
+        .child(step(1, home, "Create your home repository", "The private git repository that holds everything of yours. Hestia will not scan until it exists, because it holds the list of places that must never be read.",
+            (!home).then(|| go("gs-home", "Set it up", |s| { crate::welcome::open(s); s.wstep = 2; }))))
+        .child(step(2, scanned, "Run your first scan", "Reads your folders and builds the stream. It never changes a file, and it runs by itself every night.",
+            (home && !scanned).then(|| go("gs-scan", "Scan now", |s| { s.msg = "scan started: this can take a few minutes".into(); let _ = std::process::Command::new("systemctl").args(["--user", "start", "lifestream-nightly.service"]).spawn(); }))))
+        .child(step(3, launcher, "Turn on Hestia Search", "Alt+Space from anywhere, and clipboard history. GNOME needs one log out and in after you turn it on.",
+            (!launcher).then(|| go("gs-ext", "Turn on", |s| s.msg = crate::setup::enable_extension())))))
+}
+
 pub fn panel(s: &State) -> El {
     let d = s.design;
     let t = d.theme();
@@ -77,7 +107,14 @@ pub fn panel(s: &State) -> El {
         .child(tile(&d, "tile-history", &icons::HISTORY, "History", commit, |s| { s.pane = Pane::History; s.reload_repo() }))
         .child(tile(&d, "tile-ask", &icons::ASK, "Search", "apps, files, clipboard and Hestia in one box".into(), |s| { s.pane = Pane::Ask; s.ask.focused = true }));
 
-    let body = col().w_full().gap(d.pad() * 1.3).child(hero).child(stats).child(needs)
+    let mut body = col().w_full().gap(d.pad() * 1.3);
+    if let Some(g) = get_started(s) {
+        body = body.child(g);
+    }
+    if !s.msg.is_empty() {
+        body = body.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(d.accent_color()).wrap_anywhere().shrink());
+    }
+    let body = body.child(hero).child(stats).child(needs)
         .child(col().w_full().gap(d.gap()).child(text("Jump back in").font(style(&d, type_::TITLE)).color(t.text)).child(tiles));
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad() * 1.3).panel(&d)
         .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(body))
