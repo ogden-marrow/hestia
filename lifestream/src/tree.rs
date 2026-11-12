@@ -367,7 +367,98 @@ pub fn apply(plan: &Plan, stream: &Path, home: &Path) -> Result<(usize, Vec<Stri
         }
     }
     write_all(stream, &recs)?;
+    journal_batch(stream, home, &done)?;
     Ok((done.len(), failed))
+}
+
+// ---- undo: every batch of moves is written down, so the last one can be put back ----------------------------------
+
+fn journal_path(stream: &Path) -> PathBuf {
+    stream.join("moves.jsonl")
+}
+
+/// One line per file `apply` moved, all sharing one batch id (the time), appended to `<stream>/moves.jsonl`.
+fn journal_batch(stream: &Path, home: &Path, done: &[&Move]) -> Result<()> {
+    if done.is_empty() {
+        return Ok(());
+    }
+    let batch = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+    let mut body = String::new();
+    for m in done {
+        body.push_str(&serde_json::json!({"batch": batch, "id": m.id, "from": tilde(&m.from, home), "to": tilde(&m.to, home)}).to_string());
+        body.push('\n');
+    }
+    fs::create_dir_all(stream)?;
+    use std::io::Write;
+    fs::OpenOptions::new().create(true).append(true).open(journal_path(stream))?.write_all(body.as_bytes())?;
+    Ok(())
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct UndoReport {
+    pub restored: usize,
+    /// (path as `~/…`, why it was left where it is)
+    pub skipped: Vec<(String, String)>,
+}
+
+/// `~/a/b` -> /home/x/a/b, only if it is a plain, non-hidden path under the home folder (a journal is a file on disk:
+/// treat it as untrusted, like everything else the mover reads).
+fn under_home(home: &Path, t: &str) -> Option<PathBuf> {
+    let rel = t.strip_prefix("~/")?;
+    rel_ok(rel).then(|| home.join(rel))
+}
+
+/// Put the files of the LAST batch of moves back where they came from, one at a time. It never overwrites (a file
+/// already at the old path stops that one), never leaves the home folder, and leaves anything it could not restore in
+/// the journal so asking again retries it. The stream is updated to match what happened on disk.
+pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
+    let text = fs::read_to_string(journal_path(stream)).unwrap_or_default();
+    let lines: Vec<serde_json::Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let Some(batch) = lines.last().and_then(|v| v["batch"].as_str()).map(String::from) else { return Ok(UndoReport::default()) };
+    let mut recs = load_all(stream)?;
+    let mut report = UndoReport::default();
+    let mut restored_lines: Vec<usize> = Vec::new();
+    for (i, v) in lines.iter().enumerate().rev() {
+        if v["batch"].as_str() != Some(batch.as_str()) {
+            continue;
+        }
+        let (Some(id), Some(from_s), Some(to_s)) = (v["id"].as_str(), v["from"].as_str(), v["to"].as_str()) else { continue };
+        let skip = |why: &str, rep: &mut UndoReport| rep.skipped.push((to_s.to_string(), why.to_string()));
+        let (Some(from), Some(to)) = (under_home(home, from_s), under_home(home, to_s)) else {
+            skip("not a plain path inside your home folder", &mut report);
+            continue;
+        };
+        match fs::symlink_metadata(&to) {
+            Ok(m) if m.file_type().is_file() => {}
+            Ok(_) => { skip("it is not a plain file any more", &mut report); continue }
+            Err(_) => { skip("it is no longer there", &mut report); continue }
+        }
+        if fs::symlink_metadata(&from).is_ok() {
+            skip("something is already at the old place", &mut report);
+            continue;
+        }
+        match move_file(&to, &from) {
+            Ok(()) => {
+                report.restored += 1;
+                restored_lines.push(i);
+                if let Some(r) = recs.iter_mut().find(|r| r.id == id) {
+                    if let Some(s) = r.sources.iter_mut().find(|s| s.as_str() == to_s) {
+                        *s = from_s.to_string();
+                    }
+                    r.was.retain(|w| w != from_s);
+                }
+            }
+            Err(e) => skip(&e.to_string(), &mut report),
+        }
+    }
+    if report.restored > 0 {
+        write_all(stream, &recs)?;
+        let keep: String = text.lines().enumerate().filter(|(i, _)| !restored_lines.contains(i)).map(|(_, l)| format!("{l}\n")).collect();
+        let tmp = journal_path(stream).with_extension("jsonl.tmp");
+        fs::write(&tmp, keep)?;
+        fs::rename(&tmp, journal_path(stream))?;
+    }
+    Ok(report)
 }
 
 /// Rename a real folder (the disk half of a drag and drop) and rewrite every stream path under it.
@@ -428,8 +519,14 @@ pub fn print_plan(plan: &Plan, home: &Path) {
 }
 
 /// `lifestream file`: dry run unless `apply`.
-pub fn cmd_file(tree_path: Option<PathBuf>, stream: &Path, manifest: Option<PathBuf>, apply_it: bool) -> Result<()> {
+pub fn cmd_file(tree_path: Option<PathBuf>, stream: &Path, manifest: Option<PathBuf>, apply_it: bool, undo: bool) -> Result<()> {
     let home = crate::home()?;
+    if undo {
+        // One JSON line, like the other engine commands: {"event":"undone","restored":N,"skipped":[{"path","why"}]}
+        let r = undo_last(stream, &home)?;
+        println!("{}", serde_json::json!({"event": "undone", "restored": r.restored, "skipped": r.skipped.iter().map(|(p, w)| serde_json::json!({"path": p, "why": w})).collect::<Vec<_>>()}));
+        return Ok(());
+    }
     let tree_path = tree_path.or_else(|| crate::query::find_up("tree.toml")).context("cannot find tree.toml (run inside your home repo or pass --tree)")?;
     let tree = Tree::load(&tree_path)?;
     let Some(manifest) = manifest.or_else(find_manifest) else {
@@ -689,5 +786,87 @@ mod tests {
         t.save(&f).unwrap();
         assert_eq!(Tree::load(&f).unwrap(), t);
         fs::remove_file(f).unwrap();
+    }
+    fn applied(tag: &str, names: &[&str]) -> (PathBuf, PathBuf) {
+        let h = sandbox(tag);
+        let stream = h.join("stream");
+        let recs: Vec<Record> = names.iter().map(|n| { let id = file(&h, &format!("Downloads/{n}"), n.as_bytes()); rec(&id, "image", &format!("~/Downloads/{n}"), n.len() as u64, "rule", 1.0) }).collect();
+        write_all(&stream, &recs).unwrap();
+        (h, stream)
+    }
+
+    fn move_one(h: &Path, stream: &Path, name: &str) {
+        let p = plan(&load_all(stream).unwrap(), &tree(), h, &[], &HashSet::new());
+        let only = Plan { moves: p.moves.into_iter().filter(|m| m.from.ends_with(name)).collect(), skipped: vec![] };
+        assert_eq!(apply(&only, stream, h).unwrap().0, 1);
+    }
+
+    #[test]
+    fn undo_puts_the_file_back_and_the_stream_agrees() {
+        let (h, stream) = applied("undo1", &["a.png"]);
+        move_one(&h, &stream, "a.png");
+        assert!(h.join("Pictures/Saved/a.png").exists() && !h.join("Downloads/a.png").exists());
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!((r.restored, r.skipped.len()), (1, 0), "{r:?}");
+        assert!(h.join("Downloads/a.png").exists() && !h.join("Pictures/Saved/a.png").exists());
+        let rec = &load_all(&stream).unwrap()[0];
+        assert_eq!((rec.sources.clone(), rec.was.len()), (vec!["~/Downloads/a.png".to_string()], 0));
+        assert_eq!(undo_last(&stream, &h).unwrap(), UndoReport::default(), "nothing left to undo");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_never_overwrites_and_remembers_what_it_could_not_do() {
+        let (h, stream) = applied("undo2", &["a.png"]);
+        move_one(&h, &stream, "a.png");
+        fs::write(h.join("Downloads/a.png"), b"a different file the person made since").unwrap();
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!(r.restored, 0);
+        assert!(r.skipped.iter().any(|(p, why)| p.ends_with("a.png") && why.contains("already")), "{r:?}");
+        assert_eq!(fs::read(h.join("Downloads/a.png")).unwrap(), b"a different file the person made since");
+        assert!(h.join("Pictures/Saved/a.png").exists(), "the filed copy stays");
+        fs::remove_file(h.join("Downloads/a.png")).unwrap();
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1, "asking again retries what was left");
+        // a file the person has since moved or deleted is reported, not invented
+        let (h2, stream2) = applied("undo3", &["b.png"]);
+        move_one(&h2, &stream2, "b.png");
+        fs::remove_file(h2.join("Pictures/Saved/b.png")).unwrap();
+        let r = undo_last(&stream2, &h2).unwrap();
+        assert!(r.restored == 0 && r.skipped[0].1.contains("no longer there"), "{r:?}");
+        fs::remove_dir_all(h).unwrap();
+        fs::remove_dir_all(h2).unwrap();
+    }
+
+    #[test]
+    fn undo_takes_back_only_the_last_batch() {
+        let (h, stream) = applied("undo4", &["a.png", "b.png"]);
+        move_one(&h, &stream, "a.png");
+        move_one(&h, &stream, "b.png");
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1);
+        assert!(h.join("Downloads/b.png").exists() && h.join("Pictures/Saved/a.png").exists(), "only the later batch comes back");
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1);
+        assert!(h.join("Downloads/a.png").exists());
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_treats_the_journal_as_untrusted() {
+        let (h, stream) = applied("undo5", &["a.png"]);
+        move_one(&h, &stream, "a.png");
+        let j = journal_path(&stream);
+        let id = load_all(&stream).unwrap()[0].id.clone();
+        let batch = "9999-12-31T00:00:00.000000000Z";
+        fs::create_dir_all(h.join(".ssh")).unwrap();
+        let mut evil = String::new();
+        for (from, to) in [("~/.ssh/authorized_keys", "~/Pictures/Saved/a.png"), ("/etc/cron.d/x", "~/Pictures/Saved/a.png"), ("~/Downloads/../.ssh/k", "~/Pictures/Saved/a.png"), ("~/Downloads/x", "/etc/passwd")] {
+            evil.push_str(&format!("{}\n", serde_json::json!({"batch": batch, "id": id, "from": from, "to": to})));
+        }
+        use std::io::Write;
+        fs::OpenOptions::new().append(true).open(&j).unwrap().write_all(evil.as_bytes()).unwrap();
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!(r.restored, 0);
+        assert_eq!(r.skipped.len(), 4, "{r:?}");
+        assert!(h.join("Pictures/Saved/a.png").exists() && !h.join(".ssh/authorized_keys").exists(), "nothing moved outside the rules");
+        fs::remove_dir_all(h).unwrap();
     }
 }
