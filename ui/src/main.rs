@@ -521,7 +521,7 @@ fn system_panel(s: &State) -> El {
     let t = d.theme();
     let acc = d.accent_color();
     let st = &s.status;
-    let bad = rune::Color { r: 0.92, g: 0.35, b: 0.33, a: 1.0 };
+    let bad = d.danger();
     let card = |title: &str| col().w_full().padding(d.pad()).gap(d.gap()).tile(&d)
         .child(text(title.to_string()).font(style(&d, type_::SECTION)).color(t.text_secondary));
     let cell = |txt: String, w: f32, c: rune::Color| text(txt).font(style(&d, type_::LABEL)).color(c).w(d.size(w));
@@ -531,10 +531,15 @@ fn system_panel(s: &State) -> El {
             .child(text("Overnight scan").font(style(&d, type_::BODY)).color(t.text))
             .child(text("Reads your folders and updates the stream. The schedule is in Settings.").font(style(&d, type_::LABEL)).color(t.text_secondary)))
         .child(questions::action(&d, "scan-now", "Scan now", "Scanning…", true, s.jobs.running("scan"), |s: &mut State| s.start_scan()));
-    let mut timers = card("timers and services").child(
-        row().gap(d.pad()).child(cell("".into(), 14.0, t.text_secondary)).child(cell("unit".into(), 230.0, t.text_secondary))
-            .child(cell("state".into(), 130.0, t.text_secondary)).child(cell("next run".into(), 150.0, t.text_secondary)).child(cell("last run".into(), 150.0, t.text_secondary)),
-    );
+    let mut timers = card("Background jobs");
+    if st.units.is_empty() {
+        timers = timers.child(text("No background jobs found. Turn them on in Settings, General.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
+    } else {
+        timers = timers.child(
+            row().gap(d.pad()).child(cell("".into(), 14.0, t.text_secondary)).child(cell("Name".into(), 230.0, t.text_secondary))
+                .child(cell("State".into(), 130.0, t.text_secondary)).child(cell("Next run".into(), 150.0, t.text_secondary)).child(cell("Last run".into(), 150.0, t.text_secondary)),
+        );
+    }
     for u in &st.units {
         let ok = (u.active.starts_with("active") || u.active == "idle") && (u.result.is_empty() || u.result == "success");
         timers = timers.child(
@@ -553,7 +558,10 @@ fn system_panel(s: &State) -> El {
         else if m.starts_with(semantic::DEFAULT_MODEL) { "search by meaning" }
         else { "installed" }
     };
-    let mut models = card(if st.ollama_up { "models (ollama is up)" } else { "models (ollama is down)" });
+    let mut models = card("Models");
+    if st.installed.is_empty() {
+        models = models.child(text(if st.ollama_up { "No models installed yet." } else { "Models are off. Start Ollama to get folder suggestions and search by meaning." }).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
+    }
     for (name, gb) in &st.installed {
         let live = st.loaded.iter().find(|l| &l.name == name);
         models = models.child(
@@ -566,26 +574,24 @@ fn system_panel(s: &State) -> El {
         );
     }
 
-    let mut hw = card("graphics card");
-    match &st.gpu {
-        Some(g) => {
+    let mut hw = card("Graphics");
+    if let Some(g) = &st.gpu {
+        {
             let frac = g.used_mb as f32 / g.total_mb.max(1) as f32;
             hw = hw
                 .child(text(format!("memory {} / {} MB · busy {}% · {}°C", g.used_mb, g.total_mb, g.util, g.temp)).font(style(&d, type_::BODY)).color(t.text))
                 .child(el().key("gpu-track").w_full().h(8.0).radius(4.0).fill(t.control_off)
                     .child(el().key("gpu-bar").w(560.0 * frac).h(8.0).radius(4.0).fill(if frac > 0.9 { bad } else { acc })));
         }
-        None => hw = hw.child(text("no NVIDIA GPU reported").font(style(&d, type_::BODY)).color(t.text_secondary)),
     }
 
-    let pipe = card("pipeline")
+    let pipe = card("Progress")
         .child(kv(&d, "stream last updated", &st.stream_age))
         .child(kv(&d, "files waiting for you", &st.pending.to_string()))
         .child(kv(&d, "folders suggested by the models", &format!("{} of {}", st.suggested, st.folders)));
 
-    let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(row().w_full().gap(d.pad()).child(hw.grow(1.0)).child(pipe.grow(1.0)));
+    let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(row().w_full().gap(d.pad()).child(pipe.grow(1.0)).child(if st.gpu.is_some() { hw.grow(1.0) } else { col().size(0.0, 0.0) }));
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
-        .child(text("system · live").font(style(&d, type_::TITLE)).color(t.text))
         .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(inner))
 }
 
