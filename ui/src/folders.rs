@@ -262,21 +262,54 @@ impl State {
             let _ = std::fs::create_dir_all(home.join(d));
         }
     }
+    /// File everything the plan says, as a job: the screen stays alive and the button says what it is doing.
     fn file_now(&mut self) {
         let Some(stream) = self.stream.clone() else { return };
-        let home = super::files::home();
-        self.create_dirs();
-        match tree::preview(&self.recs, &self.tree, &self.repo_dir).and_then(|p| tree::apply(&p, &stream, &home)) {
-            Ok((n, failed)) => {
-                self.recs = lifestream::load_all(&stream).unwrap_or_default();
-                self.refresh_derived();
-                self.refresh_plan();
-                self.msg = format!("moved {n} files{}", if failed.is_empty() { String::new() } else { format!(", {} failed", failed.len()) });
-            }
-            Err(e) => self.msg = format!("could not move: {e:#}"),
-        }
         self.confirm_move = false;
+        self.undo_lines.clear();
+        self.create_dirs();
+        let (recs, tree, repo, home) = (self.recs.clone(), self.tree.clone(), self.repo_dir.clone(), super::files::home());
+        self.msg = "moving your files…".into();
+        self.jobs.start("file", Some(reload_after_filing), move || {
+            let (n, failed) = tree::preview(&recs, &tree, &repo).and_then(|p| tree::apply(&p, &stream, &home)).map_err(|e| format!("could not move: {e:#}"))?;
+            Ok(format!("{n}\u{1f}{}", failed.len()))
+        });
     }
+
+    /// Put the last batch back, as a job. What could not go back is listed, one calm line each.
+    pub(crate) fn undo_filing(&mut self) {
+        let Some(stream) = self.stream.clone() else { return };
+        self.undo_lines.clear();
+        self.msg = "putting files back…".into();
+        let inbox = self.undo_inbox.clone();
+        self.jobs.start("undo", Some(after_undo), move || {
+            let u = crate::engine::undo(&stream)?;
+            *inbox.lock().unwrap() = u.skipped.iter().map(|(p, why)| format!("{p}: {why}")).collect();
+            Ok(if u.restored == 0 && u.skipped.is_empty() { "Nothing to put back.".to_string() } else { format!("Put back {}", crate::today::count(u.restored, "file", "files")) })
+        });
+    }
+}
+
+/// After a filing job: the engine moved the files and wrote the stream; load it and show Undo.
+fn reload_after_filing(s: &mut State) {
+    if let Some(stream) = s.stream.clone() {
+        s.recs = lifestream::load_all(&stream).unwrap_or_default();
+    }
+    s.refresh_derived();
+    s.refresh_plan();
+    let (n, failed) = s.msg.split_once('\u{1f}').map(|(a, b)| (a.parse().unwrap_or(0), b.parse().unwrap_or(0))).unwrap_or((0usize, 0usize));
+    s.last_filed = n;
+    s.msg = format!("Moved {}{}. You can put them back.", crate::today::count(n, "file", "files"), if failed > 0 { format!(", {failed} could not be moved") } else { String::new() });
+}
+
+fn after_undo(s: &mut State) {
+    if let Some(stream) = s.stream.clone() {
+        s.recs = lifestream::load_all(&stream).unwrap_or_default();
+    }
+    s.refresh_derived();
+    s.refresh_plan();
+    s.last_filed = 0;
+    s.undo_lines = std::mem::take(&mut *s.undo_inbox.lock().unwrap());
 }
 
 fn toggle(d: &Design, on: bool) -> El {
@@ -395,7 +428,7 @@ pub fn panels(s: &State) -> Vec<El> {
     let n_moves = s.tplan.as_ref().map(|p| p.moves.len()).unwrap_or(0);
     let bar = row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y()
         .child(text(format!("{n_moves} files would move tonight")).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0))
-        .child(button(&d, "f-now", "File them now…".into(), true, |s: &mut State| s.confirm_move = true));
+        .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", true, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
 
     let banner = match s.moving.and_then(|i| s.tree.folders.get(i)) {
         Some(f) => Some(row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
@@ -485,15 +518,28 @@ pub fn panels(s: &State) -> Vec<El> {
             }
             if s.confirm_move {
                 prev = prev.child(col().w_full().padding(d.item_px()).gap(d.gap()).tile(&d)
-                    .child(text(format!("Move {} files now? Hestia keeps no undo for moves.", p.moves.len())).font(style(&d, type_::LABEL)).color(t.text).wrap_anywhere().shrink())
+                    .child(text(format!("Move {} files now? You can put them back right after.", p.moves.len())).font(style(&d, type_::LABEL)).color(t.text).wrap_anywhere().shrink())
                     .child(row().w_full().gap(d.gap())
-                        .child(button(&d, "f-confirm", format!("Yes, move {} files", p.moves.len()), true, |s: &mut State| s.file_now()))
+                        .child(crate::questions::action(&d, "f-confirm", &format!("Yes, move {} files", p.moves.len()), "Moving files…", true, s.jobs.running("file"), |s: &mut State| s.file_now()))
                         .child(button(&d, "f-cancel", "Cancel".into(), false, |s: &mut State| s.confirm_move = false))));
             }
         }
         None => prev = prev.child(text("Preview unavailable: the sensitive-path list could not be read.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()),
     }
     body = body.child(prev);
+    if s.last_filed > 0 || s.jobs.running("undo") {
+        body = body.child(crate::questions::action(&d, "f-undo", "Put them back", "Putting files back…", false, s.jobs.running("undo"), |s: &mut State| s.undo_filing()));
+    }
+    if !s.undo_lines.is_empty() {
+        let mut left = col().w_full().gap(d.gap() * 0.5).child(text("These stayed where they are:").font(style(&d, type_::LABEL)).color(t.text));
+        for l in s.undo_lines.iter().take(8) {
+            left = left.child(text(l.clone()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
+        }
+        if s.undo_lines.len() > 8 {
+            left = left.child(text(format!("and {} more", s.undo_lines.len() - 8)).font(style(&d, type_::LABEL)).color(t.text_secondary));
+        }
+        body = body.child(left);
+    }
     if !s.msg.is_empty() {
         body = body.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink());
     }
@@ -523,5 +569,27 @@ mod tests {
         assert_eq!(path_for("software/app-bundle"), "Software/App-Bundle");
         assert_eq!(path_for("audio"), "Audio");
         assert_eq!(path_for("game/save-backup"), "Game/Save-Backup");
+    }
+
+
+    #[test]
+    fn filing_says_what_moved_and_offers_undo() {
+        let mut s = State::default();
+        s.msg = "3\u{1f}0".into();
+        reload_after_filing(&mut s);
+        assert_eq!((s.last_filed, s.msg.as_str()), (3, "Moved 3 files. You can put them back."));
+        s.msg = "1\u{1f}2".into();
+        reload_after_filing(&mut s);
+        assert_eq!(s.msg, "Moved 1 file, 2 could not be moved. You can put them back.");
+    }
+
+    #[test]
+    fn undoing_clears_the_offer_and_lists_what_stayed() {
+        let mut s = State::default();
+        s.last_filed = 3;
+        *s.undo_inbox.lock().unwrap() = vec!["~/Pictures/a.png: something is already at the old place".into()];
+        after_undo(&mut s);
+        assert_eq!(s.last_filed, 0);
+        assert_eq!(s.undo_lines.len(), 1);
     }
 }
