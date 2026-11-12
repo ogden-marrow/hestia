@@ -266,7 +266,7 @@ impl State {
             }
         }
         self.ext_kinds = by_ext.into_iter()
-            .filter_map(|(e, k)| k.into_iter().max_by_key(|x| x.1).filter(|x| x.1 >= 3).map(|best| (e, best)))
+            .filter_map(|(e, k)| k.into_iter().max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0))).filter(|x| x.1 >= 3).map(|best| (e, best)))
             .collect();
         let live = |r: &Record| r.status != "gone";
         self.total = self.recs.iter().filter(|r| live(r)).count();
