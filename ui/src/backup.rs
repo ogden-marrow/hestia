@@ -46,6 +46,13 @@ pub fn watch_failure(json: &str) -> Option<String> {
     Some(if reason.is_empty() { "the last backup did not finish".to_string() } else { reason.to_string() })
 }
 
+/// When the watcher last finished a run that worked (`ok…`). A quiet computer makes no commits, so the newest
+/// commit alone would call a perfectly healthy backup "3 days old".
+pub fn watch_ok_at(json: &str) -> Option<i64> {
+    let v: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
+    v.get("result")?.as_str()?.starts_with("ok").then(|| v.get("at")?.as_i64()).flatten()
+}
+
 pub fn watch_json() -> Option<String> {
     let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
     std::fs::read_to_string(base.join("hestia/watch.json")).ok()
@@ -55,10 +62,12 @@ pub fn read(dir: &Path) -> Facts {
     if !lifestream::home::is_home(dir) {
         return Facts::default();
     }
-    let last = git(dir, &["log", "-1", "--format=%ct"]).trim().parse().ok();
+    let watch = watch_json();
+    let commit: Option<i64> = git(dir, &["log", "-1", "--format=%ct"]).trim().parse().ok();
+    let last = commit.max(watch.as_deref().and_then(watch_ok_at));
     let has_remote = !git(dir, &["remote"]).trim().is_empty();
     let ahead = git(dir, &["rev-list", "--count", "@{u}..HEAD"]).trim().parse().unwrap_or(0);
-    Facts { is_home: true, last, has_remote, ahead, failed: watch_json().and_then(|j| watch_failure(&j)) }
+    Facts { is_home: true, last, has_remote, ahead, failed: watch.as_deref().and_then(watch_failure) }
 }
 
 /// "just now", "12 minutes ago", "3 hours ago", "yesterday", "5 days ago".
@@ -144,6 +153,13 @@ mod tests {
         assert_eq!(watch_failure(r#"{"at":1,"result":"ok: 2 commit(s), up to date"}"#), None);
         assert_eq!(watch_failure(r#"{"at":1,"result":"busy: another run"}"#), None);
         assert_eq!(watch_failure("not json"), None);
+    }
+
+    #[test]
+    fn a_quiet_but_healthy_watcher_counts_as_a_recent_backup() {
+        assert_eq!(watch_ok_at(r#"{"at":1700,"result":"ok: 0 commit(s), up to date"}"#), Some(1700));
+        assert_eq!(watch_ok_at(r#"{"at":1700,"result":"FAILED: x"}"#), None);
+        assert_eq!(watch_ok_at(r#"{"at":1700,"result":"busy: y"}"#), None);
     }
 
     #[test]

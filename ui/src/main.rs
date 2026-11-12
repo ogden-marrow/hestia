@@ -476,7 +476,7 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         Pane::Machine => format!("{} since your last backup", today::count(s.mach.iter().map(|c| c.drift()).sum::<usize>(), "change", "changes")),
         Pane::System => format!("models {}", if s.status.ollama_up { "ready" } else { "off" }),
         Pane::Ask => "apps, files, clipboard and Hestia, on this computer".into(),
-        Pane::Settings => "changes apply right away".into(),
+        Pane::Settings => "changes apply right away  ·  Ctrl+, opens Settings, Ctrl+F searches".into(),
         Pane::Welcome => "a short tour".into(),
     };
     let footer = row().w_full().h(d.size(24.0)).px(pad).center_y().fill(t.card)
@@ -596,8 +596,16 @@ fn system_panel(s: &State) -> El {
         .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(inner))
 }
 
-/// Arrow keys move through time on the time view.
+/// Ctrl+, opens Settings and Ctrl+F opens Search, from anywhere; arrow keys move through time on the time view.
 fn on_key(s: &mut State, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+    if ev.is_command(',') {
+        s.pane = Pane::Settings;
+        return true;
+    }
+    if ev.is_command('f') {
+        s.pane = Pane::Ask;
+        return true;
+    }
     if s.pane != Pane::Time {
         return false;
     }
