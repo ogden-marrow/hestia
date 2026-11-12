@@ -72,21 +72,24 @@ pub fn list(s: &State) -> El {
         .child(col().w_full().h(d.size(220.0)).scroll(ScrollSpec { stick_bottom: false }).child(rows));
     if let Some(e) = s.entries.get(s.esel) {
         c = c
-            .child(kv(&d, "kind", &e.kind))
-            .child(kv(&d, "size", &if e.is_dir { "folder".to_string() } else { human(e.size) }))
-            .child(kv(&d, "modified", &e.modified));
+            .child(kv(&d, "Kind", &if e.is_dir { "Folder".to_string() } else { crate::kinds::label(&e.kind) }))
+            .child(kv(&d, "Size", &if e.is_dir { "—".to_string() } else { human(e.size) }))
+            .child(kv(&d, "Modified", &e.modified));
         if let Some(r) = s.recs.iter().find(|r| r.sources.iter().any(|p| *p == tilde(&e.path))) {
             c = c
-                .child(kv(&d, "filed by", &format!("{} · {}", r.by.tier, r.by.name)))
-                .child(kv(&d, "tags", &r.tags.join("  ")))
+                .child(kv(&d, "Filed by", &format!("{} · {}", crate::kinds::label(&r.by.tier), r.by.name)));
+            if !r.tags.is_empty() {
+                c = c.child(kv(&d, "Tags", &r.tags.join("  ")));
+            }
+            c = c
                 .child(super::field(&d, "file-kind", &s.f_filekind, "change this file's kind ↵ (like document/manual)", |s: &mut State| &mut s.f_filekind).on_submit(|s: &mut State, _: &mut rune::Tx| s.label_file()));
         }
         let path = e.path.clone();
-        c = c.child(
-            row().key("open").h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM)).fill(acc)
+        c = c.child(row().child(
+            row().key("open").h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM)).border(1.0, t.card_border)
                 .on_press(move |_: &mut State| super::open_folder(&path.to_string_lossy()))
-                .child(text("Open").font(style(&d, type_::LABEL)).color(d.on_accent())),
-        );
+                .child(text("Open").font(style(&d, type_::LABEL)).color(t.text)),
+        ));
     }
     c
 }
