@@ -77,7 +77,13 @@ fn clock<F: Fn(&mut State, i32, i32) + Clone + 'static>(d: &Design, key: &str, (
 }
 
 pub(crate) fn on_off<F: Fn(&mut State, bool) + Clone + 'static>(d: &Design, key: &str, on: bool, f: F) -> El {
-    segmented(d, key, &["Off", "On"], on as usize, move |s, i| f(s, i == 1))
+    let t = d.theme();
+    let knob = || rune::el().size(d.size(20.0), d.size(20.0)).radius(d.size(10.0)).fill(rune::oklch(1.0, 0.0, 0.0));
+    let spacer = || rune::el().grow(1.0);
+    let track = row().key(key.to_string()).w(d.size(44.0)).h(d.size(26.0)).px(3.0).center_y().radius(d.size(13.0))
+        .fill(if on { d.accent_color() } else { t.control_off }).border(1.0, if on { d.accent_color() } else { t.card_border })
+        .on_press(move |s: &mut State| f(s, !on));
+    if on { track.child(spacer()).child(knob()) } else { track.child(knob()).child(spacer()) }
 }
 
 /// Turning clipboard history off also deletes what was recorded.
