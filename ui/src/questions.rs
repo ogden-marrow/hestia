@@ -54,7 +54,7 @@ pub fn choices(s: &State, b: &Bundle) -> Vec<Choice> {
         }
     }
     let mut nearby: Vec<_> = nearby.into_iter().collect();
-    nearby.sort_by_key(|x| std::cmp::Reverse(x.1));
+    nearby.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     for (kind, n) in nearby.into_iter().take(2) {
         add(&mut out, kind, format!("You filed {n} files in this project as this"));
     }
@@ -63,7 +63,7 @@ pub fn choices(s: &State, b: &Bundle) -> Vec<Choice> {
             add(&mut out, kind, format!("Other {ext} files are filed as this ({n} of them)"));
         }
     }
-    out.sort_by_key(|c| std::cmp::Reverse(c.reasons.len()));
+    out.sort_by(|a, b| b.reasons.len().cmp(&a.reasons.len()).then_with(|| a.kind.cmp(&b.kind)));
     out
 }
 
