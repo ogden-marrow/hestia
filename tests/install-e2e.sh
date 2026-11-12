@@ -50,7 +50,7 @@ mkdir -p "$HOME/Other"; ( cd "$HOME/Other" && git init -q . && touch tree.toml &
 for form in "$HOME/Other" "~/Other" "Other"; do
   sed -i '/^home=/d' "$HOME/.config/hestia/settings"; echo "home=$form" >> "$HOME/.config/hestia/settings"
   bash "$PREFIX/libexec/hestia/watch.sh" || fail "the watcher failed for home=$form"
-  git -C "$HOME/Other" log --format=%s | grep -q "first capture of this computer" || fail "home=$form did not move the watcher to the other repository"
+  git -C "$HOME/Other" log --format=%s | grep -q "first capture of this computer" || fail "home=$form did not move the watcher to the other repository. status: $(cat "$XDG_DATA_HOME/hestia/watch.json" 2>&1); errors: $(tail -5 "$XDG_DATA_HOME/hestia/watch.err" 2>&1); log: $(git -C "$HOME/Other" log --format=%s | head -3 | paste -sd'|')"
   git -C "$HOME/Other" reset -q --hard HEAD~1 2>/dev/null || true
 done
 [ "$(git -C "$HESTIA_HOME" rev-list --count HEAD)" = "$before" ] || fail "the watcher touched a repository the setting no longer names"
