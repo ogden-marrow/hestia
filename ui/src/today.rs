@@ -36,14 +36,21 @@ fn get_started(s: &State) -> Option<El> {
             .child(action.unwrap_or_else(|| col().size(1.0, 1.0)))
     };
     let go = |key: &str, label: &str, f: fn(&mut State)| crate::questions::button(&d, key, label.to_string(), true, f);
+    // One step at a time: only the next thing to do, with how far along you are.
+    let done_n = [home, scanned, launcher].iter().filter(|x| **x).count();
+    let next = if !home {
+        step(1, false, "Create your home repository", "The private git repository that holds everything of yours. Hestia will not scan until it exists, because it holds the list of places that must never be read.",
+            Some(go("gs-home", "Set it up", |s| { crate::welcome::open(s); s.wstep = 2; crate::account::begin(s); })))
+    } else if !scanned {
+        step(2, false, "Run your first scan", "Reads your folders and builds the stream. It never changes a file, and it runs by itself every night.",
+            Some(crate::questions::action(&d, "gs-scan", "Scan now", "Scanning…", true, s.jobs.running("scan"), |s: &mut State| s.start_scan())))
+    } else {
+        step(3, false, "Turn on Hestia Search", "Alt+Space from anywhere, and clipboard history. GNOME needs one log out and in after you turn it on.",
+            Some(crate::questions::action(&d, "gs-ext", "Turn on", "Turning on…", true, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search())))
+    };
     Some(col().w_full().padding(d.pad()).gap(d.gap() * 0.4).tile(&d)
-        .child(text("Get started").font(style(&d, type_::TITLE)).color(t.text))
-        .child(step(1, home, "Create your home repository", "The private git repository that holds everything of yours. Hestia will not scan until it exists, because it holds the list of places that must never be read.",
-            (!home).then(|| go("gs-home", "Set it up", |s| { crate::welcome::open(s); s.wstep = 2; crate::account::begin(s); }))))
-        .child(step(2, scanned, "Run your first scan", "Reads your folders and builds the stream. It never changes a file, and it runs by itself every night.",
-            (home && !scanned).then(|| crate::questions::action(&d, "gs-scan", "Scan now", "Scanning…", true, s.jobs.running("scan"), |s: &mut State| s.start_scan()))))
-        .child(step(3, launcher, "Turn on Hestia Search", "Alt+Space from anywhere, and clipboard history. GNOME needs one log out and in after you turn it on.",
-            (!launcher).then(|| crate::questions::action(&d, "gs-ext", "Turn on", "Turning on…", true, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search())))))
+        .child(text(format!("Get started · {done_n} of 3 done")).font(style(&d, type_::TITLE)).color(t.text))
+        .child(next))
 }
 
 /// The backup: silent when safe (the header says so), one card with one plain action when it is not.
@@ -125,9 +132,6 @@ pub fn panel(s: &State) -> El {
         .font(d.text(Role::Label)).color(t.text_secondary).wrap_anywhere().shrink();
 
     let mut body = col().w_full().gap(d.section());
-    if let Some(g) = get_started(s) {
-        body = body.child(g);
-    }
     if !s.msg.is_empty() {
         body = body.child(text(s.msg.clone()).font(d.text(Role::Label)).color(d.accent_color()).wrap_anywhere().shrink());
     }
@@ -135,7 +139,11 @@ pub fn panel(s: &State) -> El {
     if let Some(b) = backup_status(s) {
         body = body.child(b);
     }
-    let body = body.child(needs).child(facts);
+    body = body.child(needs);
+    if let Some(g) = get_started(s) {
+        body = body.child(g);
+    }
+    let body = body.child(facts);
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad() * 2.0).panel(&d)
         .child(col().w_full().max_w(d.size(640.0)).scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(body))
 }
