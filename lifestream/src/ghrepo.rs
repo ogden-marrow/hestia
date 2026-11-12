@@ -25,6 +25,7 @@ pub fn valid_full_name(s: &str) -> bool {
     s.split_once('/').is_some_and(|(o, n)| ok(o) && ok(n) && !n.contains('/'))
 }
 
+#[allow(clippy::result_large_err)] // ureq's own error type
 fn get(ep: &Endpoints, token: &str, path: &str) -> Result<Value, ureq::Error> {
     let r = crate::auth::agent()
         .get(&format!("{}{path}", ep.api))
@@ -143,9 +144,28 @@ fn git_ok(args: &[&str], helper: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Everything `adopt` and `create` need besides what they are asked to do: who is signed in, where GitHub and git are, where the
+/// setting lives, which program git should ask for the token, and today's date.
+#[derive(Clone, Copy)]
+pub struct Ctx<'a> {
+    pub token: &'a str,
+    pub ep: &'a Endpoints,
+    pub git_base: &'a str,
+    pub settings: &'a Path,
+    pub exe: &'a Path,
+    pub today: &'a str,
+}
+
+impl<'a> Ctx<'a> {
+    pub fn new(token: &'a str, ep: &'a Endpoints, git_base: &'a str, settings: &'a Path, exe: &'a Path, today: &'a str) -> Self {
+        Self { token, ep, git_base, settings, exe, today }
+    }
+}
+
 /// Clone the person's own private home repository into `dest` and make it this computer's home.
 /// `git_base` is where git fetches from (https://github.com in production; a local folder in tests).
-pub fn adopt(out: &mut dyn Write, token: &str, ep: &Endpoints, git_base: &str, full: &str, dest: &Path, settings: &Path, exe: &Path, today: &str) -> bool {
+pub fn adopt(out: &mut dyn Write, c: &Ctx, full: &str, dest: &Path) -> bool {
+    let Ctx { token, ep, git_base, settings, exe, today } = *c;
     if !valid_full_name(full) {
         return other(out, "that is not a repository name (use owner/name)");
     }
@@ -252,7 +272,8 @@ pub fn guard_history(dir: &Path) -> Result<()> {
 /// Make a new PRIVATE repository on GitHub for the person's home, create the local home repository, and push it.
 /// Order matters: nothing is sent until the whole history has been scanned, and a name that is already taken is reported
 /// (`exists`) rather than reused.
-pub fn create(out: &mut dyn Write, token: &str, ep: &Endpoints, git_base: &str, name: &str, dest: &Path, settings: &Path, exe: &Path, today: &str) -> bool {
+pub fn create(out: &mut dyn Write, c: &Ctx, name: &str, dest: &Path) -> bool {
+    let Ctx { token, ep, git_base, settings, exe, today } = *c;
     if !valid_full_name(&format!("x/{name}")) {
         return other(out, "that is not a repository name (letters, digits, - _ and . only)");
     }
@@ -457,7 +478,7 @@ mod tests {
         let dest = root.join("Home");
         let settings = root.join("cfg/settings");
         let mut out = Vec::new();
-        let ok = adopt(&mut out, &tok(), &ep, &base, "ada/home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11");
+        let ok = adopt(&mut out, &Ctx::new(&tok(), &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11"), "ada/home", &dest);
         let o = String::from_utf8(out).unwrap();
         assert!(ok, "{o}");
         assert!(o.contains(r#""event":"cloned""#) && o.contains("ada/home") && !o.contains("gho_"), "{o}");
@@ -469,7 +490,7 @@ mod tests {
         assert!(String::from_utf8_lossy(&c.stdout).contains("auth git-credential"));
         // doing it again is fine and changes nothing
         let mut out2 = Vec::new();
-        assert!(adopt(&mut out2, &tok(), &ep, &base, "ada/home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11"), "{}", String::from_utf8_lossy(&out2));
+        assert!(adopt(&mut out2, &Ctx::new(&tok(), &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11"), "ada/home", &dest), "{}", String::from_utf8_lossy(&out2));
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -480,7 +501,7 @@ mod tests {
         let run = |routes: Vec<(String, u16, String)>, full: &str, dest: &Path| {
             let (ep, _) = fake(routes);
             let mut out = Vec::new();
-            let ok = adopt(&mut out, &tok(), &ep, &base, full, dest, &settings, Path::new("/usr/bin/true"), "2026-11-11");
+            let ok = adopt(&mut out, &Ctx::new(&tok(), &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11"), full, dest);
             (ok, String::from_utf8(out).unwrap())
         };
         let dest = root.join("Home");
@@ -503,7 +524,7 @@ mod tests {
         let (ep, _) = fake(adopt_routes(true, true));
         let dest2 = root2.join("Home");
         let mut out = Vec::new();
-        assert!(!adopt(&mut out, &tok(), &ep, &base2, "ada/home", &dest2, &root2.join("s"), Path::new("/usr/bin/true"), "2026-11-11"));
+        assert!(!adopt(&mut out, &Ctx::new(&tok(), &ep, &base2, &root2.join("s"), Path::new("/usr/bin/true"), "2026-11-11"), "ada/home", &dest2));
         assert!(!dest2.exists() && !root2.join(".home.hestia-part").exists());
         std::fs::remove_dir_all(&root).unwrap();
         std::fs::remove_dir_all(&root2).unwrap();
@@ -578,7 +599,7 @@ mod tests {
         let dest = root.join("Home");
         let settings = root.join("cfg/settings");
         let mut out = Vec::new();
-        let ok = create(&mut out, &tok(), &ep, &base, "home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11");
+        let ok = create(&mut out, &Ctx::new(&tok(), &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11"), "home", &dest);
         let o = String::from_utf8(out).unwrap();
         assert!(ok, "{o}");
         assert!(o.contains(r#""event":"created""#) && o.contains("ada/home") && !o.contains("gho_"), "{o}");
@@ -599,7 +620,7 @@ mod tests {
         let dest = root.join("Home");
         let (ep, _) = fake(create_routes(422));
         let mut out = Vec::new();
-        assert!(!create(&mut out, &tok(), &ep, &base, "home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11"));
+        assert!(!create(&mut out, &Ctx::new(&tok(), &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11"), "home", &dest));
         let o = String::from_utf8(out).unwrap();
         assert!(o.contains(r#""kind":"exists""#) && o.contains("ada/home") && !dest.exists(), "{o}");
         // a folder with files: refused without even contacting GitHub's create endpoint
@@ -607,7 +628,7 @@ mod tests {
         std::fs::write(dest.join("mine.txt"), "keep me").unwrap();
         let (ep, seen) = fake(create_routes(201));
         let mut out = Vec::new();
-        assert!(!create(&mut out, &tok(), &ep, &base, "home", &dest, &settings, Path::new("/usr/bin/true"), "2026-11-11"));
+        assert!(!create(&mut out, &Ctx::new(&tok(), &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11"), "home", &dest));
         assert!(String::from_utf8(out).unwrap().contains("already has files"));
         assert!(!seen.lock().unwrap().iter().any(|r| r.starts_with("POST")), "must not create anything on GitHub");
         assert_eq!(std::fs::read_to_string(dest.join("mine.txt")).unwrap(), "keep me");

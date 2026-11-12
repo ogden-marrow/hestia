@@ -293,13 +293,13 @@ fn main() -> Result<()> {
                     let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
                     let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));
                     let exe = std::env::current_exe()?;
-                    ghrepo::create(&mut out, &token, &ep, "https://github.com", &name, &dest, &settings, &exe, &chrono_today())
+                    ghrepo::create(&mut out, &ghrepo::Ctx::new(&token, &ep, "https://github.com", &settings, &exe, &chrono_today()), &name, &dest)
                 }
                 HomeCmd::Adopt { repo, into, .. } => {
                     let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
                     let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));
                     let exe = std::env::current_exe()?;
-                    ghrepo::adopt(&mut out, &token, &ep, "https://github.com", &repo, &dest, &settings, &exe, &chrono_today())
+                    ghrepo::adopt(&mut out, &ghrepo::Ctx::new(&token, &ep, "https://github.com", &settings, &exe, &chrono_today()), &repo, &dest)
                 }
             };
             if !ok {

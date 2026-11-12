@@ -66,7 +66,7 @@ pub fn scan_git(repo: &std::path::Path, scope: Scope) -> anyhow::Result<Vec<(Str
     let out = git.output()?;
     anyhow::ensure!(out.status.success(), "git failed: {}", String::from_utf8_lossy(&out.stderr).trim());
     let (mut found, mut file, mut added) = (Vec::new(), String::from("?"), Vec::new());
-    let mut flush = |file: &str, added: &mut Vec<u8>, found: &mut Vec<(String, Finding)>| {
+    let flush = |file: &str, added: &mut Vec<u8>, found: &mut Vec<(String, Finding)>| {
         for f in scan(added) { found.push((file.to_string(), f)); }
         added.clear();
     };
@@ -84,7 +84,7 @@ mod tests {
 
     fn rules(text: &str) -> Vec<&'static str> { scan(text.as_bytes()).iter().map(|f| f.rule).collect() }
     // Fake values are assembled at runtime so this file never contains something that looks like a real token.
-    fn fake(prefix: &str, n: usize) -> String { format!("{prefix}{}", "a1B2c3D4e5".repeat(n / 10 + 1)[..n].to_string()) }
+    fn fake(prefix: &str, n: usize) -> String { format!("{prefix}{}", &"a1B2c3D4e5".repeat(n / 10 + 1)[..n]) }
 
     #[test]
     fn modern_token_formats_are_caught() {
@@ -94,9 +94,9 @@ mod tests {
             (format!("GITHUB_TOKEN={}", fake("gho_", 36)), "github token"),
             (format!("//registry.npmjs.org/:_authToken={}", fake("npm_", 36)), "npm token"),
             (format!("token = {}", fake("hf_", 34)), "huggingface token"),
-            (format!("{}", fake("glpat-", 22)), "gitlab token"),
+            (fake("glpat-", 22), "gitlab token"),
             (format!("key={}", fake("AIza", 35)), "google api key"),
-            (format!("{}", fake("AKIA", 16).to_uppercase()), "aws access key"),
+            (fake("AKIA", 16).to_uppercase(), "aws access key"),
             (format!("aws_secret_access_key = {}", fake("", 40)), "aws secret key"),
             ("machine example.com login me password hunter2hunter2".to_string(), "netrc login"),
             (format!("\"auth\": \"{}\"", fake("", 30)), "docker auth"),

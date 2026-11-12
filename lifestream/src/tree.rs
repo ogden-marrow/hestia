@@ -680,7 +680,7 @@ mod tests {
         let a = file(&h, "Downloads/x.png", b"new");
         file(&h, "Pictures/Saved/x.png", b"old");
         let r = rec(&a, "image", "~/Downloads/x.png", 3, "rule", 1.0);
-        let p = plan(&[r.clone()], &tree(), &h, &[], &HashSet::new());
+        let p = plan(std::slice::from_ref(&r), &tree(), &h, &[], &HashSet::new());
         let want = format!("x-{}.png", &a["sha256:".len()..]["".len()..][..8]);
         assert_eq!(p.moves[0].to.file_name().unwrap().to_str().unwrap(), want);
         assert_eq!(fs::read(h.join("Pictures/Saved/x.png")).unwrap(), b"old");
