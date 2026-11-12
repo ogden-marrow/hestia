@@ -82,6 +82,7 @@ git log -1 --format=%s | grep -q "new files captured (new-capture.txt)" || fail 
 [ -z "$(git status --short)" ] || fail "tree not clean after committing new capture files"
 # the one deny-list: a sensitive path is never captured even if it is added to capture-paths.txt
 mkdir -p "$T/home/.ssh"; echo "Host example" > "$T/home/.ssh/config"
+# shellcheck disable=SC2088 # a literal '~/' line is what capture-paths.txt holds
 echo '~/.ssh/config' >> "$rel/capture-paths.txt"
 run
 [ ! -e "$rel/dotfiles/.ssh/config" ] || fail "a path on the deny-list was captured"

@@ -5,7 +5,7 @@
 #   RANGE=<a..b>   which commits to check the identities of (default: origin/main..HEAD). Older history is not rewritten
 #                  here; see docs/THREAT_MODEL.md T19.
 set -uo pipefail
-cd "$(git rev-parse --show-toplevel)"
+cd "$(git rev-parse --show-toplevel)" || exit 1
 bad=0; say() { echo "PRIVACY: $*" >&2; bad=1; }
 
 # 1. files: home-directory paths other than obvious placeholders
@@ -18,7 +18,7 @@ while IFS= read -r l; do say "an email address: $l"; done < <(git grep -nIoE '[A
 
 # 3. files: this computer's user and host name (only meaningful on a real computer; CI runners are skipped)
 for w in "$(id -un)" "$(hostname -s 2>/dev/null)"; do
-  case "$w" in ""|runner|root|localhost|ubuntu|"") continue;; esac
+  case "$w" in ""|runner|root|localhost|ubuntu) continue;; esac
   [ "${#w}" -ge 4 ] || continue
   while IFS= read -r l; do say "this computer's name '$w' appears: $l"; done < <(git grep -nIiF -- "$w" -- . "${files[@]}" | cut -c1-160)
 done

@@ -5,6 +5,7 @@
 hestia_home_repo() {
   local f="$HOME/.config/hestia/settings" v   # exactly where the app and install.sh keep it
   v="$(sed -n 's/^home=//p' "$f" 2>/dev/null | head -1)"
+  # shellcheck disable=SC2088 # a literal "~/" is what the setting contains
   case "$v" in
     "")    echo "$HOME/Home" ;;
     "~/"*) echo "$HOME/${v#\~/}" ;;
