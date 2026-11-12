@@ -26,6 +26,8 @@ jobs:
       - run: cargo test --release --locked
       - name: Clipboard extension never records secrets
         run: node tests/clipboard-filter.js
+      - name: The third-party list is current
+        run: python3 packaging/third-party.py --check
       - name: A release, rehearsed (the release script, checksums, tarball install without a compiler, the .deb)
         run: bash tests/release-rehearsal.sh
       - name: A clean computer, end to end (install, capture, restore dry-run, uninstall)
@@ -49,10 +51,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Dependencies come only from where we expect
+      - name: Dependencies come only from where we expect, under licences we allow
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
-          command: check sources
+          command: check sources licenses
       - name: Known vulnerabilities (reported, not blocking)
         continue-on-error: true
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2

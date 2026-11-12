@@ -15,7 +15,7 @@ name=hestia-linux-x86_64
 mkdir -p "$work/$name/bin"
 cp "$here"/target/release/{hestia,hestia-tray,lifestream} "$work/$name/bin/"
 cp -r "$here/packaging" "$here/install.sh" "$here/uninstall.sh" "$here/LICENSE" "$here/README.md" "$work/$name/"
-[ -f "$here/CHANGELOG.md" ] && cp "$here/CHANGELOG.md" "$work/$name/"
+for f in CHANGELOG.md THIRD_PARTY.md; do [ -f "$here/$f" ] && cp "$here/$f" "$work/$name/"; done
 tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$out/$name.tar.gz" -C "$work" "$name"
 ( cd "$out" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
 
