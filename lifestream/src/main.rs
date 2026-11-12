@@ -109,6 +109,9 @@ enum Cmd {
         manifest: Option<PathBuf>,
         #[arg(long)]
         apply: bool,
+        /// put the last batch of moves back where it came from (never overwrites); prints one JSON line
+        #[arg(long, conflicts_with = "apply")]
+        undo: bool,
     },
     /// Fingerprint this computer into machines/<name>/machine.toml (--write), or just print it
     Machine {
@@ -239,7 +242,7 @@ fn main() -> Result<()> {
     let cmd = Cli::parse().cmd;
     match cmd {
         Cmd::Tree { tree, apply, r#move } => lifestream::tree::cmd_tree(tree, apply, r#move),
-        Cmd::File { tree, out, manifest, apply } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply),
+        Cmd::File { tree, out, manifest, apply, undo } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply, undo),
         Cmd::Machine { repo, write } => {
             let m = lifestream::machine::probe(&chrono_today());
             if write {

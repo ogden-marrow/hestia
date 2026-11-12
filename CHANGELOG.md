@@ -5,6 +5,8 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 ## Unreleased
 
 ### Added
+- **Undo for filing** (engine): every batch of moves is written down; `lifestream file --undo` puts the last batch back, one file at
+  a time, never overwriting, never leaving your home folder, and leaves what it could not restore to be retried.
 - **Sign in with GitHub** (engine and screens): device-flow sign-in, find, adopt or create your private home repository.
   The token lives only in the system keyring and is refused if there is none. Needs the project's GitHub Client ID to go live.
 - **Machine watcher shipped with Hestia**: captures packages, snaps, flatpaks, config, dotfiles and desktop settings every
