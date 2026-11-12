@@ -236,10 +236,10 @@ pub fn panels(s: &State) -> Vec<El> {
         let drift = c.drift();
         cats = cats.child(
             row().key(format!("mcat-{i}")).h(d.row_h()).px(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
-                .fill(if on { t.control_off } else { rune::Color::TRANSPARENT })
+                .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { s.mcat = i; s.mit = 0 })
-                .child(text(c.name.to_string()).font(style(&d, type_::LABEL)).color(t.text).grow(1.0))
-                .child(text(if drift > 0 { format!("{drift} changed") } else { "Up to date".into() }).font(style(&d, type_::LABEL)).color(if drift > 0 { acc } else { t.text_secondary })),
+                .child(text(c.name.to_string()).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
+                .child(text(if drift > 0 { format!("{drift} changed") } else { "Up to date".into() }).font(style(&d, type_::LABEL)).color(t.text_secondary)),
         );
     }
     let left = col().w(240.0).padding(d.gap()).gap(d.gap()).side(&d)
@@ -257,9 +257,12 @@ pub fn panels(s: &State) -> Vec<El> {
                     .on_press(move |s: &mut State| { s.mit = i; s.msg.clear() })
                     .child(text(it.name.clone()).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
                     .child(text(match it.cond { Cond::Same => "", Cond::Changed => "changed", Cond::Missing => "missing", Cond::New => "new" }.to_string())
-                        .font(style(&d, type_::LABEL)).color(if it.cond == Cond::Same { t.text_secondary } else { acc })),
+                        .font(style(&d, type_::LABEL)).color(t.text_secondary)),
             );
         }
+    }
+    if cat.map(|c| c.items.is_empty()).unwrap_or(true) {
+        list = list.child(text("Nothing here yet. Add a file or folder on the right, or back up now.").font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).py(d.gap()).wrap_anywhere().shrink());
     }
     let btn = |key: &str, label: &str, primary: bool| {
         row().key(key.to_string()).h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM))
@@ -270,7 +273,7 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(text(cat.map(|c| c.name).unwrap_or("")).font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).wrap_anywhere().shrink())
         .child(row().w_full().gap(d.gap()).center_y().px(d.item_px())
             .child(btn("m-refresh", "Refresh", false).on_press(|s: &mut State| s.reload_machine()))
-            .child(super::questions::action(&d, "m-capture", "Back up now", "Backing up…", true, s.jobs.running("capture"), |s: &mut State| s.capture_now())))
+            .child(super::questions::action(&d, "m-capture", "Back up now", "Backing up…", s.mach.iter().any(|c| c.drift() > 0), s.jobs.running("capture"), |s: &mut State| s.capture_now())))
         .child(text(if s.msg.is_empty() { "How this computer differs from your last backup. Back up now to save the current state; History shows what changed.".to_string() } else { s.msg.clone() })
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
@@ -289,7 +292,7 @@ pub fn panels(s: &State) -> Vec<El> {
                 lines = lines.child(row().w_full().px(d.gap()).fill(bg)
                     .child(text(l.text.clone()).font(style(&d, type_::MONO_CAPTION)).color(fg).grow(1.0).shrink().min_w(0.0).wrap_anywhere()));
             }
-            body = body.child(col().w_full().gap(d.gap()).child(text("WHAT CHANGED (backup → now)").font(style(&d, type_::SECTION)).color(t.text_secondary)).child(lines));
+            body = body.child(col().w_full().gap(d.gap()).child(text("What changed since your backup").font(style(&d, type_::SECTION)).color(t.text_secondary)).child(lines));
         }
         if let Some(p) = it.path.clone() {
             body = body.child(btn("m-remove", "Stop backing this up", false).on_press(move |s: &mut State| s.remove_capture(p.clone())));
@@ -297,8 +300,8 @@ pub fn panels(s: &State) -> Vec<El> {
     }
     if s.mcat == 0 {
         body = body.child(col().w_full().gap(d.gap())
-            .child(text("ADD A FILE OR FOLDER TO YOUR BACKUP").font(style(&d, type_::SECTION)).color(t.text_secondary).wrap_anywhere().shrink())
-            .child(super::field(&d, "f-cap", &s.f_cap, "a path, like ~/.config/kitty, then Return", |s: &mut State| &mut s.f_cap).on_submit(|s: &mut State, _: &mut Tx| s.add_capture()))
+            .child(text("Add to your backup").font(style(&d, type_::SECTION)).color(t.text_secondary).wrap_anywhere().shrink())
+            .child(super::field(&d, "f-cap", &s.f_cap, "A path, like ~/.config/kitty", |s: &mut State| &mut s.f_cap).on_submit(|s: &mut State, _: &mut Tx| s.add_capture()))
             .child(text("For your safety, Hestia never copies anything that looks like a password, a key, or private browser or mail data.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
     }
     detail = detail.child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body));
