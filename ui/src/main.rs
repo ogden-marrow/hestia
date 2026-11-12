@@ -2,6 +2,7 @@
 //! `hestia --snap out.png --scene dark-pink --size 1280x760` renders headless.
 
 mod account;
+mod backup;
 mod clipboard;
 mod engine;
 mod design;
@@ -91,6 +92,8 @@ struct State {
     repo_dir: PathBuf,
     repo_status: String,
     repo_stamp: String,
+    backup: backup::Verdict,
+    backup_stamp: String,
     commits: Vec<Commit>,
     csel: usize,
     changes: Vec<Change>,
@@ -237,7 +240,7 @@ impl State {
         let mut s = State {
             design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), flow_return: None, account_user: None, dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
             ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
-            pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
+            pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), backup: backup::Verdict::Unknown, backup_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false, last_filed: 0, undo_lines: vec![], undo_inbox: Default::default(),
             f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), f_filekind: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
         };
@@ -247,6 +250,7 @@ impl State {
         s.select_folder(0);
         s.refresh_derived();
         s.commits = repo::log(&s.repo_dir, 1); // just the newest, for the Today tile; History loads the rest
+        s.reload_backup();
         s.reload_dir();
         s
     }
@@ -345,6 +349,10 @@ impl State {
     fn step_time(&mut self, back: i32) {
         let last = self.days.len().saturating_sub(1) as i32;
         self.dsel = (self.dsel as i32 + back).clamp(0, last) as usize;
+    }
+    fn reload_backup(&mut self) {
+        self.backup_stamp = repo::stamp(&self.repo_dir);
+        self.backup = backup::verdict(&backup::read(&self.repo_dir), chrono::Utc::now().timestamp());
     }
     fn reload_repo(&mut self) {
         self.repo_status = repo::status_line(&self.repo_dir);
@@ -639,6 +647,10 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
         }
         changed |= s.pane == Pane::System;
     }
+    if f.repo != s.backup_stamp {
+        s.reload_backup();
+        changed = true;
+    }
     if f.repo != s.repo_stamp && s.pane == Pane::History {
         s.reload_repo();
         changed = true;
@@ -694,6 +706,11 @@ fn scene(s: &mut State, pane: Pane) {
     let fixture = std::env::var("HESTIA_FIXTURE").ok();
     if let Some(f) = &fixture {
         fixture::apply(s, f != "calm");
+        s.backup_stamp = repo::stamp(&s.repo_dir);
+        s.backup = match std::env::var("HESTIA_BACKUP").as_deref() {
+            Ok("needs") => backup::Verdict::NeedsYou { why: "Your backup is only on this computer. Sign in to keep a private copy on GitHub.".into(), fix: backup::Fix::SignIn },
+            _ => backup::Verdict::Safe { when: "12 minutes ago".into() },
+        };
     }
     if let Ok(look) = std::env::var("HESTIA_LOOK") {
         apply_look(&mut s.settings, &look);
