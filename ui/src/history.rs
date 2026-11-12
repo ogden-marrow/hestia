@@ -112,7 +112,7 @@ mod tests {
     fn subjects_read_like_a_person_wrote_them() {
         assert_eq!(plain("machine: GNOME settings, 5 lines changed (org/gnome/mutter/keybindings)"), "GNOME settings, 5 lines changed");
         assert_eq!(plain("Uncommitted changes"), "Uncommitted changes");
-        assert_eq!(plain("machine: packages (apt)"), "Packages (apt)");
+        assert_eq!(plain("machine: fonts (user)"), "Fonts (user)");
         assert_eq!(plain("machine: config, 1 files changed"), "Config, 1 file changed");
     }
 
