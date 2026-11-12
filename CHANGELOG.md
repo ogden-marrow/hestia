@@ -22,6 +22,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **CI**: the whole workspace is lint-clean (clippy with warnings as errors) and so are the shell scripts (shellcheck), clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
 
 ### Security
+- **Restore hardened against a poisoned home repository** (#174): file by file with a `.bak` of anything different (no more skipping whole existing folders), a fixed list of names, never `~/.ssh`, `~/.gnupg` or the keyring, shell startup files, `.gitconfig`, `environment.d`, fish/zsh/bash config held back until `--allow-executable`, file modes restored, honest counts in the summary.
 - One shared secret scanner (modern token formats, short quoted or exported passwords, binaries) gates capture, push and
   publish; secret lines are left out of the backup, private keys drop the file.
 - Pushes go only to a private GitHub repository of yours, checked on the address git will really use.

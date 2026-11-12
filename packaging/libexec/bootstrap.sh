@@ -6,13 +6,16 @@
 #   --apply     do it.
 #   --only a,b  run only these steps. Steps: packages dotfiles config settings sources
 #   --allow-executable
-#               also restore things that run by themselves (autostart entries, systemd user units, custom
-#               keyboard-shortcut commands). Without it they are listed for you to read first and left alone.
+#               also restore things that run by themselves or change what runs (shell startup files, .gitconfig,
+#               environment.d, autostart entries, systemd user units, custom keyboard-shortcut
+#               commands). Without it they are listed for you to read first and left alone.
 #
 # Safe by design:
-#  * It never deletes. A file that is already there is moved aside to NAME.bak.<time>, never overwritten.
+#  * It never deletes. A file that is already there and different is moved aside to NAME.bak.<time>, never overwritten.
+#  * Restore is file by file from a fixed list of names, with the file modes. ~/.ssh, ~/.gnupg and the keyring are never touched.
 #  * Dotfiles and config are COPIED, never linked, so a live file never points into the repository.
-#  * Anything that can run code on login is not restored unless you say so with --allow-executable.
+#  * Anything that can run code or change what runs (shell startup files, .gitconfig, environment.d, autostart,
+#    systemd user units, fish/zsh/bash config) is not restored unless you say so with --allow-executable.
 #  * Third-party apt sources (they add software you did not review) only run when named with --only sources.
 set -uo pipefail
 repo=""; APPLY=0; ONLY=""; EXEC=0
@@ -21,7 +24,7 @@ while [ $# -gt 0 ]; do
     --apply) APPLY=1 ;;
     --only) ONLY="${2:-}"; shift ;;
     --allow-executable) EXEC=1 ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *) repo="$1" ;;
   esac; shift
@@ -39,23 +42,59 @@ want() { if [ -n "$ONLY" ]; then [[ ",$ONLY," == *",$1,"* ]]; else [ "$1" != sou
 fail=(); review=()
 stamp="$(date +%Y%m%d%H%M%S)"
 
-# Runs code by itself on login or in the background: held back unless --allow-executable.
+# Runs code by itself, or changes what runs: held back unless --allow-executable. PATH is relative to ~ (dotfiles) or ~/.config.
+# A poisoned repository can use any of these to run its code (LD_PRELOAD in environment.d, core.sshCommand in .gitconfig).
 is_executable_config() {
   case "$1" in
-    autostart/*|systemd/*|*/autostart/*|*/systemd/*) return 0 ;;
+    .bashrc|.bash_profile|.bash_login|.bash_logout|.profile|.zshrc|.zshenv|.zprofile|.zlogin|.zlogout|.gitconfig) return 0 ;;
+    autostart|autostart/*|systemd|systemd/*|environment.d|environment.d/*|fish|fish/*|zsh|zsh/*|bash|bash/*|git|git/*) return 0 ;;
+    */autostart/*|*/systemd/*|*/environment.d/*) return 0 ;;
   esac
   return 1
 }
+# Never restored, with or without --allow-executable: keys and the keyring.
+is_denied() { case "$1" in .ssh|.ssh/*|.gnupg|.gnupg/*|gnupg|gnupg/*|*keyring*|gh|gh/*) return 0 ;; esac; return 1; }
+# The only top-level names restore will write. Everything else in the repository is ignored and counted as skipped.
+is_allowed() {
+  case "$1" in
+    .nvidia-settings-rc|mimeapps.list|user-dirs.dirs|monitors.xml|gtk-3.0|gtk-4.0|mpv|htop|nautilus|powerlimit|johncast|hestia) return 0 ;;
+  esac
+  is_executable_config "$1"
+}
+n_new=0; n_same=0; n_bak=0; n_skip=0
+mode_of() { printf '%o' $(( 8#$(stat -c %a -- "$1") & 8#755 )); } # keeps owner bits and private modes, drops setuid/setgid and group/other write
 
-# put a captured file or folder at DEST: copy, and move anything already there aside
-place() { # src dest
+# make DEST (a directory) exist, giving each directory it creates the mode of its source twin
+ensure_dir() { # srcdir destdir srcroot
+  [ -d "$2" ] && return
+  if [ "$1" = "$3" ]; then run mkdir -p -- "$2"; return; fi
+  ensure_dir "$(dirname "$1")" "$(dirname "$2")" "$3"
+  run mkdir -- "$2"; run chmod "$(mode_of "$1")" -- "$2"
+}
+
+# restore one captured file at DEST: copy with its mode; if a different file is there, keep it as NAME.bak.<time> first
+place_file() { # src dest srcroot
   local src="$1" dest="$2"
-  if [ -e "$dest" ] || [ -L "$dest" ]; then
-    if [ -f "$dest" ] && [ ! -L "$dest" ] && cmp -s "$src" "$dest" 2>/dev/null; then echo "already the same: $dest"; return; fi
-    run mv -- "$dest" "$dest.bak.$stamp"
-  fi
-  run mkdir -p -- "$(dirname "$dest")"
-  run cp -a -- "$src" "$dest"
+  case "$(realpath -m -- "$dest")" in "$HOME"/*) ;; *) echo "refused (outside your home folder): $dest"; n_skip=$((n_skip+1)); return ;; esac
+  if [ -L "$src" ] || [ ! -f "$src" ]; then echo "skipped (not a plain file): $src"; n_skip=$((n_skip+1)); return; fi
+  if [ -f "$dest" ] && [ ! -L "$dest" ] && cmp -s "$src" "$dest" 2>/dev/null; then n_same=$((n_same+1)); return; fi
+  if [ -e "$dest" ] || [ -L "$dest" ]; then run mv -- "$dest" "$dest.bak.$stamp"; n_bak=$((n_bak+1)); fi
+  ensure_dir "$(dirname "$src")" "$(dirname "$dest")" "$3"
+  run cp -- "$src" "$dest"; run chmod "$(mode_of "$src")" -- "$dest"
+  n_new=$((n_new+1))
+}
+
+# restore everything captured under SRC-ROOT/NAME into DEST-ROOT/NAME, file by file
+restore_top() { # kind srcroot destroot name
+  local kind="$1" root="$2" droot="$3" name="$4" f rel
+  if is_denied "$name"; then echo "refused (never restored): $name"; n_skip=$((n_skip+1)); return; fi
+  if ! is_allowed "$name"; then echo "skipped (not on the restore list): $name"; n_skip=$((n_skip+1)); return; fi
+  while IFS= read -r -d '' f; do
+    rel="${f#"$root"/}"
+    if is_denied "$rel"; then echo "refused (never restored): $rel"; n_skip=$((n_skip+1)); continue; fi
+    if is_executable_config "$rel" && [ "$EXEC" != 1 ]; then review+=("$kind/$rel"); continue; fi
+    place_file "$f" "$droot/$rel" "$root"
+  done < <(find "$root/$name" \( -type f -o -type l \) -print0 2>/dev/null)
 }
 
 if want packages; then
@@ -78,25 +117,19 @@ if want packages; then
 fi
 
 if want dotfiles; then
-  say "dotfiles (copied into your home folder; existing files are moved aside, never overwritten)"
+  say "dotfiles (copied into your home folder with their modes; a different existing file is kept as NAME.bak.<time>)"
   for f in "$here"/dotfiles/.[!.]*; do
-    [ -e "$f" ] || continue
-    place "$f" "$HOME/$(basename "$f")"
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    restore_top dotfiles "$here/dotfiles" "$HOME" "$(basename "$f")"
   done
 fi
 
 if want config; then
   say "config (~/.config)"
   for d in "$here"/config/*; do
-    [ -e "$d" ] || continue
-    name="$(basename "$d")"
-    if is_executable_config "$name/" && [ "$EXEC" != 1 ]; then review+=("config/$name"); continue; fi
-    if [ -e "$HOME/.config/$name" ]; then echo "skip (already there, not changed): ~/.config/$name"; else place "$d" "$HOME/.config/$name"; fi
+    [ -e "$d" ] || [ -L "$d" ] || continue
+    restore_top config "$here/config" "$HOME/.config" "$(basename "$d")"
   done
-  # autostart and systemd entries may also live under a captured folder's own name; report anything that would run by itself
-  if [ "$EXEC" != 1 ]; then
-    while IFS= read -r f; do review+=("${f#"$here"/}"); done < <(find "$here/config" "$here/dotfiles" -type f \( -path '*/autostart/*' -o -path '*/systemd/*' \) 2>/dev/null)
-  fi
 fi
 
 if want settings; then
@@ -124,6 +157,7 @@ if want sources; then
 fi
 
 say "summary"
+echo "files: $n_new restored, $n_same already identical, $n_bak replaced (old copy kept as .bak), $n_skip skipped"
 if [ ${#review[@]} -gt 0 ]; then
   echo "Held back because they run by themselves. Read them, then re-run with --allow-executable:"
   printf '  - %s\n' "${review[@]}" | sort -u
