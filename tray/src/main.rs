@@ -78,13 +78,13 @@ const FLICKER: [usize; 8] = [0, 1, 0, 2, 0, 3, 2, 1];
 const TICK: Duration = Duration::from_millis(220);
 const REFRESH_EVERY: u32 = 60 * 1000 / 220;
 
-/// Is the Hestia window open? (The small launcher window does not count.)
+/// Is the Hestia window open? (The headless `--serve` engine behind the Shell launcher does not count.)
 fn app_open() -> bool {
     let Ok(dir) = std::fs::read_dir("/proc") else { return false };
     dir.flatten().any(|e| {
         let p = e.path();
         std::fs::read_to_string(p.join("comm")).map(|c| c.trim() == "hestia").unwrap_or(false)
-            && !std::fs::read(p.join("cmdline")).map(|c| String::from_utf8_lossy(&c).contains("--launch")).unwrap_or(true)
+            && !std::fs::read(p.join("cmdline")).map(|c| String::from_utf8_lossy(&c).contains("--serve")).unwrap_or(true)
     })
 }
 

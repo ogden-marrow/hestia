@@ -113,9 +113,8 @@ struct State {
     clips: Vec<clipboard::Entry>,
     launches: HashMap<String, u32>,
     copy_text: Option<String>, // set by a click, written to the clipboard by poll
-    close_after: bool,
     wstep: usize, // welcome tour step
-    launched_ask: bool, // opened as the small launcher window (`hestia --launch`)
+    headless: bool, // the `hestia --serve` engine behind the Shell launcher: no window; screen hits start the app
     bundles: Vec<Bundle>,
     suggestions: HashMap<String, Cached>,
     qsel: usize,
@@ -163,11 +162,7 @@ impl Default for State {
             && let Some(p) = launcher::pane_of(key) {
                 s.pane = p;
             }
-        if args.iter().any(|a| a == "--launch") {
-            s.pane = Pane::Ask;
-            s.launched_ask = true;
-            s.ask.focused = true;
-        } else if args.iter().any(|a| a == "--questions") {
+        if args.iter().any(|a| a == "--questions") {
             s.pane = Pane::Questions;
         }
         s
@@ -242,7 +237,7 @@ impl State {
         let mut s = State {
             design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), flow_return: None, account_user: None, dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
             ask: TextEdit::new(""), teach: TextEdit::new(""), ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
-            pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, close_after: false, wstep: 0, launched_ask: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
+            pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false, last_filed: 0, undo_lines: vec![], undo_inbox: Default::default(),
             f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), f_filekind: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
         };
@@ -484,9 +479,6 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     if s.pane == Pane::Welcome {
         return welcome::screen(s);
     }
-    if s.launched_ask {
-        return col().w_full().h_full().child(launcher::panel(s));
-    }
     let panes: Vec<El> = match s.pane {
         Pane::Questions => questions::panels(s),
         Pane::System => vec![system_panel(s)],
@@ -619,9 +611,6 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
     if let Some(text) = s.copy_text.take() {
         tx.copy_rich(rune::ClipboardContent::new(text));
     }
-    if s.close_after {
-        tx.close_window();
-    }
     let heard = engine::drain(&s.auth_inbox);
     let mut any = !heard.is_empty();
     for e in heard {
@@ -727,7 +716,7 @@ fn scene(s: &mut State, pane: Pane) {
         Pane::History => s.reload_repo(),
         Pane::Files => s.open_files(),
         Pane::Machine => s.reload_machine(),
-        Pane::Ask => { s.launched_ask = true; s.ask.text = "fi".into(); for a in s.apps.iter().take(40) { let _ = s.icons.app_icon(&a.path, 30.0).wait(); } }
+        Pane::Ask => { s.ask.text = "fi".into(); for a in s.apps.iter().take(40) { let _ = s.icons.app_icon(&a.path, 30.0).wait(); } }
         _ => {}
     }
 }
@@ -739,11 +728,6 @@ fn main() {
     }
     // The window's identity: GNOME matches it to hestia.desktop for the taskbar name and icon.
     rune::set_app_id("app.hestia.Hestia");
-    let launch = rune::extra_args().iter().any(|a| a == "--launch")
-        && !std::env::args().any(|a| matches!(a.as_str(), "--snap" | "--trace" | "--tree" | "--frames" | "--script" | "--list-scenes"));
-    if launch && toggle_launcher() {
-        return; // it was open: this press closed it
-    }
     let spec = AppSpec::<State> {
         scenes: &[
             ("today", |s| scene(s, Pane::Today)),
@@ -766,42 +750,11 @@ fn main() {
         setup: Some(setup),
         poll: Some(poll),
         on_key: Some(on_key),
-        min_size: if launch { None } else { Some((960.0, 620.0)) },
-        ..AppSpec::new("Hestia", if launch { (launcher::LAUNCHER_W, 68.0) } else { (1280.0, 760.0) }, State::default, view)
+        min_size: Some((960.0, 620.0)),
+        ..AppSpec::new("Hestia", (1280.0, 760.0), State::default, view)
     };
-    if launch {
-        // Spotlight: no title bar, no frame, floating above everything, closing when dismissed
-        rune::run_windows(move |_| {
-            vec![rune::WindowSpec::new("launcher", spec).options(rune::WindowOptions {
-                borderless: true, transparent: true, resizable: true, always_on_top: true, min_size: Some((0.0, 0.0)), ..Default::default()
-            })]
-        });
-    } else {
-        rune::run(spec);
-    }
+    rune::run(spec);
 }
-
-/// Pressing the shortcut while the launcher is open closes it, like Spotlight. Returns true when it did.
-fn toggle_launcher() -> bool {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let pidfile = PathBuf::from(&home).join(".cache/hestia/launcher.pid");
-    if let Some(pid) = std::fs::read_to_string(&pidfile).ok().and_then(|t| t.trim().parse::<u32>().ok()) {
-        let cmd = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
-        let cmd = String::from_utf8_lossy(&cmd);
-        if pid != std::process::id() && cmd.contains("hestia") && cmd.contains("--launch") {
-            let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
-            let _ = std::fs::remove_file(&pidfile);
-            return true;
-        }
-    }
-    if let Some(d) = pidfile.parent() {
-        let _ = std::fs::create_dir_all(d);
-    }
-    let _ = std::fs::write(&pidfile, std::process::id().to_string());
-    false
-}
-
-
 
 #[cfg(test)]
 mod tests {

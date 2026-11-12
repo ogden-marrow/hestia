@@ -16,7 +16,7 @@ Actions=Search;Questions;
 
 [Desktop Action Search]
 Name=Search…
-Exec=@HOME@/.local/bin/hestia --launch
+Exec=@HOME@/.local/bin/hestia --pane=search
 
 [Desktop Action Questions]
 Name=Answer the questions
