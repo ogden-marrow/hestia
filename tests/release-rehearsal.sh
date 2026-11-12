@@ -15,7 +15,7 @@ cp "$out/hestia-linux-x86_64.tar.gz" "$T/bad.tgz"; printf 'x' >> "$T/bad.tgz"
 
 # the tarball: what a person who downloads it gets
 mkdir "$T/x"; tar -xzf "$out/hestia-linux-x86_64.tar.gz" -C "$T/x"; pkg="$T/x/hestia-linux-x86_64"
-for f in bin/hestia bin/hestia-tray bin/lifestream install.sh uninstall.sh LICENSE README.md packaging/libexec/watch.sh packaging/systemd/hestia-watch.timer; do [ -e "$pkg/$f" ] || fail "the tarball lacks $f"; done
+for f in bin/hestia bin/hestia-tray bin/lifestream install.sh uninstall.sh LICENSE THIRD_PARTY.md README.md packaging/libexec/watch.sh packaging/systemd/hestia-watch.timer; do [ -e "$pkg/$f" ] || fail "the tarball lacks $f"; done
 for b in hestia hestia-tray lifestream; do [ -x "$pkg/bin/$b" ] || fail "bin/$b is not executable"; done
 find "$pkg" -type f \( -name '*.rs' -o -name Cargo.toml \) | grep -q . && fail "the tarball carries source it does not need"
 
