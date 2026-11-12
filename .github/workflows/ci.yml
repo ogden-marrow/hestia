@@ -26,8 +26,8 @@ jobs:
           sudo apt-get $o update && sudo apt-get $o install -y libxkbcommon-dev libwayland-dev libvulkan-dev libfontconfig1-dev libdbus-1-dev pkg-config
       - run: cargo build --release --locked
       - run: cargo test --release --locked
-      - name: The engine is lint-clean (clippy, warnings are errors)
-        run: cargo clippy -p lifestream --all-targets --locked -- -D warnings
+      - name: The whole workspace is lint-clean (clippy, warnings are errors)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Clipboard extension never records secrets
         run: node tests/clipboard-filter.js
       - name: The third-party list is current
