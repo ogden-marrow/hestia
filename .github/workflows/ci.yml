@@ -46,6 +46,8 @@ jobs:
         run: grep -q '^OnActiveSec=' packaging/systemd/hestia-watch.timer
       - name: Watcher on a fresh home repository
         run: bash tests/watcher.sh
+      - name: Watcher when things go wrong (visible failures, stuck backups unstick, nothing hangs)
+        run: bash tests/watcher-failures.sh
 
   # Where dependencies come from and whether any has a known vulnerability. 'sources' blocks (a dependency from an
   # unexpected place); 'advisories' reports but does not block, because a new advisory should not stop unrelated work.
