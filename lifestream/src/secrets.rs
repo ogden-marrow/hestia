@@ -38,17 +38,46 @@ fn compiled() -> &'static Vec<(&'static str, Regex)> {
     C.get_or_init(|| RULES.iter().map(|(n, p)| (*n, Regex::new(p).expect("rule compiles"))).collect())
 }
 
-/// Every place in `data` that looks like a secret, one finding per line per rule.
-pub fn scan(data: &[u8]) -> Vec<Finding> {
-    let mut out = Vec::new();
-    for (i, line) in data.split(|b| *b == b'\n').enumerate() {
+/// Lines longer than this are scanned in pieces that overlap, so memory stays small whatever the file holds
+/// (a 3 GB file of zeros has no line breaks at all).
+const PIECE: usize = 1 << 20;
+const OVERLAP: usize = 4096;
+
+/// Every place in a stream that looks like a secret, one finding per line per rule, read piece by piece.
+pub fn scan_reader(mut r: impl std::io::BufRead) -> std::io::Result<Vec<Finding>> {
+    use std::io::{BufRead, Read};
+    let (mut out, mut buf, mut line) = (Vec::<Finding>::new(), Vec::new(), 1usize);
+    loop {
+        let n = r.by_ref().take(PIECE as u64).read_until(b'\n', &mut buf)?;
+        if n == 0 { break; }
+        let ended = buf.last() == Some(&b'\n');
+        if ended { buf.pop(); }
         for (rule, re) in compiled() {
-            if re.is_match(line) {
-                out.push(Finding { rule, line: i + 1 });
+            if re.is_match(&buf) && !out.iter().rev().take_while(|f| f.line == line).any(|f| f.rule == *rule) {
+                out.push(Finding { rule, line });
             }
         }
+        if ended { line += 1; buf.clear(); }
+        else if n == PIECE { buf.drain(..buf.len().saturating_sub(OVERLAP)); }
     }
-    out
+    Ok(out)
+}
+
+/// Every place in `data` that looks like a secret.
+pub fn scan(data: &[u8]) -> Vec<Finding> {
+    scan_reader(data).expect("reading memory cannot fail")
+}
+
+/// `path` if it is a file, or every file below it if it is a folder (never `.git`, never through a symlink).
+pub fn files_under(path: &std::path::Path, out: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+    let md = std::fs::symlink_metadata(path)?;
+    if md.is_dir() {
+        if path.file_name().is_some_and(|n| n == ".git") { return Ok(()); }
+        for e in std::fs::read_dir(path)? { files_under(&e?.path(), out)?; }
+    } else if md.is_file() {
+        out.push(path.to_path_buf());
+    }
+    Ok(())
 }
 
 /// What to check in a git repository.
@@ -127,6 +156,18 @@ mod tests {
         for t in ["export PATH=$HOME/.cargo/bin:$PATH", "alias ll='ls -la'", "token=$TOKEN", "# password: ask the admin", "[user]\n  name = Someone", "font-name='Ubuntu 11'", "http://example.com/a/b"] {
             assert!(scan(t.as_bytes()).is_empty(), "false positive: {t}");
         }
+    }
+
+    #[test]
+    fn a_huge_line_is_scanned_in_overlapping_pieces() {
+        // a token that straddles a piece boundary is still found, once, on line 2
+        let tok = fake("ghp_", 40);
+        let mut data = b"ok\n".to_vec();
+        data.extend(std::iter::repeat_n(b' ', PIECE - 20));
+        data.extend_from_slice(tok.as_bytes());
+        data.extend(std::iter::repeat_n(b' ', 100));
+        let f = scan(&data);
+        assert_eq!(f.iter().map(|x| (x.line, x.rule)).collect::<Vec<_>>(), vec![(2, "github token")]);
     }
 
     #[test]

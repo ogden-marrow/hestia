@@ -147,7 +147,10 @@ enum Cmd {
         /// check every commit in a range, like origin/main..HEAD, or `all` for the whole history
         #[arg(long)]
         range: Option<String>,
-        /// or check these files
+        /// print `path`, line and rule each ended by a NUL byte, so any file name is safe to read back
+        #[arg(short = 'z', long)]
+        nul: bool,
+        /// or check these files (a folder means every file inside it, except .git)
         paths: Vec<PathBuf>,
     },
     /// The morning briefing: what happened overnight and what needs me
@@ -332,11 +335,25 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::SecretScan { repo, staged, range, paths } => {
-            let mut n = 0;
-            let mut report = |where_: &str, data: &[u8]| for f in lifestream::secrets::scan(data) { println!("{where_}:{}: {}", f.line, f.rule); n += 1; };
+        Cmd::SecretScan { repo, staged, range, nul, paths } => {
+            use std::io::Write;
+            use std::os::unix::ffi::OsStrExt;
+            let (mut found, mut broke) = (0, false);
+            let mut say = |name: &[u8], line: usize, rule: &str| {
+                let mut o = std::io::stdout().lock();
+                if nul { let _ = o.write_all(&[name, b"\0", line.to_string().as_bytes(), b"\0", rule.as_bytes(), b"\0"].concat()); }
+                else { let _ = writeln!(o, "{}:{line}: {rule}", String::from_utf8_lossy(name)); }
+                found += 1;
+            };
             if !paths.is_empty() {
-                for p in &paths { report(&p.display().to_string(), &std::fs::read(p)?); }
+                let mut files = Vec::new();
+                for p in &paths { if std::fs::metadata(p).is_ok_and(|m| m.is_file()) { files.push(p.clone()); } else if let Err(e) = lifestream::secrets::files_under(p, &mut files) { eprintln!("could not read {}: {e}", p.display()); broke = true; } }
+                for p in &files {
+                    match std::fs::File::open(p).and_then(|f| lifestream::secrets::scan_reader(std::io::BufReader::new(f))) {
+                        Ok(fs) => for f in fs { say(p.as_os_str().as_bytes(), f.line, f.rule) },
+                        Err(e) => { eprintln!("could not read {}: {e}", p.display()); broke = true; }
+                    }
+                }
             } else {
                 let repo = repo.unwrap_or_else(|| PathBuf::from("."));
                 let scope = match (staged, range.as_deref()) {
@@ -345,10 +362,15 @@ fn main() -> Result<()> {
                     (_, Some(r)) => lifestream::secrets::Scope::Range(r),
                     _ => anyhow::bail!("say what to check: --staged, --range <a..b|all>, or file paths"),
                 };
-                for (file, f) in lifestream::secrets::scan_git(&repo, scope)? { println!("{file}: {}", f.rule); n += 1; }
+                match lifestream::secrets::scan_git(&repo, scope) {
+                    Ok(fs) => for (file, f) in fs { say(file.as_bytes(), f.line, f.rule) },
+                    Err(e) => { eprintln!("could not scan: {e}"); broke = true; }
+                }
             }
-            if n > 0 { eprintln!("{n} possible secret(s) found: nothing was sent anywhere"); std::process::exit(1); }
-            println!("no secrets found");
+            // exit 1 means "found something"; exit 2 means "could not look": a broken scan is never reported as a finding
+            if found > 0 { eprintln!("{found} possible secret(s) found: nothing was sent anywhere"); std::process::exit(1); }
+            if broke { std::process::exit(2); }
+            if !nul { println!("no secrets found"); }
             Ok(())
         }
         Cmd::Suggest { out, host } => {
