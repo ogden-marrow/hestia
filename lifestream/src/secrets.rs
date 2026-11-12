@@ -237,7 +237,7 @@ mod tests {
         for t in [
             format!("{up}=$DB_VALUE"), format!("{up}=${{DB_VALUE}}"), format!("{up}=<your-value-here>"), format!("{pw} = {{{{ .Values.db }}}}"),
             format!("{up}=short"), format!("{up}="), format!("{pw}={{}}"),
-            format!("const token=getToken(request)"), format!("{pw}=request.form['x']"), format!("{pw} = os.environ.get(\"X\")"),
+            "const token=getToken(request)".to_string(), format!("{pw}=request.form['x']"), format!("{pw} = os.environ.get(\"X\")"),
             "MAX_TOKENS=1".to_string(), "OLDPWD=/home/someone/projects".to_string(), "PWD=/home/someone".to_string(), "bypass=localhost.local".to_string(),
             "docker login --password-stdin".to_string(), format!("docker login --{pw}=$REGISTRY_VALUE"), "tool --token-file /run/secrets/t".to_string(),
             "tool --pass-through verbose-output".to_string(), format!("export {up}_FILE=/run/secrets/db"),
@@ -298,7 +298,7 @@ mod tests {
         assert!(!found.is_empty() && found.iter().all(|f| f.0 == "f.txt"), "the secret exists only in the merge commit");
         assert!(!scan_git(&d, Scope::AllHistory).unwrap().is_empty());
         // what the first parent already had is not "added" by the merge
-        let none = scan_git(&d, Scope::Range(&format!("main..main"))).unwrap();
+        let none = scan_git(&d, Scope::Range("main..main")).unwrap();
         assert!(none.is_empty());
         std::fs::remove_dir_all(&d).unwrap();
     }
