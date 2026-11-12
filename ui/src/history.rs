@@ -6,6 +6,28 @@ use crate::repo::{Kind, WORKTREE};
 use rune::tok::{self, type_};
 use rune::{col, el, oklcha, oklch, row, text, El, ScrollSpec};
 
+/// A commit subject as a person would say it: no "machine:" prefix, no trailing "(path/to/key)".
+pub fn plain(subject: &str) -> String {
+    let s = subject.strip_prefix("machine: ").unwrap_or(subject).trim();
+    let s = match s.rsplit_once(" (") {
+        Some((head, tail)) if tail.ends_with(')') && tail.contains('/') && !tail.contains(' ') => head,
+        _ => s,
+    };
+    let s = s.replace(" 1 files ", " 1 file ").replace(", 1 files", ", 1 file");
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+/// "3 files changed · 12 lines added", or nothing at all when no file is listed.
+fn tally(files: usize, add: u32, del: u32) -> Option<String> {
+    if files == 0 {
+        return None;
+    }
+    let lines = |n: u32| if n == 1 { "1 line".to_string() } else { format!("{n} lines") };
+    let what = if del == 0 { format!("{} added", lines(add)) } else { format!("{add} added, {del} removed") };
+    Some(format!("{} · {what}", crate::today::count(files, "file changed", "files changed")))
+}
+
 pub fn panels(s: &State) -> Vec<El> {
     let d = s.design;
     let t = d.theme();
@@ -26,7 +48,7 @@ pub fn panels(s: &State) -> Vec<El> {
                 .on_press(move |s: &mut State| s.select_commit(i))
                 .child(col().w(14.0).child(el().size(9.0, 9.0).radius(5.0).fill(if on || work { acc } else { t.text_secondary })))
                 .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
-                    .child(text(c.subject.clone()).font(style(&d, type_::BODY)).color(t.text).truncate())
+                    .child(text(plain(&c.subject)).font(style(&d, type_::BODY)).color(t.text).truncate())
                     .child(text(if work { "not saved yet".to_string() } else { c.when.clone() }).font(style(&d, type_::LABEL)).color(t.text_secondary).truncate())),
         );
     }
@@ -50,10 +72,10 @@ pub fn panels(s: &State) -> Vec<El> {
         );
     }
     let (total_add, total_del): (u32, u32) = s.changes.iter().fold((0, 0), |a, c| (a.0 + c.add, a.1 + c.del));
-    let msg = s.commits.get(s.csel).map(|c| c.subject.clone()).unwrap_or_default();
+    let msg = s.commits.get(s.csel).map(|c| plain(&c.subject)).unwrap_or_default();
     let changed = col().w(230.0).shrink().min_w(200.0).padding(d.pad()).gap(d.gap()).panel(&d)
         .child(text(msg).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink())
-        .child(text(format!("{} · {}", crate::today::count(s.changes.len(), "file changed", "files changed"), if total_del == 0 { format!("{total_add} lines added") } else { format!("{total_add} added, {total_del} removed") })).font(style(&d, type_::LABEL)).color(t.text_secondary))
+        .child(text(tally(s.changes.len(), total_add, total_del).unwrap_or_else(|| "Nothing to show for this one.".into())).font(style(&d, type_::LABEL)).color(t.text_secondary))
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(files));
 
     // ---- diff
@@ -76,8 +98,28 @@ pub fn panels(s: &State) -> Vec<El> {
     }
     let path = s.changes.get(s.fsel).map(|c| c.path.clone()).unwrap_or_default();
     let diff = col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.gap()).panel(&d)
-        .child(text(if path.is_empty() { "pick a file".to_string() } else { path }).font(style(&d, type_::TITLE)).color(t.text).truncate())
+        .child(text(if path.is_empty() { "Choose a file to see what changed".to_string() } else { path }).font(style(&d, type_::TITLE)).color(t.text).truncate())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(lines));
 
     vec![commits, changed, diff]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subjects_read_like_a_person_wrote_them() {
+        assert_eq!(plain("machine: GNOME settings, 5 lines changed (org/gnome/mutter/keybindings)"), "GNOME settings, 5 lines changed");
+        assert_eq!(plain("Uncommitted changes"), "Uncommitted changes");
+        assert_eq!(plain("machine: packages (apt)"), "Packages (apt)");
+        assert_eq!(plain("machine: config, 1 files changed"), "Config, 1 file changed");
+    }
+
+    #[test]
+    fn the_tally_is_silent_without_files_and_singular_when_one() {
+        assert_eq!(tally(0, 0, 0), None);
+        assert_eq!(tally(1, 1, 0).unwrap(), "1 file changed · 1 line added");
+        assert_eq!(tally(2, 4, 3).unwrap(), "2 files changed · 4 added, 3 removed");
+    }
 }
