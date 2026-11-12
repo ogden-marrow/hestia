@@ -457,7 +457,7 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     let header = row().w_full().h(d.size(28.0)).px(pad).center_y().fill(t.card)
         .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
         .child(row().w(200.0).gap(d.gap()).center_y()
-            .child(col().size(10.0, 10.0).radius(2.0).fill(acc))
+            .child(rune::icon(&icons::FLAME, d.size(16.0)).color(acc))
             .child(text("Hestia").font(style(&d, type_::LABEL)).color(t.text_secondary)))
         .child(text(title).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
         .child(
