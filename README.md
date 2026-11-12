@@ -118,7 +118,7 @@ git clone <this repository> && cd hestia
 
 `install.sh` puts the programs in `~/.local/bin`, installs the desktop entry, icons, the GNOME
 extension and the systemd user timers (overnight scan at about 02:30, morning notification at 07:30),
-and records where your home repository is. Choose it with `HESTIA_HOME`:
+and sets the `home` setting if it is not set yet. Choose its first value with `HESTIA_HOME`:
 
 ```bash
 HESTIA_HOME=~/Home ./install.sh
@@ -144,7 +144,7 @@ lifestream brief                                   # the morning briefing
 
 | Setting | Where | Default |
 |---|---|---|
-| Home repository | `HESTIA_HOME` (absolute path; `install.sh` writes `~/.config/environment.d/hestia.conf`), else the `home` setting (folder name under your home folder) | `~/Home` |
+| Home repository | the `home` setting in `~/.config/hestia/settings`: the one place the app, the watcher and the restore script read (absolute, `~/…` or a folder under your home folder). `install.sh` seeds it from `HESTIA_HOME` only if it is not set; signing in, adopting or creating a repository writes it | `~/Home` |
 | Hestia's public repository | the `hestia_repo` setting (URL used for the submodule) | unset |
 | App settings | `~/.config/hestia/settings`, edited in Settings | |
 | Stream | `~/.local/share/lifestream/stream` | |

@@ -172,11 +172,9 @@ impl Default for State {
     }
 }
 
-/// Where your home repository lives: `$HESTIA_HOME`, else `~/Home` (the app is launched from the app grid, so cwd means nothing).
+/// Where your home repository lives: the `home` setting (the one place; the watcher and restore script read the same
+/// line), else `~/Home` (the app is launched from the app grid, so cwd means nothing).
 fn home_repo() -> PathBuf {
-    if let Some(d) = std::env::var_os("HESTIA_HOME") {
-        return PathBuf::from(d);
-    }
     if !cfg!(test) {
         let chosen = Settings::load().home;
         if !chosen.is_empty() {

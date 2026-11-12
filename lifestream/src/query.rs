@@ -113,6 +113,8 @@ pub fn load_views(dir: &Path) -> Result<Vec<Query>> {
     Ok(views)
 }
 
+/// Look for `rel` from the working directory upwards, then in the home repository the one `home=` setting names (a
+/// background service has no useful working directory).
 pub fn find_up(rel: &str) -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
@@ -121,9 +123,10 @@ pub fn find_up(rel: &str) -> Option<PathBuf> {
             return Some(c);
         }
         if !dir.pop() {
-            return None;
+            break;
         }
     }
+    crate::settings_home().map(|h| h.join(rel)).filter(|p| p.exists())
 }
 
 fn expand(src: &str, home: &Path) -> PathBuf {

@@ -193,9 +193,29 @@ pub(crate) fn find_manifest() -> Option<PathBuf> {
             return Some(cand);
         }
         if !dir.pop() {
-            return None;
+            break;
         }
     }
+    settings_home().map(|h| h.join("manifest/rules.toml")).filter(|p| p.is_file())
+}
+
+/// The home repository named by the one `home=` setting (the line the app shows and the watcher reads), if any.
+/// Absolute, `~/…`, or relative to the home folder. A background service has no useful working directory, so this is how it finds the repository.
+pub fn settings_home() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    // exactly where the app and install.sh keep the settings (not XDG_CONFIG_HOME: one place, the same for everyone)
+    parse_settings_home(&fs::read_to_string(home.join(".config/hestia/settings")).ok()?, &home)
+}
+
+pub(crate) fn parse_settings_home(text: &str, home: &Path) -> Option<PathBuf> {
+    let v = text.lines().find_map(|l| l.strip_prefix("home="))?.trim();
+    if v.is_empty() {
+        return None;
+    }
+    Some(match v.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => home.join(v), // an absolute path replaces the base, a relative one is under the home folder
+    })
 }
 
 /// Paths (absolute) that must never be read: `sensitive = true` rules + [secrets].
@@ -767,5 +787,15 @@ mod tests {
         let repos = w.items.iter().filter(|i| matches!(i, Item::Repo { .. })).count();
         assert_eq!((files, repos, w.skipped_sensitive), (1, 1, 1));
         fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn the_home_setting_is_read_in_all_three_forms() {
+        let home = Path::new("/home/x");
+        for (line, want) in [("home=/srv/Home", "/srv/Home"), ("home=~/Home", "/home/x/Home"), ("home=Home", "/home/x/Home")] {
+            assert_eq!(parse_settings_home(&format!("scheme=dark\n{line}\nwatch=on\n"), home), Some(PathBuf::from(want)), "{line}");
+        }
+        assert_eq!(parse_settings_home("scheme=dark\nhome=\n", home), None, "an empty setting means not set");
+        assert_eq!(parse_settings_home("scheme=dark\n", home), None);
     }
 }

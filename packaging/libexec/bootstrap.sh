@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bootstrap.sh <home-repo> [--apply] [--only steps] [--allow-executable]
+# bootstrap.sh [home-repo] [--apply] [--only steps] [--allow-executable]
 # Rebuild this computer from what watch.sh captured into the home repository.
 #
 #   (default)   DRY RUN: prints every step and changes nothing.
@@ -26,7 +26,8 @@ while [ $# -gt 0 ]; do
     *) repo="$1" ;;
   esac; shift
 done
-repo="${repo:-${HESTIA_HOME:-$HOME/Home}}"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home-repo.sh"
+repo="${repo:-$(hestia_home_repo)}"
 [ -f "$repo/tree.toml" ] || { echo "not a Hestia home repository: $repo" >&2; exit 2; }
 . /etc/os-release
 here="$repo/applications/linux/${ID:-linux}/${VERSION_ID:-unknown}"
