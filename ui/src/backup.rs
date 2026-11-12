@@ -13,6 +13,8 @@ pub struct Facts {
     pub has_remote: bool,
     /// Commits not yet on the remote.
     pub ahead: usize,
+    /// The watcher's own report when its last run failed (its reason, without the "FAILED: " prefix).
+    pub failed: Option<String>,
 }
 
 /// The answer: safe, or what to do about it. `Unknown` means there is no home repository to ask about.
@@ -36,6 +38,19 @@ fn git(dir: &Path, args: &[&str]) -> String {
     Command::new("git").arg("-C").arg(dir).args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
 }
 
+/// `watch.json` is one line, `{\"at\":N,\"result\":\"...\"}`. A result that starts with FAILED is a failure;
+/// \"ok…\" and \"busy…\" are not.
+pub fn watch_failure(json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
+    let reason = v.get("result")?.as_str()?.strip_prefix("FAILED:")?.trim();
+    Some(if reason.is_empty() { "the last backup did not finish".to_string() } else { reason.to_string() })
+}
+
+pub fn watch_json() -> Option<String> {
+    let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
+    std::fs::read_to_string(base.join("hestia/watch.json")).ok()
+}
+
 pub fn read(dir: &Path) -> Facts {
     if !lifestream::home::is_home(dir) {
         return Facts::default();
@@ -43,7 +58,7 @@ pub fn read(dir: &Path) -> Facts {
     let last = git(dir, &["log", "-1", "--format=%ct"]).trim().parse().ok();
     let has_remote = !git(dir, &["remote"]).trim().is_empty();
     let ahead = git(dir, &["rev-list", "--count", "@{u}..HEAD"]).trim().parse().unwrap_or(0);
-    Facts { is_home: true, last, has_remote, ahead }
+    Facts { is_home: true, last, has_remote, ahead, failed: watch_json().and_then(|j| watch_failure(&j)) }
 }
 
 /// "just now", "12 minutes ago", "3 hours ago", "yesterday", "5 days ago".
@@ -61,6 +76,9 @@ pub fn ago(secs: i64) -> String {
 pub fn verdict(f: &Facts, now: i64) -> Verdict {
     if !f.is_home {
         return Verdict::Unknown;
+    }
+    if let Some(why) = &f.failed {
+        return Verdict::NeedsYou { why: format!("The last backup failed: {why}"), fix: Fix::BackUpNow };
     }
     let Some(last) = f.last else {
         return Verdict::NeedsYou { why: "Nothing has been backed up yet.".into(), fix: Fix::BackUpNow };
@@ -83,7 +101,7 @@ mod tests {
     use super::*;
 
     fn facts() -> Facts {
-        Facts { is_home: true, last: Some(1_000_000), has_remote: true, ahead: 0 }
+        Facts { is_home: true, last: Some(1_000_000), has_remote: true, ahead: 0, failed: None }
     }
 
     #[test]
@@ -109,6 +127,23 @@ mod tests {
         assert!(matches!(verdict(&Facts { has_remote: false, ..facts() }, 1_000_100), Verdict::NeedsYou { fix: Fix::SignIn, .. }));
         assert!(matches!(verdict(&Facts { ahead: 1, ..facts() }, 1_000_000 + day + 1), Verdict::NeedsYou { fix: Fix::BackUpNow, .. }));
         assert!(matches!(verdict(&facts(), 1_000_000 + 4 * day), Verdict::NeedsYou { fix: Fix::BackUpNow, .. }));
+    }
+
+    #[test]
+    fn a_failed_watcher_run_is_never_all_safe() {
+        let f = Facts { failed: Some("git commit: no identity".into()), ..facts() };
+        match verdict(&f, 1_000_100) {
+            Verdict::NeedsYou { why, fix } => { assert!(why.contains("no identity")); assert_eq!(fix, Fix::BackUpNow); }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn only_a_failed_result_counts_as_failure() {
+        assert_eq!(watch_failure(r#"{"at":1,"result":"FAILED: capture failed"}"#), Some("capture failed".into()));
+        assert_eq!(watch_failure(r#"{"at":1,"result":"ok: 2 commit(s), up to date"}"#), None);
+        assert_eq!(watch_failure(r#"{"at":1,"result":"busy: another run"}"#), None);
+        assert_eq!(watch_failure("not json"), None);
     }
 
     #[test]
