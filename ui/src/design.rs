@@ -104,28 +104,30 @@ impl Default for Design {
     }
 }
 
-fn pick(a: Accent, system: Color) -> Color {
+/// The accent in a given scheme. Saturated fills vibrate on near-black, so dark mode uses a little less
+/// chroma and a little more lightness (the same hue, calmer).
+fn tone(l: f32, c: f32, h: f32, dark: bool) -> Color {
+    if dark { oklch(l + 0.04, c * 0.78, h) } else { oklch(l, c, h) }
+}
+
+fn pick(a: Accent, system: Color, dark: bool) -> Color {
     match a {
         Accent::System => system,
-        Accent::Blue => oklch(0.62, 0.19, 255.0),
-        Accent::Teal => oklch(0.66, 0.12, 190.0),
-        Accent::Green => oklch(0.64, 0.17, 150.0),
-        Accent::Orange => oklch(0.7, 0.17, 55.0),
-        Accent::Purple => oklch(0.6, 0.2, 305.0),
-        Accent::Pink => oklch(0.66, 0.19, 5.0),
-        Accent::Graphite => oklch(0.5, 0.02, 260.0),
+        Accent::Blue => tone(0.62, 0.19, 255.0, dark),
+        Accent::Teal => tone(0.66, 0.12, 190.0, dark),
+        Accent::Green => tone(0.64, 0.17, 150.0, dark),
+        Accent::Orange => tone(0.7, 0.17, 55.0, dark),
+        Accent::Purple => tone(0.6, 0.2, 305.0, dark),
+        Accent::Pink => tone(0.66, 0.19, 5.0, dark),
+        Accent::Graphite => tone(0.5, 0.02, 260.0, dark),
     }
 }
 
 impl Design {
     /// Light, dark or auto (the desktop's setting), the chosen accent, spacing and text size.
     pub fn build(s: &Settings, desktop: (bool, Color)) -> Design {
-        Design {
-            density: s.density,
-            type_scale: s.text,
-            dark: match s.scheme { Scheme::Auto => desktop.0, Scheme::Light => false, Scheme::Dark => true },
-            accent: pick(s.accent, desktop.1),
-        }
+        let dark = match s.scheme { Scheme::Auto => desktop.0, Scheme::Light => false, Scheme::Dark => true };
+        Design { density: s.density, type_scale: s.text, dark, accent: pick(s.accent, desktop.1, dark) }
     }
 
     pub fn theme(&self) -> Theme {
@@ -144,6 +146,11 @@ impl Design {
             t.control_track = oklcha(0.2, 0.01, 265.0, 0.06);
         }
         t
+    }
+
+    /// The faint edge of a tile: a hairline, not a rule (the stronger `card_border` separates panes).
+    pub fn hairline(&self) -> Color {
+        if self.dark { oklcha(1.0, 0.0, 0.0, 0.09) } else { oklcha(0.15, 0.01, 265.0, 0.14) }
     }
 
     /// A quiet wash for a selected row inside a list.
@@ -255,7 +262,7 @@ impl Surface for El {
 
     fn tile(self, d: &Design) -> El {
         let t = d.theme();
-        self.radius(d.r(tok::radius::MD)).fill(t.control_track).border(1.0, t.card_border)
+        self.radius(d.r(tok::radius::MD)).fill(t.control_track).border(1.0, d.hairline())
     }
 }
 
