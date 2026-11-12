@@ -74,7 +74,7 @@ pub fn load(dir: &Path, model: &str) -> Result<Vec<Row>> {
     for (i, l) in lines.iter().enumerate() {
         let (id, h) = l.split_once('\t').context("bad ids line")?;
         let v: Vec<f32> = bytes[i * dim * 4..(i + 1) * dim * 4]
-            .chunks_exact(4)
+            .as_chunks::<4>().0.iter()
             .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect();
         rows.push(Row { id: id.into(), text_hash: h.into(), vec: v });

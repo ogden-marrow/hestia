@@ -199,7 +199,7 @@ pub fn brief(recs: &[Record], since_hours: i64) -> String {
         *fk.entry(r.kind.as_str()).or_default() += 1;
     }
     let mut fk: Vec<_> = fk.into_iter().collect();
-    fk.sort_by(|a, b| b.1.cmp(&a.1));
+    fk.sort_by_key(|x| std::cmp::Reverse(x.1));
     if !fk.is_empty() {
         out.push_str("  filed: ");
         out.push_str(&fk.iter().take(5).map(|(k, n)| format!("{n} {k}")).collect::<Vec<_>>().join(", "));
@@ -210,7 +210,7 @@ pub fn brief(recs: &[Record], since_hours: i64) -> String {
         *pk.entry(r.kind.as_str()).or_default() += 1;
     }
     let mut pk: Vec<_> = pk.into_iter().collect();
-    pk.sort_by(|a, b| b.1.cmp(&a.1));
+    pk.sort_by_key(|x| std::cmp::Reverse(x.1));
     if !pk.is_empty() {
         out.push_str("  need you: ");
         out.push_str(&pk.iter().take(5).map(|(k, n)| format!("{n} {k}")).collect::<Vec<_>>().join(", "));

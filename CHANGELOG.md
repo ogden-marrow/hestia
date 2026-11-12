@@ -15,7 +15,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
   anything that runs by itself until you ask.
 - **Design system and redesigned Welcome, Today, sidebar and wording**; the launcher shows why an app did not open.
 - **Release packaging**: one script builds the tarball and `.deb` with checksums and a signed build attestation.
-- **CI**: clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
+- **CI**: the engine is lint-clean (clippy with warnings as errors), clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
 
 ### Security
 - One shared secret scanner (modern token formats, short quoted or exported passwords, binaries) gates capture, push and

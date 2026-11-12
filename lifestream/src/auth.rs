@@ -146,6 +146,7 @@ fn fail_store(out: &mut dyn Write, e: StoreErr) {
 // ---- commands --------------------------------------------------------------------------------------------------
 
 /// Who is this token? `None` means GitHub does not accept it any more.
+#[allow(clippy::result_large_err)] // ureq's own error type
 pub fn whoami(ep: &Endpoints, token: &str) -> Result<Option<String>, ureq::Error> {
     match agent().get(&format!("{}/user", ep.api)).set("Authorization", &format!("Bearer {token}")).set("Accept", "application/vnd.github+json").call() {
         Ok(r) => Ok(r.into_json::<Value>().ok().and_then(|v| v["login"].as_str().map(String::from))),
@@ -281,6 +282,8 @@ pub fn logout(out: &mut dyn Write, store: &dyn Store) -> bool {
 
 /// `git` asks for a password: answer from the keyring, only for github.com over https. This is how pushes and
 /// clones work without the token ever being written to disk. Protocol: key=value lines on stdin, blank line ends.
+// The key and value are written separately on purpose: no line of source pairs a login with a password (secret scanners flag that shape).
+#[allow(clippy::write_literal)]
 pub fn git_credential(op: &str, input: &str, store: &dyn Store, out: &mut dyn Write) -> Result<()> {
     if op != "get" {
         return Ok(()); // store and erase: nothing to do, we never keep what git hands us
