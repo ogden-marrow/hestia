@@ -65,7 +65,7 @@ done
 [ "$withheld" -gt 0 ] || [ "$redacted" -gt 0 ] && withheld_note="; $withheld file(s) and $redacted line(s) withheld: possible secrets"
 
 # ---- who is this machine (machines/<name>/machine.toml)
-lifestream machine --repo "$repo" --write >/dev/null 2>>"$state/watch.err" || true
+"$LS" machine --repo "$repo" --write >/dev/null 2>>"$state/watch.err" || true
 
 # git refuses a path it has never seen: keep only paths that hold files or are tracked
 live() { for p in "$@"; do if [ -n "$(find "$repo/$p" -type f 2>/dev/null | head -1)" ] || [ -n "$(git -C "$repo" ls-files -- "$p")" ]; then printf '%s\n' "$p"; fi; done; }

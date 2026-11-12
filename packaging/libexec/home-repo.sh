@@ -3,7 +3,7 @@
 # ~/.config/hestia/settings), which is what the app shows and what signing in, adopting or creating a repository writes.
 # Absolute, `~/…` or relative to the home folder. If nothing is set: ~/Home. Source this; it only defines a function.
 hestia_home_repo() {
-  local f="${XDG_CONFIG_HOME:-$HOME/.config}/hestia/settings" v
+  local f="$HOME/.config/hestia/settings" v   # exactly where the app and install.sh keep it
   v="$(sed -n 's/^home=//p' "$f" 2>/dev/null | head -1)"
   case "$v" in
     "")    echo "$HOME/Home" ;;

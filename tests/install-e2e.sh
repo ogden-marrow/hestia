@@ -11,7 +11,12 @@ export HOME="$T/home" XDG_DATA_HOME="$T/home/.local/share" XDG_RUNTIME_DIR="$T" 
 mkdir -p "$T/bin" "$HOME"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 for c in systemctl pkill gsettings gtk-update-icon-cache update-desktop-database dconf; do printf '#!/bin/sh\necho "%s $*" >> "%s/calls.log"\n' "$c" "$T" > "$T/bin/$c"; done
-chmod +x "$T"/bin/*; export PATH="$T/bin:$PATH"
+chmod +x "$T"/bin/*
+# Hostile on purpose, like a CI runner: a decoy XDG_CONFIG_HOME (the settings live in ~/.config/hestia/ whatever it says),
+# and no installed Hestia on PATH (a developer's own install would hide a script that calls a bare `lifestream`).
+export XDG_CONFIG_HOME="$T/decoy-config"
+clean_path="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '/\.local/bin$' | paste -sd:)"
+export PATH="$T/bin:$clean_path"
 git config --global user.email t@t.t; git config --global user.name t; git config --global init.defaultBranch main
 
 # 1. install onto a computer that has never seen Hestia
@@ -40,6 +45,7 @@ git -C "$HESTIA_HOME" add notes.txt && git -C "$HESTIA_HOME" commit -qm "my note
 git init -q --bare "$T/remote.git"; git -C "$HESTIA_HOME" remote add origin "$T/remote.git"
 bash "$PREFIX/libexec/hestia/watch.sh" || fail "the watcher failed on a clean computer"   # no argument: it finds the repository from the setting
 git -C "$HESTIA_HOME" log --format=%s | grep -q "first capture of this computer" || fail "the first capture was not committed"
+ls "$HESTIA_HOME"/machines/*/machine.toml >/dev/null 2>&1 || fail "the watcher did not write this computer's fingerprint (it must use the installed lifestream, not whatever is on PATH): $(tail -3 "$XDG_DATA_HOME/hestia/watch.err" 2>&1)"
 grep -q "not pushed: remote is not a GitHub repository" "$XDG_DATA_HOME/hestia/watch.json" || fail "the watcher must refuse a remote that is not a private GitHub repository: $(cat "$XDG_DATA_HOME/hestia/watch.json")"
 [ -z "$(git -C "$T/remote.git" rev-parse --verify -q main 2>/dev/null)" ] || fail "something was pushed to a non-GitHub remote"
 [ -z "$(git -C "$HESTIA_HOME" status --short)" ] || fail "the home repository is not clean after a capture"

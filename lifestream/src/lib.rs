@@ -203,8 +203,8 @@ pub(crate) fn find_manifest() -> Option<PathBuf> {
 /// Absolute, `~/…`, or relative to the home folder. A background service has no useful working directory, so this is how it finds the repository.
 pub fn settings_home() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
-    let cfg = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
-    parse_settings_home(&fs::read_to_string(cfg.join("hestia/settings")).ok()?, &home)
+    // exactly where the app and install.sh keep the settings (not XDG_CONFIG_HOME: one place, the same for everyone)
+    parse_settings_home(&fs::read_to_string(home.join(".config/hestia/settings")).ok()?, &home)
 }
 
 pub(crate) fn parse_settings_home(text: &str, home: &Path) -> Option<PathBuf> {
