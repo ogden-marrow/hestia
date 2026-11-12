@@ -32,6 +32,10 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
   The engine's `secret-scan` streams files, takes folders, prints `-z` NUL-separated results and exits 2 when it could not look.
 
 ### Security
+- Secret scanner and deny-list, red-team round 3 (#175): JSON-quoted keys, bare `PASSWORD=`/`DB_PASS=`/`MYSQL_PWD=` values, `--password=`, libpq and rclone
+  lines, `curl -u`, Slack, Stripe, SendGrid, JWT, Authorization headers, Azure, WireGuard and kubernetes keys, base64-wrapped private keys. The push
+  scan no longer skips added lines starting `++` or merge commits. The deny-list now covers credential files, browser, chat and password-manager
+  profiles, shell histories, VPN files and `id_dsa`, and refuses a parent folder (`~/.config`, `~/.docker`) that holds any of them.
 - **Restore hardened against a poisoned home repository** (#174): file by file with a `.bak` of anything different (no more skipping whole existing folders), a fixed list of names, never `~/.ssh`, `~/.gnupg` or the keyring, shell startup files, `.gitconfig`, `environment.d`, fish/zsh/bash config held back until `--allow-executable`, file modes restored, honest counts in the summary.
 - One shared secret scanner (modern token formats, short quoted or exported passwords, binaries) gates capture, push and
   publish; secret lines are left out of the backup, private keys drop the file.

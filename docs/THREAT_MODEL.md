@@ -1,6 +1,6 @@
 # Hestia threat model
 
-Status as of 2026-11-11. Written from the red-team review of 2026-11-10 and what has been fixed since. Every row names the issue or PR that holds the evidence. A release is gated on the checklist at the end.
+Status as of 2026-11-12. Written from the red-team review of 2026-11-10 and what has been fixed since. Every row names the issue or PR that holds the evidence. A release is gated on the checklist at the end.
 
 ## What we protect
 
@@ -34,8 +34,8 @@ Out of scope: an attacker with root, a compromised desktop session or keyring, p
 
 | # | Threat | Mitigation | Status | Evidence |
 |---|---|---|---|---|
-| T1 | A secret is committed and pushed | One shared scanner (modern token formats, quoted and exported passwords, binaries, any case) runs on everything captured and on the new commits before every push; secret lines are left out of the backup, private keys drop the whole file | Fixed | #62, #80, #107, #129 |
-| T2 | The scanner misses a secret (short, unusual format, encoded) | Scanner is a filter, not a guarantee; the allowlist captures only named files; the push is restricted to a private repository | Residual risk | #129; keep adding rules |
+| T1 | A secret is committed and pushed | One shared scanner (modern token formats, vendor tokens, JSON-quoted and bare `PASSWORD=` values, command-line flags, binaries, any case) runs on everything captured and on the new commits before every push; secret lines are left out of the backup, private keys drop the whole file. The range scan reads the hunk headers, so an added line starting `++` is still scanned, and merge commits are scanned against their first parent | Fixed | #62, #80, #107, #129, #175 |
+| T2 | The scanner misses a secret (short, unusual format, encoded) | Scanner is a filter, not a guarantee; the allowlist captures only named files; the push is restricted to a private repository. Known gaps: placeholders that look like values (`PASSWORD=changeme`) are flagged, values under 8 characters are not, and a secret split over two lines is not seen | Residual risk | #129, #175; keep adding rules |
 | T3 | Pushing to a public, foreign or renamed repository | The push target is checked on the address git will really use (after pushurl and insteadOf), must be a private repository of the signed-in person; redirects and odd answers fail closed | Fixed | #80, #122, #132 |
 | T4 | Publishing a leaky history | Whole history scanned before any create or push | Fixed | #62, #121 |
 | T5 | Capture deletes or overwrites the person's live files | New copy built beside the old and swapped in; live symlinks into the repository are followed to their target; a capture that would keep under half of the last one is refused | Fixed | #99 |
@@ -46,7 +46,7 @@ Out of scope: an attacker with root, a compromised desktop session or keyring, p
 | T10 | A hostile file name steers the model | Names reach the model only as cleaned, shortened JSON data it is told to treat as data; its answer is limited to the known kinds; names are cleaned before embedding | Fixed | #125 |
 | T11 | File names or contents leave the computer through the model | The model host must be loopback, with no user info and no redirects | Fixed | #64 |
 | T12 | The GitHub token leaks | Only in the system keyring, refused when there is none, never printed, logged, put on a command line or in a file; git gets it through a credential helper that answers only for github.com over https; no redirects; base URLs overridable only to loopback | Fixed | #118 |
-| T13 | Three lists of "never capture" drift apart | One deny-list read by capture, the Machine screen and the starter manifest | Fixed | #129 |
+| T13 | Three lists of "never capture" drift apart | One deny-list read by capture, the Machine screen and the starter manifest. It names credential files and profiles (npm, pip, docker, kube, cloud CLIs, rclone, cargo, terraform, VPN, browsers, chat and password-manager apps), shell histories, `.Xauthority` and every private key type, and refuses a parent folder that holds any of them (`~/.config`, `~/.docker`, the home folder) so adding it wholesale cannot carry them along | Fixed | #129, #175 |
 | T14 | A bulk action is triggered by a deceptive name | "Answer similar folders together" is off until chosen | Fixed | #131 |
 | T15 | A compromised dependency or CI action | Every action is pinned to a commit; Dependabot proposes updates; cargo-deny blocks a dependency from an unexpected registry or git source or under a licence we have not allowed, and reports known advisories (three 'unmaintained' notices, no vulnerabilities: #135) | Mitigated | #59, #135 |
 | T16 | Releases are not verifiable | Release files carry SHA-256 checksums and a signed build attestation (GitHub artifact attestation: `gh attestation verify <file> --repo ogden-marrow/hestia`); the release workflow reads by default and only its job can write; every action is pinned to a commit; checkout leaves no credentials behind. The packaging is rehearsed in CI (`tests/release-rehearsal.sh`) but the signing and attestation steps only run on a real tag: no release has been cut | Mitigated (untested until the first release) | #12, #59 |
