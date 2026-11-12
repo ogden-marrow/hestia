@@ -30,7 +30,13 @@ install -Dm644 "$work/app.desktop" "$d/usr/share/applications/app.hestia.Hestia.
 mkdir -p "$d/usr/share/gnome-shell/extensions"
 cp -r "$here/packaging/gnome-extension/hestia-clipboard@hestia.app" "$d/usr/share/gnome-shell/extensions/"
 glib-compile-schemas "$d/usr/share/gnome-shell/extensions/hestia-clipboard@hestia.app/schemas"
+# the background watcher and its schedule: a .deb can only place files under /usr, so it ships the scripts and the unit templates,
+# and each person runs `hestia-setup` once (the same script install.sh runs) to seed their settings and enable the user units
+install -d "$d/usr/libexec/hestia"; cp "$here"/packaging/libexec/* "$d/usr/libexec/hestia/"; chmod +x "$d"/usr/libexec/hestia/*.sh
+cp -r "$here/packaging/systemd" "$d/usr/libexec/hestia/systemd"
+ln -s ../libexec/hestia/setup-user.sh "$d/usr/bin/hestia-setup"
 mkdir -p "$d/DEBIAN"
+printf '#!/bin/sh\necho "Hestia is installed. Run hestia-setup once as your own user to turn on the background backup and the schedules."\n' > "$d/DEBIAN/postinst"; chmod 755 "$d/DEBIAN/postinst"
 printf 'Package: hestia\nVersion: %s\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: Hestia authors <noreply@example.invalid>\nDescription: The hearth of your computer: files, history and time\n' "$version" > "$d/DEBIAN/control"
 dpkg-deb --build --root-owner-group "$d" "$out/hestia_${version}_amd64.deb" >/dev/null
 ( cd "$out" && sha256sum "hestia_${version}_amd64.deb" > "hestia_${version}_amd64.deb.sha256" )

@@ -53,29 +53,14 @@ mkdir -p "$share/gnome-shell/extensions"
 cp -r "$pk/gnome-extension/hestia-clipboard@hestia.app" "$share/gnome-shell/extensions/"
 glib-compile-schemas "$share/gnome-shell/extensions/hestia-clipboard@hestia.app/schemas" 2>/dev/null || echo "note: glib-compile-schemas not found; install libglib2.0-bin" >&2
 
-# where the home repository is: ONE setting (`home=` in the app's settings file) that the app, the watcher and the restore
-# script all read. Seeded here only if the person has not set one; never overwritten (the app and signing in own it after that).
-settings="$HOME/.config/hestia/settings"; mkdir -p "$(dirname "$settings")"
-if ! grep -q '^home=.\+' "$settings" 2>/dev/null; then
-  { grep -v '^home=' "$settings" 2>/dev/null || true; printf 'home=%s\n' "$home_repo"; } > "$settings.new" && mv "$settings.new" "$settings"
-fi
-
 # the machine capture scripts ship with Hestia, never from the home repository
 libexec="$prefix/libexec/hestia"
 rm -rf "$libexec"; mkdir -p "$libexec"
 cp "$pk"/libexec/* "$libexec/" && chmod +x "$libexec"/*.sh
 
-# systemd user units: overnight scan (~02:30), morning notification (07:30), machine watch
-unit="$HOME/.config/systemd/user"
-mkdir -p "$unit"
-for f in "$pk"/systemd/*; do
-  sed -e "s|@LIBEXEC@|$libexec|g" -e "s|%h/\.local/bin|${prefix/#"$HOME"/%h}/bin|g" "$f" > "$unit/$(basename "$f")"
-done
-systemctl --user daemon-reload
-systemctl --user enable --now hestia-tray.service lifestream-nightly.timer lifestream-morning.timer
-systemctl --user enable hestia-watch.timer
-# restart, not just start: a timer that is already running keeps its old schedule until restarted
-systemctl --user restart hestia-watch.timer
+# the per-person part (the home repository setting, the systemd user units and enabling them) is one script that a .deb install
+# runs too (`hestia-setup`); the unit templates ship beside it
+rm -rf "$libexec/systemd"; cp -r "$pk/systemd" "$libexec/systemd"
+HESTIA_HOME="$home_repo" bash "$libexec/setup-user.sh"
 
 echo "Hestia is installed. Log out and in once so the launcher takes effect."
-systemctl --user list-timers 'lifestream-*' 'hestia-*' || true
