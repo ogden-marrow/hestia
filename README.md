@@ -1,5 +1,7 @@
 # Hestia
 
+[![CI](https://github.com/ogden-marrow/hestia/actions/workflows/ci.yml/badge.svg)](https://github.com/ogden-marrow/hestia/actions/workflows/ci.yml) MIT licensed · [Changelog](CHANGELOG.md) · [Threat model](docs/THREAT_MODEL.md) · [Publishing](docs/PUBLISHING.md)
+
 **The hearth of your computer.** Hestia files your documents for you, shows your computer's
 configuration and history, and lets you travel back in time through your files. Files are read only by models
 running on your machine. The one thing that leaves it is your own home repository, pushed to a private

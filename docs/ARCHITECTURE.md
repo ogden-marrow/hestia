@@ -1,6 +1,6 @@
 # Hestia: vision and architecture
 
-Status: draft for the owner's critique. Written 2026-11-11. Where the code does not yet match the vision, this document says so.
+Status: kept current with the code (last updated 2026-11-12; `docs/VISION_FIT.md` has the per-force scorecard and `docs/THREAT_MODEL.md` every security finding). Where the code does not yet match the vision, this document says so.
 
 ## The idea
 
@@ -33,10 +33,10 @@ Five pieces run on your computer.
 
 | Piece | What it is | Where |
 |---|---|---|
-| **Engine** | The brain. Ingests files into a stream, classifies them, plans moves, scans for secrets, talks to a local model, manages the home repo. No UI. Also a CLI (`lifestream`). | `lifestream/` |
+| **Engine** | The brain. Ingests files into a stream, classifies them, plans and undoes moves, scans for secrets, talks to a local model, signs in to GitHub (token only in the system keyring) and finds, adopts or creates the home repo. No UI. Also a CLI (`lifestream`) whose engine commands print one JSON event per line. | `lifestream/` |
 | **App** | The native window (Rune, GPU). Today, Questions, Files, History, Machine, Settings, and the launcher. Calls the engine; never does slow work on the UI thread (jobs layer). | `ui/` |
 | **Tray** | Small always-on presence: shows state, lets you open the app. | `tray/` |
-| **Watcher** | A systemd timer that every 15 minutes captures this machine's state (config, dotfiles, package lists) into the home repo and commits it. Shipped inside Hestia, not copied into your repo. | `packaging/libexec/` |
+| **Watcher** | A systemd user timer (every few minutes, a setting) that, only when the computer is quiet, captures this machine's state (packages, allowlisted config, dotfiles, an allowlisted slice of desktop settings) into the home repo, commits it and pushes. Shipped inside Hestia, not copied into your repo; finds the repository from the one `home=` setting. | `packaging/libexec/` |
 | **Launcher** | One search box for screens, apps, clipboard and files. A GNOME Shell extension draws it; the engine answers over a pipe. | `packaging/gnome-extension/` |
 
 ## How things flow
@@ -44,26 +44,28 @@ Five pieces run on your computer.
 1. **Arrive.** New files appear in watched roots (Downloads, Documents, Pictures, Videos). A scheduled scan hashes them and writes one record per file into the **stream** (a plain, append-friendly store keyed by content hash).
 2. **Classify, three tiers.** Deterministic rules first (data-driven, `rules.toml`). Then two small **local** models each suggest a label; disagreement, not self-reported confidence, decides what to ask. Everything else is left alone.
 3. **Ask in bundles.** The unit of question is a folder, not a file. Questions screen: one card at a time, best guess is primary, Skip is always there.
-4. **Move, safely.** A plan is built, shown, confirmed, then applied: same-disk hard-link-then-unlink or verified copy; never overwrites; refuses symlinks and hidden destinations; records old and new path in the stream so everything can be undone.
+4. **Move, safely.** A plan is built, shown, confirmed, then applied: same-disk hard-link-then-unlink or verified copy; never overwrites; refuses symlinks and hidden destinations; records old and new path in the stream and in a journal, so `lifestream file --undo` (the app's "Put them back") reverses the last batch without overwriting anything.
 5. **Capture the machine.** The watcher writes a fingerprint and a snapshot of how the machine is set up, one commit per kind of change.
-6. **Back up.** Commits go to your private remote. Before anything leaves the machine, the shared secret scanner reads it; a hit blocks the push. Auto-push is currently **off** until the scanner is wired into the watcher and the push target is verified private.
+6. **Back up.** The watcher scans everything it captures with the shared secret scanner (a secret line is left out of the copy, a private key drops the file) and the one never-capture list, commits, and pushes automatically, only to a private GitHub repository of yours checked on the address git will really use, and only if the new commits scan clean. `HESTIA_AUTOPUSH=0` turns pushing off.
 7. **Find.** Search by name, by meaning (local embeddings of metadata, never contents), by time.
 
-## Trust boundaries (what the red team found, and what is fixed)
+## Trust boundaries
 
-- Nothing leaves the machine except commits to a private repo, after a scan. *Fixed:* one scanner, modern token formats, binaries included, publish refuses a leaky history. *Open:* wire it into capture and push; verify the push target really is private (pushurl, insteadOf, forks); stop capturing `.bashrc` wholesale.
-- The model is local only. *Fixed:* strict loopback check, no redirects, no user info.
-- The mover can't be tricked. *Fixed:* hidden destinations, symlinks, check-then-move race.
-- The home repo must not be able to run code on every machine. *Open (#48).*
-- A machine rebuilt from the repo must not delete live files. *Open (#49).*
-- The clipboard recorder is off by default and encrypted. *Open (#51).*
+`docs/THREAT_MODEL.md` is the authority (21 threats, each with its mitigation, status and evidence, plus the release gate). In short:
+
+- Nothing leaves the machine except commits to the person's own private GitHub repository, after a scan, over https, with a token that lives only in the system keyring. Hestia has no account system and no server.
+- The model is local only (loopback host, no redirects), and file names reach it only as cleaned data it is told to treat as data.
+- The mover and capture can neither overwrite nor delete the person's files; restore is a dry run by default and holds back anything that runs by itself.
+- The repository is untrusted input when it is restored from; the watcher and scripts ship with Hestia, never from the repository.
+- Open items: signed releases are untested until the first real tag (#12), and the maintainer's public name and email appear on GitHub merge commits by choice (#142).
 
 ## Where we honestly are
 
-- **Built and working:** stream and scan, rules, two-model bundling, domains, tree and mover, search, home repo creation and publish, machine fingerprint, watcher, launcher, jobs layer and status strip.
-- **Partly:** safety (about half the findings fixed), UI states (design system just landed; screens not migrated), install (works on the author's machine, no clean-machine test).
-- **Not started:** the stream as the *front door* (a live, time-ordered Today with substreams, reminders and search by time). This is the heart of the original idea and the biggest gap between the vision and the product.
-- **Debt:** two code trees (private homebase and public Hestia) have drifted and must collapse into the public one; two settings name the home repo.
+- **Built and working:** stream and scan, rules, two-model bundling, domains, tree and mover with undo, search, home repository create/adopt/find through GitHub sign-in (engine and screens), machine fingerprint, the watcher with secret scanning and verified private pushes, safe restore, the launcher, jobs layer and status strip, design system, a redesigned Welcome, Today and sidebar, release packaging with attestation, CI that includes a clean-computer end-to-end test.
+- **Not live yet:** GitHub sign-in needs the project's OAuth App Client ID (an owner step); until then the welcome says it is not set up.
+- **Partly:** the UI milestone (many screens still to migrate to the design system), and trying it on a real clean OS image with a real session.
+- **Not started:** the stream as the *front door* (a live, time-ordered Today with substreams, reminders and search by time). This is the heart of the original idea and the biggest gap between the vision and the product; it waits on decision #81.
+- **Debt:** two private repositories (`home` and the older `homebase`) and a duplicate older copy of the code in homebase: see the plan in #7 (owner decisions #82 and #83).
 
 ## Principles for building it
 
@@ -72,11 +74,6 @@ Five pieces run on your computer.
 - Never destructive; confirm anything outward; everything undoable.
 - Real process: issues and milestones, a branch per issue, CI, tests, no mainlining.
 
-## Questions for the owner
+## Open decisions (owner)
 
-1. **Stream as front door.** Should Today be the live stream itself (events in time order, answered inline), or a briefing that summarises it? The Lifestreams paper argues for the first.
-2. **Home repo scope.** Is the home repo everything (documents too) or only setup and metadata, with documents on cloud or external storage? Large media does not belong in git.
-3. **Multiple machines.** Is one home repo the source of truth for all machines, with the Mac as the iCloud bridge, or is each machine its own writer?
-4. **Who is the user?** The author only, or a stranger? "A stranger installs it" implies a much higher bar for onboarding, errors and support than a tool for one person.
-5. **Autonomy dial.** How much should it do without asking, and how does a person see and undo it?
-6. **Name and feel.** What should Hestia feel like beyond tidy: a hearth, a butler, an instrument?
+Tracked as issues in the "M0 Decisions" milestone, each with options and a recommendation: **#81** Today as the live stream or a briefing; **#82** what lives in the home repository; **#83** one home repository for all machines; **#84** who the user is; **#85** the autonomy dial and an activity log with undo; **#86** what Hestia should feel like.
