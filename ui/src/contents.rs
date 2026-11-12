@@ -56,17 +56,9 @@ pub fn list(s: &State) -> El {
     }
     let up = s.cwd.parent().map(|p| p.to_path_buf());
     let header = row().w_full().gap(d.gap()).center_y()
-        .child(
-            row().key("up").h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM)).fill(t.control_off)
-                .on_press(move |s: &mut State| { if let Some(p) = up.clone() { s.go_folder(p) } })
-                .child(text("↑ up").font(style(&d, type_::LABEL)).color(t.text)),
-        )
+        .child(super::questions::button(&d, "up", "↑ Up".into(), false, move |s: &mut State| { if let Some(p) = up.clone() { s.go_folder(p) } }))
         .child(text(tilde(&s.cwd)).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-        .child(
-            row().key("new-note").h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM)).fill(t.control_off)
-                .on_press(|s: &mut State| s.new_note())
-                .child(text("New note").font(style(&d, type_::LABEL)).color(t.text)),
-        );
+        .child(super::questions::button(&d, "new-note", "New note".into(), false, |s: &mut State| s.new_note()));
     let mut c = col().w_full().gap(d.gap()).child(header)
         .child(text(format!("{} items · updates by itself", s.entries.len())).font(style(&d, type_::SECTION)).color(t.text_secondary))
         .child(col().w_full().h(d.size(220.0)).scroll(ScrollSpec { stick_bottom: false }).child(rows));
@@ -85,11 +77,7 @@ pub fn list(s: &State) -> El {
                 .child(super::field(&d, "file-kind", &s.f_filekind, "change this file's kind ↵ (like document/manual)", |s: &mut State| &mut s.f_filekind).on_submit(|s: &mut State, _: &mut rune::Tx| s.label_file()));
         }
         let path = e.path.clone();
-        c = c.child(row().child(
-            row().key("open").h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM)).border(1.0, t.card_border)
-                .on_press(move |_: &mut State| super::open_folder(&path.to_string_lossy()))
-                .child(text("Open").font(style(&d, type_::LABEL)).color(t.text)),
-        ));
+        c = c.child(row().child(super::questions::button(&d, "open", "Open".into(), false, move |_: &mut State| super::open_folder(&path.to_string_lossy()))));
     }
     c
 }
