@@ -20,7 +20,7 @@ Research notes (2026-11-12). The question: does each screen give the person the 
 
 ## Honesty audit (fixed with this note)
 
-Two sentences in the app said nothing leaves the computer, while Hestia pushes the home repository to the person's own private GitHub repository by default. They now say what is true: files are read only by local models and are never uploaded; notes about how the computer is set up are saved to a private repository only the person can see.
+Two sentences in the app said nothing leaves the computer, while Hestia pushes the home repository to the person's own private GitHub repository once they sign in. The backup copies the contents of settings and config files and of any folder the person adds (secret-looking lines are withheld); documents are never uploaded. The copy now says exactly that, and before sign-in it says "Nothing has left this computer yet." Rule: say "documents" for what never leaves, and name config files for what does.
 
 ## Information each screen owes the person
 

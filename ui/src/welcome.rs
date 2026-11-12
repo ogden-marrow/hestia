@@ -52,7 +52,7 @@ pub fn screen(s: &State) -> El {
         0 => ("Welcome to Hestia", col().w_full().gap(d.section())
             .child(line(s, "It files your computer for you.", "Every night it reads your folders and works out what each file is and where it belongs."))
             .child(line(s, "It only asks when it is unsure.", "Each morning it tells you what it filed and asks a few questions about the rest."))
-            .child(line(s, "Your files stay here.", "They are read only by models on this computer, and Hestia never deletes a file. Only notes about how your computer is set up are saved, to your private GitHub repository."))),
+            .child(line(s, "Your documents stay here.", &format!("They are read only by models on this computer, and Hestia never deletes a file. {} There is no Hestia account.", crate::account::leaves_line(s.account_user.is_some()))))),
         1 => ("Where things are", col().w_full().gap(d.section())
             .child(line(s, "Questions", "Folders it could not place. Your answer teaches it."))
             .child(line(s, "Files", "Everything you own, grouped by what it is for, with each folder's rule and contents."))

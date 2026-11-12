@@ -489,3 +489,23 @@ mod tests {
         }
     }
 }
+
+/// Where the setup notes go, said truthfully: nothing leaves until someone signs in.
+pub fn leaves_line(signed_in: bool) -> &'static str {
+    if signed_in {
+        "Once you sign in, your settings and config files are saved to a private repository on your own GitHub account."
+    } else {
+        "Nothing has left this computer yet."
+    }
+}
+
+#[cfg(test)]
+mod leaves_tests {
+    use super::leaves_line;
+
+    #[test]
+    fn the_privacy_line_depends_on_signing_in() {
+        assert!(leaves_line(false).contains("Nothing has left"));
+        assert!(leaves_line(true).contains("private repository on your own GitHub account"));
+    }
+}
