@@ -2,6 +2,8 @@
 # The machine watcher when things go wrong (issues #166-#172): every failure is a visible result that starts with
 # FAILED, a stuck backup unsticks itself, and nothing hangs. Hostile on purpose: a fake HOME, fake gh, a fake git remote
 # (a bare repository in a temp folder) and a fake "GitHub URL" for it. Never touches the real HOME or any real repository.
+# shellcheck disable=SC2088 # a literal "~/" is what capture-paths.txt holds
+# shellcheck disable=SC2254 # want() takes a glob on purpose
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 w="$here/packaging/libexec/watch.sh"

@@ -4,6 +4,7 @@
 # message, then pushes to the private origin. It only touches the capture files.
 # The result is one line in watch.json: it starts with "ok" only when everything asked of it worked, and with
 # "FAILED" (and the first line of what went wrong) otherwise. Exit 1 means FAILED; 75 means another run holds the lock.
+# shellcheck disable=SC2069 # "2>&1 >/dev/null" is deliberate: keep git's complaint (stderr), drop its output
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 libexec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
