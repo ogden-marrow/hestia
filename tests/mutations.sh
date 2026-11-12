@@ -42,7 +42,7 @@ mutate "hostile file names are not cleaned"                lifestream/src/bundle
             ||' rs hostile_names
 mutate "direction-changing characters are not removed from names" lifestream/src/bundle.rs "'\\u{202A}'..='\\u{202E}' | " '' rs hostile_names
 mutate "undo accepts a journal that leaves the home folder" lifestream/src/tree.rs 'rel_ok(rel).then(|| home.join(rel))' 'Some(home.join(rel))' rs undo_treats_the_journal
-mutate "watcher pushes to a repo Hestia cannot vouch for"  packaging/libexec/watch.sh '"$LS" home check-private "$slug" >/dev/null 2>&1 ||' 'true ||' bash tests/watcher.sh
+mutate "watcher pushes to a repo Hestia cannot vouch for"  packaging/libexec/watch.sh 'out=$("$LS" home check-private "$slug" 2>&1) ||' 'out=$(true) ||' bash tests/watcher.sh
 mutate "capture no longer refuses a mass deletion"         packaging/libexec/capture.sh '[ "$before" -ge 4 ]' '[ "$before" -ge 4000000 ]' bash tests/watcher.sh
 mutate "deny-list is not applied inside captured folders"  packaging/libexec/capture.sh 'if [ "${#inside[@]}" -gt 0 ]; then' 'if [ 1 -eq 0 ]; then' bash tests/watcher.sh
 mutate "a secret line is left in a shell file"             packaging/libexec/watch.sh 'sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f"' 'true' bash tests/watcher.sh

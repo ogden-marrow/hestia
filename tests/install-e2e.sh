@@ -43,10 +43,11 @@ git -C "$HESTIA_HOME" add notes.txt && git -C "$HESTIA_HOME" commit -qm "my note
 
 # 3. the watcher captures this clean computer once; a local remote is refused (only a private GitHub repository is pushed to)
 git init -q --bare "$T/remote.git"; git -C "$HESTIA_HOME" remote add origin "$T/remote.git"
-bash "$PREFIX/libexec/hestia/watch.sh" || fail "the watcher failed on a clean computer"   # no argument: it finds the repository from the setting
+# no argument: it finds the repository from the setting. It reports FAILED (exit 1) for the refused remote, checked below.
+bash "$PREFIX/libexec/hestia/watch.sh" || [ "$?" = 1 ] || fail "the watcher crashed on a clean computer"
 git -C "$HESTIA_HOME" log --format=%s | grep -q "first capture of this computer" || fail "the first capture was not committed"
 ls "$HESTIA_HOME"/machines/*/machine.toml >/dev/null 2>&1 || fail "the watcher did not write this computer's fingerprint (it must use the installed lifestream, not whatever is on PATH): $(tail -3 "$XDG_DATA_HOME/hestia/watch.err" 2>&1)"
-grep -q "not pushed: remote is not a GitHub repository" "$XDG_DATA_HOME/hestia/watch.json" || fail "the watcher must refuse a remote that is not a private GitHub repository: $(cat "$XDG_DATA_HOME/hestia/watch.json")"
+grep -q "FAILED: not pushed: remote is not a GitHub repository" "$XDG_DATA_HOME/hestia/watch.json" || fail "the watcher must refuse a remote that is not a private GitHub repository: $(cat "$XDG_DATA_HOME/hestia/watch.json")"
 [ -z "$(git -C "$T/remote.git" rev-parse --verify -q main 2>/dev/null)" ] || fail "something was pushed to a non-GitHub remote"
 [ -z "$(git -C "$HESTIA_HOME" status --short)" ] || fail "the home repository is not clean after a capture"
 
