@@ -448,15 +448,21 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         Pane::Ask => "Search", Pane::History => "History", Pane::Files => "Files", Pane::Time => "Time",
         Pane::Machine => "Machine", Pane::Settings => "Settings", Pane::Welcome => "Welcome",
     };
+    let (status_text, status_color) = match (&s.backup, needs) {
+        (_, n) if n > 0 => (crate::today::count(n, "question", "questions"), acc),
+        (backup::Verdict::Safe { when }, _) => (format!("Backed up {when}"), t.text_secondary),
+        (backup::Verdict::NeedsYou { .. }, _) => ("Backup needs you".to_string(), d.danger()),
+        _ => ("All clear".to_string(), t.text_secondary),
+    };
     let header = row().w_full().h(d.size(28.0)).px(pad).center_y().fill(t.card)
         .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
         .child(row().w(200.0).gap(d.gap()).center_y()
             .child(col().size(10.0, 10.0).radius(2.0).fill(acc))
-            .child(text("Hestia").font(style(&d, type_::TITLE)).color(t.text)))
+            .child(text("Hestia").font(style(&d, type_::LABEL)).color(t.text_secondary)))
         .child(text(title).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
         .child(
-            text(if needs == 0 { "All clear".to_string() } else { crate::today::count(needs, "question", "questions") }).key("need-you").font(style(&d, type_::LABEL)).color(if needs > 0 { acc } else { t.text_secondary })
-                .on_press(|s: &mut State| s.pane = Pane::Questions),
+            text(status_text).key("need-you").font(style(&d, type_::LABEL)).color(status_color)
+                .on_press(move |s: &mut State| s.pane = if needs > 0 { Pane::Questions } else { Pane::Today }),
         );
 
     // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"

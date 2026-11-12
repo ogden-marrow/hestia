@@ -46,16 +46,14 @@ fn get_started(s: &State) -> Option<El> {
             (!launcher).then(|| crate::questions::action(&d, "gs-ext", "Turn on", "Turning on…", true, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search())))))
 }
 
-/// The backup, as one calm line: "Everything is backed up" when it is, and one plain action when it is not.
+/// The backup: silent when safe (the header says so), one card with one plain action when it is not.
 fn backup_status(s: &State) -> Option<El> {
     use crate::backup::{Fix, Verdict};
     let d = s.design;
     let t = d.theme();
     match &s.backup {
         Verdict::Unknown => None,
-        Verdict::Safe { when } => Some(row().w_full().gap(d.gap()).center_y()
-            .child(text("✓".to_string()).font(d.text(Role::Body)).color(t.text_secondary))
-            .child(text(format!("Everything is backed up  ·  last backup {when}")).font(d.text(Role::Label)).color(t.text_secondary).wrap_anywhere().shrink().grow(1.0).min_w(0.0))),
+        Verdict::Safe { .. } => None, // the header says "Backed up 12 minutes ago" on every screen
         Verdict::NeedsYou { why, fix } => {
             let (label, go): (&str, fn(&mut State)) = match fix {
                 Fix::BackUpNow => ("Back up now", |s| s.pane = Pane::Machine),
@@ -167,7 +165,7 @@ mod tests {
         let mut s = State::default();
         for v in [Verdict::Unknown, Verdict::Safe { when: "now".into() }, Verdict::NeedsYou { why: "x".into(), fix: Fix::SignIn }] {
             s.backup = v.clone();
-            assert_eq!(backup_status(&s).is_some(), v != Verdict::Unknown);
+            assert_eq!(backup_status(&s).is_some(), matches!(v, Verdict::NeedsYou { .. }));
         }
     }
 
