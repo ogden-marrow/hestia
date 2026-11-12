@@ -117,6 +117,29 @@ pub fn cancel(s: &State) {
     }
 }
 
+/// What `lifestream file --undo` said: how many files went back, and which ones could not (path, plain reason).
+#[derive(Debug, Default, PartialEq)]
+pub struct Undone {
+    pub restored: usize,
+    pub skipped: Vec<(String, String)>,
+}
+
+pub fn parse_undo(line: &str) -> Option<Undone> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    (v["event"].as_str()? == "undone").then(|| Undone {
+        restored: v["restored"].as_u64().unwrap_or(0) as usize,
+        skipped: v["skipped"].as_array().map(|a| a.iter().filter_map(|x| Some((x["path"].as_str()?.to_string(), x["why"].as_str()?.to_string()))).collect()).unwrap_or_default(),
+    })
+}
+
+/// Put the last batch of filed files back (blocking: run it as a job).
+pub fn undo(stream: &Path) -> Result<Undone, String> {
+    let out = Command::new(bin()).args(["file", "--undo", "--out"]).arg(stream).stdin(Stdio::null()).stderr(Stdio::null()).output()
+        .map_err(|_| "Hestia's helper program isn't installed, so it can't put files back yet.".to_string())?;
+    String::from_utf8_lossy(&out.stdout).lines().rev().find_map(parse_undo)
+        .ok_or_else(|| "Putting the files back did not finish. Nothing was changed that Hestia could not undo; try again.".to_string())
+}
+
 /// Take everything the engine has said since the last look.
 pub fn drain(inbox: &Arc<Mutex<Vec<Event>>>) -> Vec<Event> {
     std::mem::take(&mut *inbox.lock().unwrap())
@@ -157,6 +180,15 @@ mod tests {
         }
         assert_eq!(p("not json"), None);
         assert_eq!(p(r#"{"event":"unknown"}"#), None);
+    }
+
+    #[test]
+    fn the_undo_line_is_read() {
+        assert_eq!(parse_undo(r#"{"event":"undone","restored":2,"skipped":[{"path":"~/Pictures/a.png","why":"something is already at the old place"}]}"#),
+            Some(Undone { restored: 2, skipped: vec![("~/Pictures/a.png".into(), "something is already at the old place".into())] }));
+        assert_eq!(parse_undo(r#"{"event":"undone","restored":0,"skipped":[]}"#), Some(Undone::default()));
+        assert_eq!(parse_undo("garbage"), None);
+        assert_eq!(parse_undo(r#"{"event":"other"}"#), None);
     }
 
     #[test]
