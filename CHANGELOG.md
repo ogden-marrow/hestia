@@ -4,6 +4,9 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 
 ## Unreleased
 
+### Removed
+- **The standalone launcher window** (`hestia --launch`, its toggle and sizing): the Shell extension owns Alt+Space. Search inside the app and `hestia --serve` (the engine behind the Shell bar) are unchanged; the desktop entry's "Search…" action opens the app's Search screen.
+
 ### Added
 - **Undo for filing** (engine): every batch of moves is written down; `lifestream file --undo` puts the last batch back, one file at
   a time, never overwriting, never leaving your home folder, and leaves what it could not restore to be retried.

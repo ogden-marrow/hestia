@@ -1,6 +1,6 @@
 //! The launcher: one search box for Hestia's screens, installed apps, clipboard history and files.
 //! No plugins. Apps come from the system's desktop entries; the clipboard from Hestia's own history.
-//! It is the same thing as Search inside the app and as `hestia --launch` from a keyboard shortcut.
+//! The same results serve Search inside the app and `hestia --serve`, the engine behind the Shell's Alt+Space bar.
 
 use super::{style, Pane, State};
 use crate::clipboard;
@@ -224,35 +224,16 @@ pub fn heading_of(h: &Hit) -> &'static str {
     if h.top { "Best match" } else { match h.group { "Apps" => "Applications", "Files" => "Documents", "Clipboard" => "Recently copied", g => g } }
 }
 
-/// The window height that fits this many results: the bar, then rows and headings.
-pub fn height_for(hits: &[Hit]) -> f32 {
-    if hits.is_empty() {
-        return 68.0;
-    }
-    let mut h = 68.0 + 12.0;
-    let mut last = "";
-    for (i, x) in hits.iter().take(10).enumerate() {
-        let g = heading_of(x);
-        if g != last || i == 0 {
-            h += 26.0;
-            last = g;
-        }
-        h += 44.0;
-    }
-    h + 8.0
-}
-
 impl State {
-    /// Do what the selected result says. Returns true when the launcher window should close.
+    /// Do what the selected result says. True when it was handled for the headless engine (the Shell bar
+    /// closes itself); in the app the result shows in place.
     pub(crate) fn activate(&mut self, hit: &Hit) {
-        if self.activate_inner(hit) && self.launched_ask {
-            self.close_after = true;
-        }
+        self.activate_inner(hit);
     }
     fn activate_inner(&mut self, hit: &Hit) -> bool {
         match &hit.kind {
             Kind::Screen(key) => {
-                if self.launched_ask {
+                if self.headless {
                     let _ = std::process::Command::new(std::env::current_exe().unwrap_or_else(|_| "hestia".into())).arg(format!("--pane={key}")).spawn();
                     return true;
                 }
@@ -285,13 +266,13 @@ impl State {
                     self.copy_text = Some(c.text.clone());
                     self.msg = "copied, ready to paste".into();
                 }
-                self.launched_ask
+                self.headless
             }
             Kind::File(i) => {
                 if let Some(src) = self.recs.get(*i).and_then(|r| r.sources.first().or(r.was.first())) {
                     super::open_folder(src);
                 }
-                self.launched_ask
+                self.headless
             }
             Kind::Meaning => {
                 self.do_ask();
@@ -307,7 +288,7 @@ impl State {
 ///   {"q":"fire"}  ->  {"hits":[{"i":0,"top":true,"group":"Applications","title":"Firefox","sub":"Web Browser","kind":"app","path":"/usr/share/applications/firefox.desktop"}]}
 ///   {"run":0}     ->  {"done":true}  or  {"copy":"text"} for a clipboard item (the Shell owns the clipboard)
 pub fn serve() {
-    let s = State { launched_ask: true, ..State::default() };
+    let s = State { headless: true, ..State::default() };
     serve_with(s, std::io::stdin().lock(), std::io::stdout().lock());
 }
 
@@ -381,35 +362,27 @@ pub fn panel(s: &State) -> El {
     let field = rune::text_input(&s.ask, d.font(big)).key("ask-big").single_line().grow(1.0).h(64.0).py(19.0).color(t.text)
         .placeholder("Search your files, apps and folders", t.text_secondary)
         .on_edit(|s: &mut State| &mut s.ask)
-        .on_input_change(|s: &mut State, tx: &mut Tx| {
+        .on_input_change(|s: &mut State, _: &mut Tx| {
             s.asel = 0;
             s.asked.clear();
             s.ask_hits.clear();
-            if s.launched_ask {
-                tx.resize_window_instant((LAUNCHER_W, height_for(&results(s))));
-            }
         })
-        .on_input_key(move |s: &mut State, ev: &KeyEvent, tx: &mut Tx| {
+        .on_input_key(move |s: &mut State, ev: &KeyEvent, _: &mut Tx| {
             let count = results(s).len();
             match ev.key {
                 Key::Down => s.asel = (s.asel + 1).min(count.saturating_sub(1)),
                 Key::Up => s.asel = s.asel.saturating_sub(1),
-                Key::Escape => {
-                    if s.launched_ask { tx.close_window() } else { s.pane = Pane::Today }
-                }
+                Key::Escape => s.pane = Pane::Today,
                 _ => return false,
             }
             true
         })
-        .on_submit(|s: &mut State, tx: &mut Tx| {
+        .on_submit(|s: &mut State, _: &mut Tx| {
             let all = results(s);
             // the highlighted row is clamped when drawn, so Enter opens what is lit
             if let Some(h) = all.get(s.asel.min(all.len().saturating_sub(1))).cloned() {
                 s.msg.clear();
                 s.activate(&h);
-            }
-            if s.launched_ask {
-                tx.resize_window_instant((LAUNCHER_W, height_for(&results(s))));
             }
         });
     let bar = row().w_full().px(20.0).gap(14.0).center_y()
@@ -442,21 +415,14 @@ pub fn panel(s: &State) -> El {
     if n > 0 {
         c = c.child(col().w_full().h(1.0).fill(t.card_border))
             .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(list));
-    } else if !s.launched_ask {
+    } else {
         c = c.child(text("Type to search apps, files, clipboard (type “clipboard”) and Hestia.").font(style(&d, type_::LABEL)).color(t.text_secondary).px(20.0).py(d.gap()));
     }
-    if s.launched_ask && !s.msg.is_empty() {
+    if !s.msg.is_empty() {
         c = c.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink().px(20.0).py(d.gap()));
     }
-    if s.launched_ask {
-        // the window itself is the card: rounded, ruled, with the desktop showing at the corners
-        c.radius(24.0).fill(t.card).border(1.0, t.card_border)
-    } else {
-        c.panel(&d)
-    }
+    c.panel(&d)
 }
-
-pub const LAUNCHER_W: f32 = 680.0;
 
 #[cfg(test)]
 mod tests {
@@ -474,7 +440,7 @@ mod tests {
         let text = format!("[Desktop Entry]\nType=Application\nName=Zzfake Thing\nExec=touch {}\n", marker.display());
         std::fs::write(&entry, &text).unwrap();
         let state = || {
-            let mut s = State { launched_ask: true, apps: vec![parse_entry("zzfake.desktop", &entry, &text).unwrap()], ..State::default() };
+            let mut s = State { headless: true, apps: vec![parse_entry("zzfake.desktop", &entry, &text).unwrap()], ..State::default() };
             s.clips.clear();
             s
         };
@@ -501,6 +467,13 @@ mod tests {
         assert!(err.starts_with("Couldn't open Gone"), "{err}");
         assert!(counts.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nothing_starts_the_removed_launcher_window() {
+        let entry = include_str!("../../packaging/desktop/app.hestia.Hestia.desktop");
+        assert!(!entry.contains("--launch"), "the desktop entry must not start the removed launcher window");
+        assert!(pane_of("search").is_some(), "the entry's Search action opens the in-app Search screen");
     }
 
     #[test]
