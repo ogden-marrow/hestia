@@ -86,8 +86,8 @@ impl State {
         if let Some(f) = self.tree.folders.get(i).cloned() {
             self.go(super::files::home().join(&f.path));
             self.f_path = TextEdit::new(f.path.rsplit('/').next().unwrap_or(&f.path));
-            self.f_kind = TextEdit::new(&csv(&f.kind));
-            self.f_tag = TextEdit::new(&csv(&f.tag));
+            self.f_kind = TextEdit::new(csv(&f.kind));
+            self.f_tag = TextEdit::new(csv(&f.tag));
             self.f_name = TextEdit::new(f.name.as_deref().unwrap_or(""));
             self.f_year = f.by_year;
         }
@@ -380,8 +380,7 @@ pub fn panels(s: &State) -> Vec<El> {
             n += 1;
             let idx = s.tree.folders.iter().position(|f| f.path == dir);
             let on = idx.is_some() && idx == Some(s.tsel);
-            let top = dir.split('/').next().unwrap_or("");
-            let depth = dir.matches('/').count().saturating_sub(if top.is_empty() { 0 } else { usize::from(s.domains.iter().any(|x| x.folder == top)) * 0 }) as f32;
+            let depth = dir.matches('/').count() as f32;
             let name = dir.rsplit('/').next().unwrap_or(&dir).to_string();
             let count = tonight.get(&dir).copied().unwrap_or(0);
             let moving_here = s.moving.is_some();
@@ -430,13 +429,10 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(text(format!("{n_moves} files would move tonight")).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0))
         .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", true, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
 
-    let banner = match s.moving.and_then(|i| s.tree.folders.get(i)) {
-        Some(f) => Some(row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
+    let banner = s.moving.and_then(|i| s.tree.folders.get(i)).map(|f| row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
             .child(text(format!("Click the folder to put “{}” inside, or the top level:", f.path)).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0).wrap_anywhere())
             .child(button(&d, "mv-top", "Top level".into(), false, |s: &mut State| s.finish_move("")))
-            .child(button(&d, "mv-cancel", "Cancel".into(), false, |s: &mut State| s.moving = None))),
-        None => None,
-    };
+            .child(button(&d, "mv-cancel", "Cancel".into(), false, |s: &mut State| s.moving = None)));
 
     let mut center = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(col().w_full().px(d.item_px()).py(d.gap() * 0.5).gap(d.gap())
@@ -574,8 +570,7 @@ mod tests {
 
     #[test]
     fn filing_says_what_moved_and_offers_undo() {
-        let mut s = State::default();
-        s.msg = "3\u{1f}0".into();
+        let mut s = State { msg: "3\u{1f}0".into(), ..State::default() };
         reload_after_filing(&mut s);
         assert_eq!((s.last_filed, s.msg.as_str()), (3, "Moved 3 files. You can put them back."));
         s.msg = "1\u{1f}2".into();
@@ -585,8 +580,7 @@ mod tests {
 
     #[test]
     fn undoing_clears_the_offer_and_lists_what_stayed() {
-        let mut s = State::default();
-        s.last_filed = 3;
+        let mut s = State { last_filed: 3, ..State::default() };
         *s.undo_inbox.lock().unwrap() = vec!["~/Pictures/a.png: something is already at the old place".into()];
         after_undo(&mut s);
         assert_eq!(s.last_filed, 0);

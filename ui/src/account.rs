@@ -467,9 +467,7 @@ mod tests {
 
     #[test]
     fn leaving_the_flow_returns_to_settings_when_it_started_there() {
-        let mut s = State::default();
-        s.flow_return = Some(crate::Pane::Settings);
-        s.pane = crate::Pane::Welcome;
+        let mut s = State { flow_return: Some(crate::Pane::Settings), pane: crate::Pane::Welcome, ..State::default() };
         done(&mut s);
         assert_eq!(s.pane, crate::Pane::Settings);
         assert!(s.flow_return.is_none());
@@ -485,8 +483,7 @@ mod tests {
     #[test]
     fn every_canned_state_exists_and_renders() {
         for name in ALL.iter().chain(["other"].iter()) {
-            let mut s = State::default();
-            s.auth = canned(name);
+            let s = State { auth: canned(name), ..State::default() };
             assert!(s.auth.is_some(), "{name}");
             assert!(view(&s).is_some(), "{name}");
         }

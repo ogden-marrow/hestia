@@ -113,7 +113,8 @@ pub fn panels(s: &State) -> Vec<El> {
         tabs = tabs.child(
             row().key(format!("tab-{i}")).h(d.row_h()).px(d.item_px()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { t.control_off } else { rune::Color::TRANSPARENT })
-                .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) } if i == 7 { crate::account::refresh_status(s) } })
+                .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) }
+                    if i == 7 { crate::account::refresh_status(s) } })
                 .child(text(name.to_string()).font(style(&d, type_::LABEL)).color(t.text)),
         );
     }
@@ -191,7 +192,7 @@ pub fn panels(s: &State) -> Vec<El> {
             let n = s.clips.len();
             body = body
                 .child(setting(&d, "Clipboard history", &format!("Remember what you copy, so you can find and paste it again from the launcher. {}", crate::clipboard::PRIVACY),
-                    on_off(&d, "clip", s.settings.clipboard_on, |s, on| set_clipboard(s, on))))
+                    on_off(&d, "clip", s.settings.clipboard_on, set_clipboard)))
                 .child(setting(&d, "Keep the last", "How many copied items to remember.",
                     segmented(&d, "clipmax", &["50", "100", "200"], match s.settings.clipboard_max { 50 => 0, 200 => 2, _ => 1 },
                         |s, i| s.change_settings(|st| st.clipboard_max = [50, 100, 200][i]))))
@@ -214,7 +215,7 @@ pub fn panels(s: &State) -> Vec<El> {
                         None => crate::questions::button(&d, "acct-in", "Sign in…".into(), true, |s: &mut State| crate::account::open_from_settings(s, false)),
                     }))
                 .child(setting(&d, "Home repository", &match &remote { Some(r) => format!("{r}. Private. Hestia keeps it up to date."), None => "Not connected to GitHub yet.".to_string() },
-                    if user.is_some() { crate::questions::button(&d, "acct-switch", "Switch…".into(), false, |s: &mut State| crate::account::open_from_settings(s, true)) } else { text("").font(style(&d, type_::LABEL)).into() }))
+                    if user.is_some() { crate::questions::button(&d, "acct-switch", "Switch…".into(), false, |s: &mut State| crate::account::open_from_settings(s, true)) } else { text("").font(style(&d, type_::LABEL)) }))
                 .child(setting(&d, "No Hestia account", crate::account::SHORT, text("").font(style(&d, type_::LABEL))));
         }
         _ => {

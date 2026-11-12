@@ -15,7 +15,7 @@ impl State {
         let tags: Vec<String> = parts.map(String::from).collect();
         let Some(e) = self.entries.get(self.esel) else { return };
         let path = tilde(&e.path);
-        let Some(id) = self.recs.iter().find(|r| r.sources.iter().any(|p| *p == path)).map(|r| r.id.clone()) else { return };
+        let Some(id) = self.recs.iter().find(|r| r.sources.contains(&path)).map(|r| r.id.clone()) else { return };
         let Some(stream) = self.stream.clone() else { return };
         match lifestream::teach(&stream, &[id], kind, &tags) {
             Ok(recs) => {

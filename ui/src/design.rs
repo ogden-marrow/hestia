@@ -292,8 +292,6 @@ mod tests {
         assert_eq!(d.text(Role::Body).size, 13.0 * 1.25);
     }
 
-    #[test]
-    fn radii_nest() {
-        assert!(radius::CONTROL < radius::CARD && radius::CARD < radius::SHEET);
-    }
+    // radii nest: checked when the program is built
+    const _: () = assert!(radius::CONTROL < radius::CARD && radius::CARD < radius::SHEET);
 }

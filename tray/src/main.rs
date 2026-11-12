@@ -97,11 +97,11 @@ fn main() {
     loop {
         std::thread::sleep(TICK);
         tick = tick.wrapping_add(1);
-        if tick % REFRESH_EVERY == 0 {
+        if tick.is_multiple_of(REFRESH_EVERY) {
             stats = counts();
         }
         // it only wiggles while the app is open; checked about once a second
-        if tick % 5 == 0 {
+        if tick.is_multiple_of(5) {
             open = app_open();
         }
         let frame = if open { FLICKER[tick as usize % FLICKER.len()] } else { 0 };
