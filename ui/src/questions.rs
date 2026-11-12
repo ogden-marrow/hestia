@@ -134,7 +134,7 @@ pub fn panels(s: &State) -> Vec<El> {
                     chips = chips.child(chip(&d, crate::kinds::label(&g.kind), false));
                 }
             }
-            _ => chips = chips.child(chip(&d, "no suggestion yet".into(), false)),
+            _ => {}
         }
         if skipped {
             chips = chips.child(chip(&d, "skipped".into(), false));
@@ -143,7 +143,7 @@ pub fn panels(s: &State) -> Vec<El> {
             col().key(format!("bundle-{i}")).w_full().px(d.item_px()).py(d.gap()).gap(d.gap() * 0.5).radius(d.r(tok::radius::SM))
                 .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
                 .border(1.0, if on { acc } else { Color::TRANSPARENT })
-                .on_press(move |s: &mut State| { s.qsel = i; s.msg.clear() })
+                .on_press(move |s: &mut State| { s.qsel = i; s.msg.clear(); s.kinds_open = false })
                 .child(row().w_full().gap(d.gap()).center_y()
                     .child(text(name).font(style(&d, type_::TITLE)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
                     .child(text(format!("{} files", b.ids.len())).font(style(&d, type_::LABEL)).color(if agree { acc } else { t.text_secondary })))
@@ -188,11 +188,11 @@ pub fn panels(s: &State) -> Vec<El> {
             let mut card = col().w_full().padding(d.item_px()).gap(d.gap() * 0.5).tile(&d)
                 .child(row().w_full().gap(d.gap()).center_y()
                     .child(text(crate::kinds::label(&c.kind)).font(style(&d, type_::TITLE)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-                    .child(if n == 0 && c.reasons.len() > 1 { chip(&d, "best guess".into(), true) } else { chip(&d, format!("{} reason{}", c.reasons.len(), if c.reasons.len() == 1 { "" } else { "s" }), false) }));
+                    .child(if n == 0 && c.reasons.len() > 1 { chip(&d, "best guess".into(), true) } else { col().size(0.0, 0.0) }));
             for r in &c.reasons {
                 card = card.child(text(format!("•  {r}")).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
             }
-            card = card.child(button(&d, &format!("accept-{}-{n}", b.root), format!("File {} as this", if sibs.is_empty() || !s.settings.siblings { "folder".to_string() } else { format!("{} folders", sibs.len() + 1) }), n == 0, move |s: &mut State| s.answer(&kind, &[])));
+            card = card.child(row().child(button(&d, &format!("accept-{}-{n}", b.root), format!("File {} as this", if sibs.is_empty() || !s.settings.siblings { "folder".to_string() } else { format!("{} folders", sibs.len() + 1) }), n == 0, move |s: &mut State| s.answer(&kind, &[]))));
             sugg = sugg.child(card);
         }
         body = body.child(sugg);
@@ -200,23 +200,29 @@ pub fn panels(s: &State) -> Vec<El> {
         if !sibs.is_empty() {
             let names: Vec<String> = sibs.iter().take(3).map(|&j| s.bundles[j].root.rsplit('/').next().unwrap_or("").to_string()).collect();
             body = body.child(
-                text(format!("{} similar folders in {} ({}) {}. Change this in Settings.", sibs.len(), project_of(&b.root).rsplit('/').next().unwrap_or(""), names.join(", "),
-                    if s.settings.siblings { "are answered together with this one" } else { "are not included" }))
+                text(format!("{} similar {} nearby ({}) {}. Change this in Settings.", sibs.len(), if sibs.len() == 1 { "folder" } else { "folders" }, names.join(", "),
+                    if s.settings.siblings { "will be answered together with this one" } else { "are not included" }))
                     .font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink(),
             );
         }
 
-        // something else: every kind is one click away
-        let mut kinds = row().w_full().shrink().min_w(0.0).gaps(d.gap(), d.gap()).flex_wrap();
-        for (n, k) in KINDS.iter().enumerate() {
-            let k = k.to_string();
-            kinds = kinds.child(
-                row().key(format!("kind-{}-{n}", b.root)).h(d.size(26.0)).px(d.gap()).center_y().radius(99.0).fill(t.control_off)
-                    .on_press({ let k = k.clone(); move |s: &mut State| s.answer(&k, &[]) })
-                    .child(text(k).font(style(&d, type_::LABEL)).color(t.text)),
-            );
+        // something else: tucked away until asked for; every kind is then one click away
+        let mut other = col().w_full().gap(d.gap()).child(heading(&d, "Something else"));
+        if s.kinds_open {
+            let mut kinds = row().w_full().shrink().min_w(0.0).gaps(d.gap(), d.gap()).flex_wrap();
+            for (n, k) in KINDS.iter().enumerate() {
+                let k = k.to_string();
+                kinds = kinds.child(
+                    row().key(format!("kind-{}-{n}", b.root)).h(d.size(26.0)).px(d.gap()).center_y().radius(99.0).fill(t.control_off)
+                        .on_press({ let k = k.clone(); move |s: &mut State| s.answer(&k, &[]) })
+                        .child(text(k).font(style(&d, type_::LABEL)).color(t.text)),
+                );
+            }
+            other = other.child(kinds);
+        } else {
+            other = other.child(row().child(button(&d, "kinds-more", "Choose another kind…".into(), false, |s: &mut State| s.kinds_open = true)));
         }
-        body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "Something else")).child(kinds)
+        body = body.child(other
             .child(super::field(&d, "teach", &s.teach, "or type your own kind ↵", |s: &mut State| &mut s.teach).on_submit(|s: &mut State, _: &mut rune::Tx| {
                 let text = s.teach.text.trim().to_string();
                 let mut p = text.split_whitespace();
