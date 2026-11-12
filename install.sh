@@ -2,7 +2,7 @@
 # Installs Hestia for the current user: programs, desktop entry, icons, the GNOME Shell extension and
 # the systemd user timers. Works from a release tarball (bin/ next to this script) or a source checkout.
 #
-#   HESTIA_HOME=~/Home ./install.sh      # where your home repository lives (default ~/Home)
+#   HESTIA_HOME=~/Home ./install.sh      # the first home repository setting (default ~/Home); after that the app owns it
 #   PREFIX=~/.local ./install.sh         # programs go to $PREFIX/bin (default ~/.local)
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -53,9 +53,12 @@ mkdir -p "$share/gnome-shell/extensions"
 cp -r "$pk/gnome-extension/hestia-clipboard@hestia.app" "$share/gnome-shell/extensions/"
 glib-compile-schemas "$share/gnome-shell/extensions/hestia-clipboard@hestia.app/schemas" 2>/dev/null || echo "note: glib-compile-schemas not found; install libglib2.0-bin" >&2
 
-# where the home repository is, for the app and the services (a login is needed once)
-mkdir -p "$HOME/.config/environment.d"
-printf 'HESTIA_HOME=%s\n' "$home_repo" > "$HOME/.config/environment.d/hestia.conf"
+# where the home repository is: ONE setting (`home=` in the app's settings file) that the app, the watcher and the restore
+# script all read. Seeded here only if the person has not set one; never overwritten (the app and signing in own it after that).
+settings="$HOME/.config/hestia/settings"; mkdir -p "$(dirname "$settings")"
+if ! grep -q '^home=.\+' "$settings" 2>/dev/null; then
+  { grep -v '^home=' "$settings" 2>/dev/null || true; printf 'home=%s\n' "$home_repo"; } > "$settings.new" && mv "$settings.new" "$settings"
+fi
 
 # the machine capture scripts ship with Hestia, never from the home repository
 libexec="$prefix/libexec/hestia"
@@ -66,7 +69,7 @@ cp "$pk"/libexec/* "$libexec/" && chmod +x "$libexec"/*.sh
 unit="$HOME/.config/systemd/user"
 mkdir -p "$unit"
 for f in "$pk"/systemd/*; do
-  sed -e "s|@HOME_REPO@|$home_repo|g" -e "s|@LIBEXEC@|$libexec|g" -e "s|%h/\.local/bin|${prefix/#"$HOME"/%h}/bin|g" "$f" > "$unit/$(basename "$f")"
+  sed -e "s|@LIBEXEC@|$libexec|g" -e "s|%h/\.local/bin|${prefix/#"$HOME"/%h}/bin|g" "$f" > "$unit/$(basename "$f")"
 done
 systemctl --user daemon-reload
 systemctl --user enable --now hestia-tray.service lifestream-nightly.timer lifestream-morning.timer
@@ -74,5 +77,5 @@ systemctl --user enable hestia-watch.timer
 # restart, not just start: a timer that is already running keeps its old schedule until restarted
 systemctl --user restart hestia-watch.timer
 
-echo "Hestia is installed. Log out and in once so the launcher and the home repository setting take effect."
+echo "Hestia is installed. Log out and in once so the launcher takes effect."
 systemctl --user list-timers 'lifestream-*' 'hestia-*' || true

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# watch.sh <home-repo> — keep the machine capture current, in small commits, only when the computer is quiet.
+# watch.sh [home-repo] — keep the machine capture current, in small commits, only when the computer is quiet.
 # Run by hestia-watch.timer. Captures, then commits each kind of change on its own with a plain
 # message, then pushes to the private origin. It only touches the capture files.
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 libexec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="${1:-${HESTIA_HOME:-$HOME/Home}}"
+. "$libexec/home-repo.sh"
+repo="${1:-$(hestia_home_repo)}"   # the one setting the app shows; an argument is for tests
 # nothing to do until Hestia has made the home repository
 [ -f "$repo/tree.toml" ] && [ -e "$repo/.git" ] || exit 0
 . /etc/os-release

@@ -8,6 +8,5 @@ Type=oneshot
 Nice=19
 IOSchedulingClass=idle
 CPUWeight=20
-WorkingDirectory=@HOME_REPO@
 ExecStart=%h/.local/bin/lifestream scan %h/Documents %h/Downloads %h/Pictures %h/Videos
 ExecStartPost=%h/.local/bin/lifestream suggest

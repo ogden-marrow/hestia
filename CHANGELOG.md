@@ -28,6 +28,9 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - See `docs/THREAT_MODEL.md` for every finding, its status and the release gate.
 
 ### Changed
+- **One home-repository setting**: the `home=` line in `~/.config/hestia/settings` is the only place that says where your home
+  repository is. The app, the watcher, the nightly scan and the restore script all read it; `install.sh` only seeds it. The path
+  baked into the systemd units and the `environment.d` file are gone.
 - "Answer similar folders together" is off until you choose it.
 - Auto-push is on by default (`HESTIA_AUTOPUSH=0` turns it off).
 

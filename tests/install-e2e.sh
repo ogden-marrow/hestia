@@ -20,11 +20,12 @@ for b in hestia hestia-tray lifestream; do [ -x "$PREFIX/bin/$b" ] || fail "$b w
 "$PREFIX/bin/lifestream" --version >/dev/null || fail "lifestream does not run"
 for f in watch.sh capture.sh bootstrap.sh dconf-filter.sh capture-paths.default; do [ -e "$PREFIX/libexec/hestia/$f" ] || fail "libexec/$f missing"; done
 for f in watch.sh capture.sh bootstrap.sh dconf-filter.sh; do [ -x "$PREFIX/libexec/hestia/$f" ] || fail "$f is not executable"; done
-grep -qx "HESTIA_HOME=$HESTIA_HOME" "$HOME/.config/environment.d/hestia.conf" || fail "the home repository setting was not written"
+grep -qx "home=$HESTIA_HOME" "$HOME/.config/hestia/settings" || fail "the home repository setting was not seeded in the app's settings"
+[ ! -e "$HOME/.config/environment.d/hestia.conf" ] || fail "a second place for the home repository was written (one setting only)"
 unit="$HOME/.config/systemd/user"
 for u in hestia-watch.service hestia-watch.timer lifestream-nightly.service lifestream-morning.service hestia-tray.service; do [ -f "$unit/$u" ] || fail "$u missing"; done
 grep -l '@[A-Z_]*@' "$unit"/* 2>/dev/null && fail "a systemd unit still has an unfilled placeholder"
-grep -q "ExecStart=$PREFIX/libexec/hestia/watch.sh $HESTIA_HOME" "$unit/hestia-watch.service" || fail "the watch unit does not point at the installed script and home repository"
+grep -qx "ExecStart=$PREFIX/libexec/hestia/watch.sh" "$unit/hestia-watch.service" || fail "the watch unit must run the installed script and take the home repository from the setting, not carry its own copy"
 grep -q '^OnActiveSec=' "$unit/hestia-watch.timer" || fail "the watch timer would not fire after install"
 grep -q "Exec=" "$HOME/.local/share/applications/app.hestia.Hestia.desktop" || fail "no desktop entry"
 [ -d "$HOME/.local/share/gnome-shell/extensions/hestia-clipboard@hestia.app" ] || fail "the shell extension was not installed"
@@ -37,11 +38,23 @@ git -C "$HESTIA_HOME" add notes.txt && git -C "$HESTIA_HOME" commit -qm "my note
 
 # 3. the watcher captures this clean computer once; a local remote is refused (only a private GitHub repository is pushed to)
 git init -q --bare "$T/remote.git"; git -C "$HESTIA_HOME" remote add origin "$T/remote.git"
-bash "$PREFIX/libexec/hestia/watch.sh" "$HESTIA_HOME" || fail "the watcher failed on a clean computer"
+bash "$PREFIX/libexec/hestia/watch.sh" || fail "the watcher failed on a clean computer"   # no argument: it finds the repository from the setting
 git -C "$HESTIA_HOME" log --format=%s | grep -q "first capture of this computer" || fail "the first capture was not committed"
 grep -q "not pushed: remote is not a GitHub repository" "$XDG_DATA_HOME/hestia/watch.json" || fail "the watcher must refuse a remote that is not a private GitHub repository: $(cat "$XDG_DATA_HOME/hestia/watch.json")"
 [ -z "$(git -C "$T/remote.git" rev-parse --verify -q main 2>/dev/null)" ] || fail "something was pushed to a non-GitHub remote"
 [ -z "$(git -C "$HESTIA_HOME" status --short)" ] || fail "the home repository is not clean after a capture"
+
+# 3b. one setting decides: pointing it elsewhere (absolute, ~/ and relative forms) moves the watcher, and nothing else is touched
+before=$(git -C "$HESTIA_HOME" rev-list --count HEAD)
+mkdir -p "$HOME/Other"; ( cd "$HOME/Other" && git init -q . && touch tree.toml && git add -A && git commit -qm "other" )
+for form in "$HOME/Other" "~/Other" "Other"; do
+  sed -i '/^home=/d' "$HOME/.config/hestia/settings"; echo "home=$form" >> "$HOME/.config/hestia/settings"
+  bash "$PREFIX/libexec/hestia/watch.sh" || fail "the watcher failed for home=$form"
+  git -C "$HOME/Other" log --format=%s | grep -q "first capture of this computer" || fail "home=$form did not move the watcher to the other repository"
+  git -C "$HOME/Other" reset -q --hard HEAD~1 2>/dev/null || true
+done
+[ "$(git -C "$HESTIA_HOME" rev-list --count HEAD)" = "$before" ] || fail "the watcher touched a repository the setting no longer names"
+sed -i '/^home=/d' "$HOME/.config/hestia/settings"; echo "home=$HESTIA_HOME" >> "$HOME/.config/hestia/settings"
 
 # 4. nothing private ended up in what was captured
 "$PREFIX/bin/lifestream" secret-scan --repo "$HESTIA_HOME" --range all >/dev/null || fail "the captured history has a possible secret"
