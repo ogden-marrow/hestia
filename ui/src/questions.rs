@@ -174,11 +174,11 @@ pub fn panels(s: &State) -> Vec<El> {
         for (e, n) in &b.exts {
             exts = exts.child(chip(&d, format!("{e} ×{n}"), false));
         }
-        body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "WHAT'S IN IT")).child(exts)
+        body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "What's in it")).child(exts)
             .child(text(b.samples.iter().take(6).cloned().collect::<Vec<_>>().join(", ")).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
 
         // suggestions, best first
-        let mut sugg = col().w_full().gap(d.gap()).child(heading(&d, "SUGGESTIONS"));
+        let mut sugg = col().w_full().gap(d.gap()).child(heading(&d, "Suggestions"));
         let all = choices(s, b);
         if all.is_empty() {
             sugg = sugg.child(text("Nothing to go on yet. Pick a kind below.").font(style(&d, type_::LABEL)).color(t.text_secondary));
@@ -216,7 +216,7 @@ pub fn panels(s: &State) -> Vec<El> {
                     .child(text(k).font(style(&d, type_::LABEL)).color(t.text)),
             );
         }
-        body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "SOMETHING ELSE")).child(kinds)
+        body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "Something else")).child(kinds)
             .child(super::field(&d, "teach", &s.teach, "or type your own kind ↵", |s: &mut State| &mut s.teach).on_submit(|s: &mut State, _: &mut rune::Tx| {
                 let text = s.teach.text.trim().to_string();
                 let mut p = text.split_whitespace();
