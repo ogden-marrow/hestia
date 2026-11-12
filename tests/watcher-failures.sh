@@ -190,5 +190,48 @@ cp_state '{"event":"failed","kind":"other","message":"that repository was not fo
 cp_state '{"event":"failed","kind":"other","message":"that repository is public"}' 'the repository is public'
 fresh; paths '~/.bashrc'; echo 'export A=1' > "$HOME/.bashrc"; FAKE_GH=false watch
 want 'FAILED: not pushed: the repository is public*' "the GitHub CLI path does not say the repository is public"
+# ---- #173: the capture list survives an OS upgrade; symlinked dotfiles are captured by content; a nested git repository is
+#      stored as files; deb822 apt sources are captured
+osd="applications/linux/${ID:-linux}"
+fresh; mkdir -p "$r/$osd/0.1" "$r/$osd/0.2"
+printf '%s\n' '~/.bashrc' > "$r/$osd/0.1/capture-paths.txt"; printf '%s\n' '~/.bashrc' '~/.myrc' > "$r/$osd/0.2/capture-paths.txt"
+echo a > "$HOME/.bashrc"; echo b > "$HOME/.myrc"; watch; want 'ok:*' "setup for the carried-forward list"
+grep -qx '~/.myrc' "$r/$rel/capture-paths.txt" || fail "an OS upgrade lost the person's added path (the list was re-seeded from the default)"
+tracked "$rel/dotfiles/.myrc" || fail "the carried-forward path was not captured"
+echo c > "$HOME/.third"; echo '~/.third' >> "$r/$rel/capture-paths.txt"; watch
+grep -qx '~/.third' "$r/$rel/capture-paths.txt" || fail "an existing list was overwritten"
+
+fresh; paths '~/.bashrc' '~/.outside' '~/.mylink' '~/.tokrc' '~/.config/stowed'
+mkdir -p "$HOME/dots" "$HOME/.config/stowed"
+echo 'export A=1' > "$HOME/dots/bashrc"; ln -s "$HOME/dots/bashrc" "$HOME/.bashrc"
+ln -s /etc/hostname "$HOME/.outside"
+printf 'machine x login y\n' > "$HOME/.netrc"; ln -s "$HOME/.netrc" "$HOME/.mylink"
+printf 'token=%s\n' "$tok" > "$HOME/dots/tokrc"; ln -s "$HOME/dots/tokrc" "$HOME/.tokrc"
+echo 'inner' > "$HOME/dots/inner.conf"; ln -s "$HOME/dots/inner.conf" "$HOME/.config/stowed/inner.conf"; ln -s /etc/hostname "$HOME/.config/stowed/out.conf"
+watch; want 'ok:*' "symlinked dotfiles broke the capture"
+[ -f "$r/$rel/dotfiles/.bashrc" ] && [ ! -L "$r/$rel/dotfiles/.bashrc" ] && grep -q 'A=1' "$r/$rel/dotfiles/.bashrc" || fail "a symlinked dotfile was not captured by content"
+git -C "$r" ls-files -s -- "$rel/dotfiles/.bashrc" | grep -q '^120000' && fail "a symlink was committed as a symlink blob"
+[ ! -e "$r/$rel/dotfiles/.outside" ] || fail "a symlink to a file outside the home folder was captured"
+[ ! -e "$r/$rel/dotfiles/.mylink" ] || fail "a symlink to a never-captured file was captured"
+grep -q '.outside' "$r/$rel/SKIPPED.txt" && grep -q '.mylink' "$r/$rel/SKIPPED.txt" || fail "the refused symlinks are not listed in SKIPPED.txt"
+grep -q "$tok" <<<"$(git -C "$S/remote.git" log -p --all)" && fail "a secret behind a symlink reached the remote"
+grep -q inner "$r/$rel/config/stowed/inner.conf" && [ ! -L "$r/$rel/config/stowed/inner.conf" ] || fail "a symlink inside a captured folder was not captured by content"
+[ ! -e "$r/$rel/config/stowed/out.conf" ] || fail "a symlink inside a folder that leaves the home folder was captured"
+if git -C "$r" ls-files -s | grep -q '^120000'; then fail "a symlink blob is in the repository"; fi
+
+fresh; paths '~/.config/nvim'; mkdir -p "$HOME/.config/nvim/lua"; echo 'vim.o.number=true' > "$HOME/.config/nvim/init.lua"
+git init -q "$HOME/.config/nvim"; echo x > "$HOME/.config/nvim/lua/a.lua"
+watch; want 'ok:*' "a nested git repository broke the capture"
+tracked "$rel/config/nvim/init.lua" && tracked "$rel/config/nvim/lua/a.lua" || fail "the files of a captured git clone were not stored"
+[ ! -e "$r/$rel/config/nvim/.git" ] || fail "the clone's .git was copied"
+git -C "$r" ls-files -s | grep -q '^160000' && fail "a nested repository became a gitlink with no content"
+
+fresh; paths '~/.bashrc'; echo a > "$HOME/.bashrc"; mkdir -p "$T/apt$n"
+printf 'Types: deb\nURIs: https://example.com/repo\nSuites: stable\nComponents: main\n' > "$T/apt$n/ext.sources"
+echo 'deb https://example.com/old stable main' > "$T/apt$n/ext.list"; echo 'Types: deb' > "$T/apt$n/ubuntu.sources"
+HESTIA_APT_SOURCES_DIR="$T/apt$n" watch; want 'ok:*' "setup for apt sources"
+tracked "$rel/apt-sources/ext.sources" || fail "a deb822 .sources file was not captured"
+tracked "$rel/apt-sources/ext.list" || fail "a .list file was not captured"
+tracked "$rel/apt-sources/ubuntu.sources" && fail "the distribution's own sources file was captured"
 [ "$bad" = 0 ] || exit 1
 echo "watcher failures ok"

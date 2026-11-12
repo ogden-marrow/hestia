@@ -22,6 +22,10 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **CI**: the whole workspace is lint-clean (clippy with warnings as errors) and so are the shell scripts (shellcheck), clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
 
 ### Fixed
+- **Capture coverage** (#173): the capture list now survives an OS upgrade (a new version folder starts from the nearest other version's list). Symlinked
+  dotfiles (a stow layout) are captured by their target's content, never as a link, when the target is inside your home folder and
+  allowed by the never-capture list; others are listed in `SKIPPED.txt`. A cloned folder such as `~/.config/nvim` is stored as its files, without
+  its `.git`. Third-party apt sources in the newer `.sources` format are captured and restored like `.list` files.
 - **The machine watcher no longer fails quietly** (#166-#172). A failed commit, push or capture is a `watch.json` result that starts
   `FAILED` with the first line of the reason, and the unit exits 1; offline, signed out, repository gone and repository public are told
   apart. A push rejected because another computer pushed first is fetched and rebased. Files over 50 MB and unreadable files are

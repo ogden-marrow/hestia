@@ -55,6 +55,10 @@ bash "$b" "$T/repo" --apply --only config --allow-executable >/dev/null
 bash "$b" "$T/repo" --apply --only dotfiles --allow-executable >/dev/null
 grep -q 'alias ll' "$HOME/.bashrc" && ls "$HOME"/.bashrc.bak.* >/dev/null 2>&1 || fail "--allow-executable did not restore .bashrc with a backup"
 
+# 4b. deb822 .sources files are restored like .list files, and only when named
+mkdir -p "$cap/apt-sources"; printf 'Types: deb\nURIs: https://example.com/r\n' > "$cap/apt-sources/ext.sources"; echo 'deb https://example.com/o stable main' > "$cap/apt-sources/old.list"
+src_out=$(bash "$b" "$T/repo" --only sources)
+echo "$src_out" | grep -q 'ext.sources' && echo "$src_out" | grep -q 'old.list' || fail "bootstrap does not restore .sources like .list"
 # 5. third-party sources are never part of the default steps
 bash "$b" "$T/repo" | grep -q "third-party apt sources" && fail "apt sources must only run when named"
 
