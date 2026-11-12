@@ -15,7 +15,7 @@ The repository is already public. This is the checklist for the **first release*
 | 7 | A clean-computer install end to end | `bash tests/install-e2e.sh` (CI) | **Pass** in an empty home folder with system commands stubbed. A real clean OS image with a real session is still untried (#6). |
 | 8 | README, CHANGELOG, licence | `README.md` install and first run, `CHANGELOG.md`, `LICENSE` | **Pass.** CHANGELOG is all "Unreleased"; the version heading is added when tagging. |
 | 9 | Sign-in works for a stranger | needs the project's GitHub OAuth App Client ID in the build | **Not yet.** Without it the welcome says sign-in is not set up and lets the person continue. Decide whether to publish a first release without it (see #110). |
-| 10 | Known limits are written down | `CHANGELOG.md` "Known limits", `docs/VISION_FIT.md` | **Pass.** The `.deb` lacks the background watcher (#148). |
+| 10 | Known limits are written down | `CHANGELOG.md` "Known limits", `docs/VISION_FIT.md` | **Pass.** The `.deb` needs `hestia-setup` run once per person (it cannot enable per-user units itself); this is rehearsed in CI. |
 
 Release when every row is Pass, or when the maintainer accepts a row that is not, in writing on the tracking issue.
 

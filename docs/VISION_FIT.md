@@ -18,7 +18,7 @@ Updated 2026-11-11. Honest scorecard, one row per force. **Met** means a strange
 
 | Step | Status |
 |---|---|
-| Install from a release without a compiler | Rehearsed in CI (`tests/release-rehearsal.sh`: the real release script, checksums, install on a machine with no compiler, the .deb); no release has been cut yet; the .deb lacks the background watcher (#148) |
+| Install from a release without a compiler | Rehearsed in CI (`tests/release-rehearsal.sh`: the real release script, checksums, install on a machine with no compiler, the .deb); no release has been cut yet; the .deb ships the watcher and a `hestia-setup` step that is rehearsed in CI (#148) |
 | First-run sign-in with GitHub, find or create the home repository | Engine done (sign-in, find, adopt, create) and screens done (#110). Not live: needs the OAuth App Client ID. |
 | Backups run by themselves | Met on the author's machine; the watch timer bug that stopped it is fixed. Install to first capture to uninstall is tested in an empty home folder in CI; a real clean machine is still untested (#6). |
 | Organises downloads and asks a few questions | Partial (rows 2 and 3) |

@@ -107,8 +107,10 @@ tar xf hestia-linux-x86_64.tar.gz && cd hestia-linux-x86_64
 ./install.sh
 ```
 
-The `.deb` installs the app, the launcher extension and the icons, but not the background watcher and its schedule;
-use the tarball for the full setup. `./uninstall.sh` removes what `install.sh` put on the computer and leaves your
+The `.deb` installs the programs, the launcher extension, icons and the background scripts system-wide. Each person then runs
+`hestia-setup` once (the same script `install.sh` runs): it sets the home repository setting, writes the user schedules
+and turns them on. Running it again is safe and never overwrites a home setting you chose.
+`./uninstall.sh` removes what `install.sh` put on the computer and leaves your
 home repository and files alone (`--purge` also deletes Hestia's own settings and data).
 
 From source:

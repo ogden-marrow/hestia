@@ -39,5 +39,5 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 
 ### Known limits
 - No release has been cut, so signing and attestation are unexercised.
-- The `.deb` does not install the background watcher.
+- The `.deb` needs `hestia-setup` run once per person to turn on the background backup (a package can only place files under /usr).
 - Not yet tried on a clean OS image with a real desktop session (`docs/VISION_FIT.md`).
