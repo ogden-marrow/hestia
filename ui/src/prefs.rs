@@ -12,10 +12,12 @@ pub(crate) fn segmented<F: Fn(&mut State, usize) + Clone + 'static>(d: &Design, 
     let t = d.theme();
     let acc = d.accent_color();
     let mut r = row().gap(0.0).radius(d.r(tok::radius::SM)).border(1.0, t.card_border);
+    // every segment as wide as the longest label, so the edges inside a control line up
+    let seg_w = d.size(labels.iter().map(|l| l.chars().count()).max().unwrap_or(0) as f32 * 8.0 + 28.0);
     for (i, l) in labels.iter().enumerate() {
         let f = f.clone();
         r = r.child(
-            row().key(format!("{key}-{i}")).h(d.row_h() - 2.0).px(d.pad()).center_y()
+            row().key(format!("{key}-{i}")).h(d.row_h() - 2.0).w(seg_w).center()
                 .fill(if i == on { acc } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| f(s, i))
                 .child(text(l.to_string()).font(style(d, type_::LABEL)).color(if i == on { d.on_accent() } else { t.text })),
@@ -26,7 +28,7 @@ pub(crate) fn segmented<F: Fn(&mut State, usize) + Clone + 'static>(d: &Design, 
 
 pub(crate) fn setting(d: &Design, title: &str, desc: &str, control: El) -> El {
     let t = d.theme();
-    row().w_full().gap(d.pad()).center_y().py(d.gap()).border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
+    row().w_full().gap(d.pad()).center_y().py(d.gap() * 1.5)
         .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
             .child(text(title.to_string()).font(style(d, type_::BODY)).color(t.text))
             .child(text(desc.to_string()).font(style(d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()))
@@ -125,7 +127,7 @@ pub fn panels(s: &State) -> Vec<El> {
         );
     }
     let tabs = col().w(220.0).padding(d.gap()).gap(d.gap()).side(&d)
-        .child(text("Settings").font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).py(d.gap() * 0.5))
+        .child(text("Settings").font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).py(d.gap()))
         .child(tabs);
 
     let mut body = col().w_full().gap(0.0).child(heading(&d, TABS[s.stab.min(TABS.len() - 1)]));
@@ -135,7 +137,7 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(setting(&d, "Colours", "Follow the desktop, or stay light or dark.",
                     segmented(&d, "scheme", &["Auto", "Light", "Dark"], match s.settings.scheme { Scheme::Auto => 0, Scheme::Light => 1, Scheme::Dark => 2 },
                         |s, i| s.change_settings(|st| st.scheme = [Scheme::Auto, Scheme::Light, Scheme::Dark][i]))))
-                .child(setting(&d, "Accent colour", "Used for selection and main buttons. The last swatch follows your desktop.", accent_picker(s)))
+                .child(setting(&d, "Accent colour", &format!("Used for selection and main buttons. Now: {}. The last swatch follows your desktop.", { let n = s.settings.accent.name(); n[..1].to_uppercase() + &n[1..] }), accent_picker(s)))
                 .child(setting(&d, "Spacing", "How much room rows and panels get.",
                     segmented(&d, "density", &["Compact", "Comfortable", "Spacious"], match s.settings.density { Density::Compact => 0, Density::Cozy => 1, Density::Airy => 2 },
                         |s, i| s.change_settings(|st| st.density = [Density::Compact, Density::Cozy, Density::Airy][i]))))
