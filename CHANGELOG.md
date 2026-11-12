@@ -23,6 +23,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - File names reach the local model only as cleaned data; the model cannot choose a destination.
 - Capture can no longer delete a live file; the mover refuses symlinks, overwrites and hidden destinations.
 - Clipboard history is off by default, filters codes and secrets, is readable only by you and deleted when turned off.
+- The never-capture list also applies to files inside captured folders (for example a file-manager bookmarks file).
 - Desktop settings are captured by allowlist; the launcher ignores toggles while the screen is locked.
 - CI actions are pinned to commits; the release workflow reads by default and only its job can write.
 - See `docs/THREAT_MODEL.md` for every finding, its status and the release gate.

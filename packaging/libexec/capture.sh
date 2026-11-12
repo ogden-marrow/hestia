@@ -64,6 +64,23 @@ while IFS= read -r line; do
     *) cp -a ~/"$rel" "$dest" ;;
   esac
 done < capture-paths.txt
+# The deny-list also applies to what is INSIDE a captured folder (a bookmarks file in ~/.config/gtk-3.0, a token file in an app's
+# folder): every captured file is asked about by its home-relative path, and a refused one is dropped from the COPY only. If the
+# list cannot be asked, nothing is captured at all.
+mapfile -d '' -t captured < <(find "$new" -type f -print0)
+inside=()
+for f in "${captured[@]}"; do
+  case "$f" in "$new/config/"*) inside+=(".config/${f#"$new/config/"}") ;; "$new/dotfiles/"*) inside+=("${f#"$new/dotfiles/"}") ;; esac
+done
+if [ "${#inside[@]}" -gt 0 ]; then
+  rc=0; refused=$("${LIFESTREAM:-lifestream}" deny-path "${inside[@]}" 2>/dev/null) || rc=$?   # exit 1 means "something was refused": expected
+  [ "$rc" -le 1 ] || { echo "cannot ask the deny-list (lifestream deny-path): nothing captured" >&2; exit 1; }
+  while IFS= read -r h; do
+    [ -n "$h" ] || continue
+    case "$h" in .config/*) rm -f -- "$new/config/${h#.config/}" ;; *) rm -f -- "$new/dotfiles/$h" ;; esac
+    echo "REFUSED inside a captured folder (never captured): ~/$h" >&2
+  done <<< "$refused"
+fi
 before=$( { find dotfiles config -type f 2>/dev/null || true; } | wc -l); after=$( { find "$new/dotfiles" "$new/config" -type f 2>/dev/null || true; } | wc -l)
 if [ "$before" -ge 4 ] && [ "$((after * 2))" -lt "$before" ]; then
   echo "REFUSED: this capture has $after files where the last had $before; keeping the last one. Check capture-paths.txt." >&2

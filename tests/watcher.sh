@@ -87,6 +87,17 @@ run
 [ ! -e "$rel/dotfiles/.ssh/config" ] || fail "a path on the deny-list was captured"
 git ls-files | grep -q '\.ssh' && fail "a path on the deny-list was committed"
 
+# the deny-list also applies INSIDE a captured folder: the rest of the folder is kept, the refused file is not
+mkdir -p "$T/home/.config/gtk-3.0" "$T/home/.config/htop"
+echo "gtk-theme-name=Adwaita" > "$T/home/.config/gtk-3.0/settings.ini"; echo "file:///some/private/folder" > "$T/home/.config/gtk-3.0/bookmarks"
+echo "hide_kernel_threads=1" > "$T/home/.config/htop/htoprc"; echo "k=v" > "$T/home/.config/htop/my-secret.conf"
+run
+[ -f "$rel/config/gtk-3.0/settings.ini" ] && [ -f "$rel/config/htop/htoprc" ] || fail "ordinary files inside captured folders were not kept"
+[ ! -e "$rel/config/gtk-3.0/bookmarks" ] || fail "a bookmarks file inside a captured folder was captured"
+[ ! -e "$rel/config/htop/my-secret.conf" ] || fail "a secret-named file inside a captured folder was captured"
+git ls-files | grep -qE 'bookmarks|my-secret' && fail "a refused file inside a captured folder was committed"
+grep -q "some/private/folder" "$T/home/.config/gtk-3.0/bookmarks" || fail "the original file must be left alone"
+
 # signed in to Hestia: the repository must be vouched for by Hestia (a private repo of yours) before anything is sent
 git config --unset-all "url.file://$T/elsewhere.pushInsteadOf" 2>/dev/null || true
 git remote remove origin 2>/dev/null || true
