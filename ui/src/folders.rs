@@ -386,15 +386,16 @@ pub fn panels(s: &State) -> Vec<El> {
             let moving_here = s.moving.is_some();
             let target = dir.clone();
             tree_col = tree_col.child(
-                row().key(format!("dir-{n}")).w_full().h(d.row_h()).pl(d.item_px() + depth * 16.0).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
+                row().key(format!("dir-{n}")).w_full().min_h(d.row_h()).py(d.gap() * 0.5).pl(d.item_px() + depth * 16.0).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
                     .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
                     .border(1.0, if moving_here { acc.alpha(0.45) } else { rune::Color::TRANSPARENT })
                     .on_press(move |s: &mut State| {
                         if s.moving.is_some() { s.finish_move(&target) } else if let Some(i) = idx { s.select_folder(i) }
                     })
                     .child(rune::icon(&icons::FOLDER, d.size(16.0)).color(if idx.is_some() { acc } else { t.text_secondary }))
-                    .child(text(name).font(style(&d, type_::BODY)).color(if idx.is_some() { t.text } else { t.text_secondary }).grow(1.0).shrink().min_w(0.0).truncate())
-                    .child(text(idx.map(|i| summary(&s.tree.folders[i])).unwrap_or_default()).font(style(&d, type_::LABEL)).color(t.text_secondary).truncate())
+                    .child(col().grow(1.0).shrink().min_w(0.0).gap(1.0)
+                        .child(text(name).font(style(&d, type_::BODY)).color(if idx.is_some() { t.text } else { t.text_secondary }).truncate())
+                        .child(if let Some(i) = idx { text(summary(&s.tree.folders[i])).font(style(&d, type_::LABEL)).color(t.text_secondary).truncate() } else { text(String::new()).font(style(&d, type_::LABEL)) }))
                     .child(text(if count > 0 { format!("{count} tonight") } else { String::new() }).font(style(&d, type_::LABEL)).color(acc)),
             );
         }
