@@ -9,7 +9,7 @@ use chrono::{Datelike, NaiveDate};
 use lifestream::{human, Record};
 use rune::tok::{self, type_};
 use crate::questions::button;
-use rune::{col, oklcha, row, text, El, ScrollSpec, Spring, TextStyle};
+use rune::{col, row, text, El, ScrollSpec, TextStyle};
 
 #[derive(Clone, Debug)]
 pub struct Day {
@@ -62,9 +62,6 @@ fn month_label(m: &str) -> String {
     NaiveDate::from_ymd_opt(y, mo, 1).map(|d| format!("{} {}", d.format("%b"), d.year())).unwrap_or_else(|| m.to_string())
 }
 
-const DEPTH: usize = 5;
-const CARD_W: f32 = 860.0;
-const CARD_H: f32 = 430.0;
 const STRIP: f32 = 30.0; // how much of each receding window shows above the next
 
 fn kind_icon(kind: &str) -> &'static rune::Icon {
@@ -78,33 +75,16 @@ pub fn panel(s: &State) -> El {
     let Some(day) = s.days.get(s.dsel) else {
         return col().grow(1.0).padding(d.pad()).panel(&d).child(text("Nothing in the stream yet.").font(style(&d, type_::BODY)).color(t.text_secondary));
     };
-    let shadow = oklcha(0.0, 0.0, 0.0, if d.dark { 0.45 } else { 0.18 });
-
-    // ---- the stack: later days in front, earlier days receding behind, like windows
-    let mut stage = col().w(CARD_W + 72.0).h(CARD_H + STRIP * DEPTH as f32 + 40.0);
-    for k in (0..=DEPTH).rev() {
-        let Some(card) = s.days.get(s.dsel + k) else { continue };
-        let scale = 1.0 - 0.045 * k as f32;
-        let (w, h) = (CARD_W * scale, CARD_H * scale);
-        let x = 36.0 + (CARD_W - w) / 2.0;
-        let y = 18.0 + STRIP * (DEPTH - k) as f32;
-        let opacity = [1.0, 0.92, 0.82, 0.72, 0.62, 0.5][k];
-        let title_bar = row().w_full().h(d.size(STRIP)).px(d.pad()).gap(d.gap()).center_y().fill(d.side_fill())
-            .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
-            .child(col().size(8.0, 8.0).radius(2.0).fill(if k == 0 { acc } else { t.text_secondary }))
-            .child(text(long_date(&card.date)).font(style(&d, type_::TITLE)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-            .child(text(format!("{} files", card.idx.len())).font(style(&d, type_::LABEL)).color(t.text_secondary));
-        let mut c = col().key(format!("card-{}", card.date)).absolute(x, y).size(w, h).opacity(opacity)
-            .fill(t.card).border(1.0, t.card_border).radius(d.r(tok::radius::MD)).shadow(4.0, 16.0, shadow)
-            .motion(Spring::new(0.35, 0.22))
-            .on_press(move |s: &mut State| s.dsel += k)
-            .child(title_bar);
-        if k == 0 {
-            c = c.child(if s.compare { compare_body(s, &d) } else { list_body(s, &d, card) });
-        }
-        stage = stage.child(c);
-    }
-    let stage = row().w_full().grow(1.0).shrink().min_h(0.0).center().fill(t.bg).border_sides([1.0, 0.0, 1.0, 0.0], t.card_border).child(stage);
+    // ---- the day: one card that fills the pane and scrolls, so it fits at any window width
+    let title_bar = row().w_full().h(d.size(STRIP)).px(d.pad()).gap(d.gap()).center_y().fill(d.side_fill())
+        .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
+        .child(text(long_date(&day.date)).font(style(&d, type_::TITLE)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
+        .child(text(format!("{} files", day.idx.len())).font(style(&d, type_::LABEL)).color(t.text_secondary));
+    let body = if s.compare { compare_body(s, &d) } else { list_body(s, &d, day) };
+    let card = col().w_full().grow(1.0).shrink().min_h(0.0).fill(t.card).border(1.0, t.card_border).radius(d.r(tok::radius::MD))
+        .child(title_bar)
+        .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(body));
+    let stage = col().w_full().grow(1.0).shrink().min_h(0.0).padding(d.pad()).child(card);
 
     // ---- the ruler: one tick per month, the chosen one marked
     let current = &day.date[..7];
@@ -152,10 +132,10 @@ fn list_body(s: &State, d: &crate::design::Design, card: &Day) -> El {
     ix.sort_by_key(|&i| std::cmp::Reverse(s.recs[i].size));
     let head = row().w_full().h(d.size(24.0)).px(d.pad()).gap(d.pad()).center_y().border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
         .child(text("Name").font(style(d, type_::LABEL)).color(t.text_secondary).grow(1.0))
-        .child(text("Kind").font(style(d, type_::LABEL)).color(t.text_secondary).w(d.size(170.0)))
+        .child(text("Kind").font(style(d, type_::LABEL)).color(t.text_secondary).w(d.size(130.0)))
         .child(text("Size").font(style(d, type_::LABEL)).color(t.text_secondary).w(d.size(80.0)));
     let mut list = col().w_full().child(head);
-    for (n, &i) in ix.iter().take(12).enumerate() {
+    for (n, &i) in ix.iter().take(200).enumerate() {
         let r = &s.recs[i];
         let src = r.sources.first().or(r.was.first()).map(|x| x.as_str()).unwrap_or("");
         list = list.child(
@@ -163,12 +143,12 @@ fn list_body(s: &State, d: &crate::design::Design, card: &Day) -> El {
                 .fill(if n % 2 == 1 { t.control_track } else { rune::Color::TRANSPARENT })
                 .child(rune::icon(kind_icon(&r.kind), d.size(14.0)).color(t.text_secondary))
                 .child(text(src.rsplit('/').next().unwrap_or(src).to_string()).font(style(d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-                .child(text(r.kind.clone()).font(style(d, type_::LABEL)).color(t.text_secondary).w(d.size(170.0)))
+                .child(text(r.kind.clone()).font(style(d, type_::LABEL)).color(t.text_secondary).w(d.size(130.0)).truncate())
                 .child(text(human(r.size)).font(style(d, type_::MONO_CAPTION)).color(t.text_secondary).w(d.size(80.0))),
         );
     }
-    if ix.len() > 12 {
-        list = list.child(text(format!("+ {} more that day", ix.len() - 12)).font(style(d, type_::LABEL)).color(t.text_secondary).px(d.pad()).py(d.gap()));
+    if ix.len() > 200 {
+        list = list.child(text(format!("+ {} more that day", ix.len() - 200)).font(style(d, type_::LABEL)).color(t.text_secondary).px(d.pad()).py(d.gap()));
     }
     list
 }
@@ -190,7 +170,7 @@ fn compare_body(s: &State, d: &crate::design::Design) -> El {
     for (kind, n) in top.into_iter().take(10) {
         c = c.child(row().w_full().gap(d.pad()).center_y()
             .child(text(kind.to_string()).font(style(d, type_::LABEL)).color(t.text).w(d.size(170.0)))
-            .child(col().w(420.0 * n as f32 / max).h(10.0).radius(2.0).fill(d.accent_color()))
+            .child(col().w(280.0 * n as f32 / max).h(10.0).radius(2.0).fill(d.accent_color()))
             .child(text(n.to_string()).font(style(d, type_::MONO_CAPTION)).color(t.text_secondary)));
     }
     c
