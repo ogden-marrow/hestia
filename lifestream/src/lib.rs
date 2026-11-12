@@ -145,7 +145,10 @@ pub fn is_transient(name: &str) -> bool {
 /// File names that look like they hold secrets: never indexed, hashed or read.
 pub fn looks_secret(name: &str) -> bool {
     let n = name.to_lowercase();
-    if n == ".env" || n == ".netrc" || n == ".pgpass" || n == ".git-credentials" || n == "credentials.json" {
+    if n == ".env" || n == ".netrc" || n == ".pgpass" || n == ".git-credentials" || n == "credentials.json"
+        || [".npmrc", ".pypirc", ".my.cnf", ".xauthority", ".iceauthority", ".viminfo", ".lesshst"].contains(&n.as_str())
+        || n.ends_with("_history")  // .bash_history, .zsh_history, fish_history: what you typed, passwords included
+    {
         return true;
     }
     if n.starts_with(".env.") && !(n.ends_with(".example") || n.ends_with(".sample") || n.ends_with(".template")) {
@@ -155,13 +158,13 @@ pub fn looks_secret(name: &str) -> bool {
         return true;
     }
     if let Some(ext) = n.rsplit('.').next().filter(|_| n.contains('.')) {
-        if ["pem", "key", "p12", "pfx", "kdbx", "gpg", "keystore", "jks"].contains(&ext) {
+        if ["pem", "key", "p12", "pfx", "kdbx", "gpg", "keystore", "jks", "ovpn"].contains(&ext) {
             return true;
         }
     }
     // private keys: id_rsa, id_ed25519, foo_ed25519 ... but not the public halves
     if !n.ends_with(".pub")
-        && (n.starts_with("id_rsa") || n.starts_with("id_ed25519") || n.starts_with("id_ecdsa")
+        && (n.starts_with("id_rsa") || n.starts_with("id_dsa") || n.starts_with("id_ed25519") || n.starts_with("id_ecdsa")
             || n.ends_with("_ed25519") || n.ends_with("_rsa"))
     {
         return true;
@@ -710,10 +713,10 @@ mod tests {
     #[test]
     fn secret_looking_names_are_caught() {
         for n in [".env", ".env.local", "freellmapi.env", "server.pem", "x.KEY", "id_rsa", "id_ed25519",
-                  "backup_ed25519", "creds.kdbx", ".netrc", "secrets.json"] {
+                  "backup_ed25519", "creds.kdbx", ".netrc", "secrets.json", ".npmrc", ".pypirc", ".my.cnf", ".Xauthority", ".bash_history", "fish_history", "work.ovpn", "id_dsa"] {
             assert!(looks_secret(n), "{n} should be secret");
         }
-        for n in [".env.example", "id_ed25519.pub", "MainGitKey.pub", "monkey.png", "keynote.txt", "notes.md", "turkey"] {
+        for n in [".env.example", "id_ed25519.pub", "MainGitKey.pub", "monkey.png", "keynote.txt", "notes.md", "turkey", "id_dsa.pub", "history.md", "vpn.conf"] {
             assert!(!looks_secret(n), "{n} should be fine");
         }
     }

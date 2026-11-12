@@ -21,6 +21,10 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **CI**: the whole workspace is lint-clean (clippy with warnings as errors) and so are the shell scripts (shellcheck), clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
 
 ### Security
+- Secret scanner and deny-list, red-team round 3 (#175): JSON-quoted keys, bare `PASSWORD=`/`DB_PASS=`/`MYSQL_PWD=` values, `--password=`, libpq and rclone
+  lines, `curl -u`, Slack, Stripe, SendGrid, JWT, Authorization headers, Azure, WireGuard and kubernetes keys, base64-wrapped private keys. The push
+  scan no longer skips added lines starting `++` or merge commits. The deny-list now covers credential files, browser, chat and password-manager
+  profiles, shell histories, VPN files and `id_dsa`, and refuses a parent folder (`~/.config`, `~/.docker`) that holds any of them.
 - One shared secret scanner (modern token formats, short quoted or exported passwords, binaries) gates capture, push and
   publish; secret lines are left out of the backup, private keys drop the file.
 - Pushes go only to a private GitHub repository of yours, checked on the address git will really use.
