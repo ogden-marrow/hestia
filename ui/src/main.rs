@@ -13,6 +13,7 @@ mod fixture;
 mod folders;
 mod history;
 mod icons;
+mod kinds;
 mod jobs;
 mod launcher;
 mod machine;

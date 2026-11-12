@@ -102,13 +102,13 @@ pub fn panel(s: &State) -> El {
         );
     }
     let ruler = col().w(190.0).py(d.gap()).side(&d).border_sides([0.0, 0.0, 0.0, 1.0], t.card_border)
-        .child(text("GO BACK IN TIME").font(style(&d, type_::SECTION)).color(t.text_secondary).px(d.item_px()).py(d.gap()))
+        .child(text("Go back in time").font(style(&d, type_::SECTION)).color(t.text_secondary).px(d.item_px()).py(d.gap()))
         .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(ruler));
 
     // ---- heading and controls
     let total = s.cum.get(s.dsel).copied().unwrap_or(0);
     let heading = col().w_full().px(d.pad()).py(d.gap()).gap(2.0)
-        .child(text("THE STREAM, AS IT WAS ON").font(style(&d, type_::SECTION)).color(t.text_secondary))
+        .child(text("The stream, as it was on").font(style(&d, type_::SECTION)).color(t.text_secondary))
         .child(text(long_date(&day.date)).font(TextStyle { size: d.size(26.0), ..style(&d, type_::TITLE) }).color(t.text));
     let summary = if s.compare {
         let since = s.days[..s.dsel].iter().map(|x| x.idx.len()).sum::<usize>();
@@ -143,7 +143,7 @@ fn list_body(s: &State, d: &crate::design::Design, card: &Day) -> El {
                 .fill(if n % 2 == 1 { t.control_track } else { rune::Color::TRANSPARENT })
                 .child(rune::icon(kind_icon(&r.kind), d.size(14.0)).color(t.text_secondary))
                 .child(text(src.rsplit('/').next().unwrap_or(src).to_string()).font(style(d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-                .child(text(r.kind.clone()).font(style(d, type_::LABEL)).color(t.text_secondary).w(d.size(130.0)).truncate())
+                .child(text(crate::kinds::label(&r.kind)).font(style(d, type_::LABEL)).color(t.text_secondary).w(d.size(130.0)).truncate())
                 .child(text(human(r.size)).font(style(d, type_::MONO_CAPTION)).color(t.text_secondary).w(d.size(80.0))),
         );
     }
@@ -169,7 +169,7 @@ fn compare_body(s: &State, d: &crate::design::Design) -> El {
         .child(text("What arrived since this day").font(style(d, type_::TITLE)).color(t.text));
     for (kind, n) in top.into_iter().take(10) {
         c = c.child(row().w_full().gap(d.pad()).center_y()
-            .child(text(kind.to_string()).font(style(d, type_::LABEL)).color(t.text).w(d.size(170.0)))
+            .child(text(crate::kinds::label(kind)).font(style(d, type_::LABEL)).color(t.text).w(d.size(170.0)))
             .child(col().w(280.0 * n as f32 / max).h(10.0).radius(2.0).fill(d.accent_color()))
             .child(text(n.to_string()).font(style(d, type_::MONO_CAPTION)).color(t.text_secondary)));
     }

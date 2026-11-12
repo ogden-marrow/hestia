@@ -23,7 +23,7 @@ fn split(t: &str) -> Vec<String> {
 fn summary(f: &Folder) -> String {
     let mut v = Vec::new();
     if !f.kind.is_empty() {
-        v.push(csv(&f.kind));
+        v.push(f.kind.iter().map(|k| crate::kinds::label(k)).collect::<Vec<_>>().join(", "));
     }
     if !f.tag.is_empty() {
         v.push(format!("tags {}", f.tag.join(" ")));
