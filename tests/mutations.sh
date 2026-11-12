@@ -40,6 +40,7 @@ mutate "the sign-in prints the token"                      lifestream/src/auth.r
 mutate "hostile file names are not cleaned"                lifestream/src/bundle.rs 'c.is_control()
             ||' 'false
             ||' rs hostile_names
+mutate "direction-changing characters are not removed from names" lifestream/src/bundle.rs "'\\u{202A}'..='\\u{202E}' | " '' rs hostile_names
 mutate "undo accepts a journal that leaves the home folder" lifestream/src/tree.rs 'rel_ok(rel).then(|| home.join(rel))' 'Some(home.join(rel))' rs undo_treats_the_journal
 mutate "watcher pushes to a repo Hestia cannot vouch for"  packaging/libexec/watch.sh '"$LS" home check-private "$slug" >/dev/null 2>&1 ||' 'true ||' bash tests/watcher.sh
 mutate "capture no longer refuses a mass deletion"         packaging/libexec/capture.sh '[ "$before" -ge 4 ]' '[ "$before" -ge 4000000 ]' bash tests/watcher.sh
