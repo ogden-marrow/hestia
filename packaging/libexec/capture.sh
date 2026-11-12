@@ -43,13 +43,19 @@ libexec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Secret-looking paths are refused even if listed.
 # Built beside the old copy and swapped in only when it is complete, so a failure never leaves the repository
 # with files missing. A live file that resolves into this repository (a bootstrap symlink) is copied from what it
-# points at, so capturing it can never delete it. A capture that would drop most of what was captured before is refused.
+# points at, so capturing it can never delete it. A capture that would drop most of what was captured before is refused,
+# unless the capture list itself changed or you say it is fine (touch the file the message names).
+# A file that cannot be read, or is bigger than HESTIA_MAX_FILE_BYTES (50 MB: GitHub refuses 100 MB), is skipped, not fatal,
+# and is listed in SKIPPED.txt so it is never silently missing.
 repo_root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")"; repo_root="$(readlink -f "$repo_root")"
 new=".capture-new.$$"; rm -rf "$new"; mkdir -p "$new/dotfiles" "$new/config"
-trap 'rm -rf "$new"' EXIT
+skipped="$new.skipped"; : > "$skipped"
+trap 'rm -rf "$new" "$skipped" "$new.err"' EXIT
+home_rel() { case "$1" in "$new/config/"*) printf '.config/%s' "${1#"$new/config/"}" ;; "$new/dotfiles/"*) printf '%s' "${1#"$new/dotfiles/"}" ;; esac; }
 while IFS= read -r line; do
-  p="${line%%#*}"; p="$(echo "$p" | xargs)"
-  [ -z "$p" ] && continue
+  # a # starts a comment only at the start of a line or after a space: a path may hold one. Quotes are ordinary characters.
+  p="${line%%[[:space:]]#*}"; p="${p#"${p%%[![:space:]]*}"}"; p="${p%"${p##*[![:space:]]}"}"
+  case "$p" in ""|"#"*) continue ;; esac
   # shellcheck disable=SC2088 # a literal "~/" is what the capture list contains
   case "$p" in "~/"*) rel="${p#\~/}" ;; *) echo "skip (not under ~): $p" >&2; continue ;; esac
   # one deny-list for everything (lifestream deny-path); if it cannot be asked, nothing is captured from home
@@ -62,17 +68,27 @@ while IFS= read -r line; do
   real="$(readlink -f ~/"$rel")"
   case "$real" in
     "$repo_root"/*) cp -aL "$real" "$dest" ;;  # symlinked into this repository: copy what it points at
-    *) cp -a ~/"$rel" "$dest" ;;
+    *) # tar, not cp: it carries on past a file it cannot read (cp stops at the first), and says which
+       pre="${rel%/*}/"; [ "$pre" = "$rel/" ] && pre=""
+       tar -C "$HOME/$pre" -cf - -- "${rel##*/}" 2>"$new.err" | tar -C "$(dirname "$dest")" -xpf - || {
+         [ "${PIPESTATUS[1]}" = 0 ] || exit 1
+         grep -v '^tar: Exiting with failure' "$new.err" | while IFS= read -r e; do
+           e="${e#tar: }"; printf '%s\n' "${e//$'\n'/?}" | sed -E "s#^(.*): Cannot [a-z ]+: (.*)\$#unreadable (\2): ~/$pre\1#" >> "$skipped"
+         done; }
+       ;;
   esac
 done < capture-paths.txt
+# one big file must not wedge every later push: it is left out and listed
+max="${HESTIA_MAX_FILE_BYTES:-52428800}"
+while IFS= read -r -d '' f; do
+  rm -f -- "$f"; printf 'too big (over %s MB): ~/%s\n' "$((max / 1048576))" "$(home_rel "$f" | tr '\n' '?')" >> "$skipped"
+done < <(find "$new" -type f -size +"${max}"c -print0)
 # The deny-list also applies to what is INSIDE a captured folder (a bookmarks file in ~/.config/gtk-3.0, a token file in an app's
 # folder): every captured file is asked about by its home-relative path, and a refused one is dropped from the COPY only. If the
 # list cannot be asked, nothing is captured at all.
 mapfile -d '' -t captured < <(find "$new" -type f -print0)
 inside=()
-for f in "${captured[@]}"; do
-  case "$f" in "$new/config/"*) inside+=(".config/${f#"$new/config/"}") ;; "$new/dotfiles/"*) inside+=("${f#"$new/dotfiles/"}") ;; esac
-done
+for f in "${captured[@]}"; do inside+=("$(home_rel "$f")"); done
 if [ "${#inside[@]}" -gt 0 ]; then
   rc=0; refused=$("${LIFESTREAM:-lifestream}" deny-path "${inside[@]}" 2>/dev/null) || rc=$?   # exit 1 means "something was refused": expected
   [ "$rc" -le 1 ] || { echo "cannot ask the deny-list (lifestream deny-path): nothing captured" >&2; exit 1; }
@@ -83,11 +99,15 @@ if [ "${#inside[@]}" -gt 0 ]; then
   done <<< "$refused"
 fi
 before=$( { find dotfiles config -type f 2>/dev/null || true; } | wc -l); after=$( { find "$new/dotfiles" "$new/config" -type f 2>/dev/null || true; } | wc -l)
-if [ "$before" -ge 4 ] && [ "$((after * 2))" -lt "$before" ]; then
-  echo "REFUSED: this capture has $after files where the last had $before; keeping the last one. Check capture-paths.txt." >&2
+accept=".accept-smaller-capture"
+if [ "$before" -ge 4 ] && [ "$((after * 2))" -lt "$before" ] && [ ! -e "$accept" ] \
+   && git -C "$dir" diff --quiet HEAD -- capture-paths.txt 2>/dev/null && git -C "$dir" ls-files --error-unmatch capture-paths.txt >/dev/null 2>&1; then
+  echo "REFUSED: this capture has $after files where the last had $before; keeping the last one. If that is right, run: touch '$dir/$accept'" >&2
   exit 1
 fi
+rm -f "$accept"
 rm -rf dotfiles config && mv "$new/dotfiles" dotfiles && mv "$new/config" config
+if [ -s "$skipped" ]; then sort -u "$skipped" > SKIPPED.txt; else rm -f SKIPPED.txt; fi
 
 # --- identity & hardware notes --------------------------------------------
 {

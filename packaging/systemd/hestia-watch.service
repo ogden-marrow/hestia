@@ -6,4 +6,8 @@ Type=oneshot
 Nice=19
 IOSchedulingClass=idle
 CPUSchedulingPolicy=idle
+# a stalled capture or push is stopped, so it can never hold the one-at-a-time lock for ever
+TimeoutStartSec=20min
+# 75: another run still holds the lock; the result file says so, and that is not a failure of this unit
+SuccessExitStatus=75
 ExecStart=@LIBEXEC@/watch.sh

@@ -21,6 +21,16 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **Release packaging**: one script builds the tarball and `.deb` with checksums and a signed build attestation.
 - **CI**: the whole workspace is lint-clean (clippy with warnings as errors) and so are the shell scripts (shellcheck), clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
 
+### Fixed
+- **The machine watcher no longer fails quietly** (#166-#172). A failed commit, push or capture is a `watch.json` result that starts
+  `FAILED` with the first line of the reason, and the unit exits 1; offline, signed out, repository gone and repository public are told
+  apart. A push rejected because another computer pushed first is fetched and rebased. Files over 50 MB and unreadable files are
+  skipped and listed in `SKIPPED.txt`. A possible secret in an unsent commit is redone from what GitHub has. File names with spaces,
+  accents, apostrophes, `#` or a newline are handled. A refused mass deletion can be confirmed (`touch .accept-smaller-capture`) and a
+  changed capture list resets the check. A stale `index.lock` is cleared, a hung push times out (`TimeoutStartSec`, fetch/push
+  timeouts), a second run reports it was refused (exit 75), and waiting for a quiet computer ends after 6 hours.
+  The engine's `secret-scan` streams files, takes folders, prints `-z` NUL-separated results and exits 2 when it could not look.
+
 ### Security
 - **Restore hardened against a poisoned home repository** (#174): file by file with a `.bak` of anything different (no more skipping whole existing folders), a fixed list of names, never `~/.ssh`, `~/.gnupg` or the keyring, shell startup files, `.gitconfig`, `environment.d`, fish/zsh/bash config held back until `--allow-executable`, file modes restored, honest counts in the summary.
 - One shared secret scanner (modern token formats, short quoted or exported passwords, binaries) gates capture, push and
