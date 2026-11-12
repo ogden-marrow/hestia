@@ -46,6 +46,28 @@ fn get_started(s: &State) -> Option<El> {
             (!launcher).then(|| crate::questions::action(&d, "gs-ext", "Turn on", "Turning on…", true, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search())))))
 }
 
+/// The backup: silent when safe (the header says so), one card with one plain action when it is not.
+fn backup_status(s: &State) -> Option<El> {
+    use crate::backup::{Fix, Verdict};
+    let d = s.design;
+    let t = d.theme();
+    match &s.backup {
+        Verdict::Unknown => None,
+        Verdict::Safe { .. } => None, // the header says "Backed up 12 minutes ago" on every screen
+        Verdict::NeedsYou { why, fix } => {
+            let (label, go): (&str, fn(&mut State)) = match fix {
+                Fix::BackUpNow => ("Back up now", |s| s.pane = Pane::Machine),
+                Fix::SignIn => ("Sign in", |s| crate::account::open_from_settings(s, false)),
+            };
+            Some(row().w_full().padding(d.pad()).gap(d.pad()).center_y().tile(&d)
+                .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
+                    .child(text("Your backup needs you".to_string()).font(d.text(Role::Body)).color(t.text))
+                    .child(text(why.clone()).font(d.text(Role::Label)).color(t.text_secondary).wrap_anywhere().shrink()))
+                .child(crate::questions::button(&d, "today-backup", label.into(), true, go)))
+        }
+    }
+}
+
 /// "1 file", "2 files", with thousands separated: 1,463.
 pub fn count(n: usize, one: &str, many: &str) -> String {
     let digits = n.to_string();
@@ -109,7 +131,11 @@ pub fn panel(s: &State) -> El {
     if !s.msg.is_empty() {
         body = body.child(text(s.msg.clone()).font(d.text(Role::Label)).color(d.accent_color()).wrap_anywhere().shrink());
     }
-    let body = body.child(hero).child(needs).child(facts);
+    let mut body = body.child(hero);
+    if let Some(b) = backup_status(s) {
+        body = body.child(b);
+    }
+    let body = body.child(needs).child(facts);
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad() * 2.0).panel(&d)
         .child(col().w_full().max_w(d.size(640.0)).scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(body))
 }
@@ -131,6 +157,16 @@ mod tests {
         assert_eq!(summary(0, 0), "Nothing new arrived while you were away. Everything is where it belongs.");
         assert!(summary(1, 0).starts_with("While you were away, Hestia filed 1 file."));
         assert!(summary(12, 3).ends_with("A few things need your say."));
+    }
+
+    #[test]
+    fn backup_line_shows_only_when_there_is_something_to_say() {
+        use crate::backup::{Fix, Verdict};
+        let mut s = State::default();
+        for v in [Verdict::Unknown, Verdict::Safe { when: "now".into() }, Verdict::NeedsYou { why: "x".into(), fix: Fix::SignIn }] {
+            s.backup = v.clone();
+            assert_eq!(backup_status(&s).is_some(), matches!(v, Verdict::NeedsYou { .. }));
+        }
     }
 
     #[test]

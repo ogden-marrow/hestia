@@ -8,6 +8,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **The standalone launcher window** (`hestia --launch`, its toggle and sizing): the Shell extension owns Alt+Space. Search inside the app and `hestia --serve` (the engine behind the Shell bar) are unchanged; the desktop entry's "Search…" action opens the app's Search screen.
 
 ### Added
+- **A calm backup status**: the header says "Backed up 12 minutes ago" on every screen; when it is not true, Today shows "Your backup needs you" with one plain action (back up now, or sign in).
 - **Undo for filing** (engine): every batch of moves is written down; `lifestream file --undo` puts the last batch back, one file at
   a time, never overwriting, never leaving your home folder, and leaves what it could not restore to be retried.
 - **Sign in with GitHub** (engine and screens): device-flow sign-in, find, adopt or create your private home repository.
@@ -25,6 +26,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
   lines, `curl -u`, Slack, Stripe, SendGrid, JWT, Authorization headers, Azure, WireGuard and kubernetes keys, base64-wrapped private keys. The push
   scan no longer skips added lines starting `++` or merge commits. The deny-list now covers credential files, browser, chat and password-manager
   profiles, shell histories, VPN files and `id_dsa`, and refuses a parent folder (`~/.config`, `~/.docker`) that holds any of them.
+- **Restore hardened against a poisoned home repository** (#174): file by file with a `.bak` of anything different (no more skipping whole existing folders), a fixed list of names, never `~/.ssh`, `~/.gnupg` or the keyring, shell startup files, `.gitconfig`, `environment.d`, fish/zsh/bash config held back until `--allow-executable`, file modes restored, honest counts in the summary.
 - One shared secret scanner (modern token formats, short quoted or exported passwords, binaries) gates capture, push and
   publish; secret lines are left out of the backup, private keys drop the file.
 - Pushes go only to a private GitHub repository of yours, checked on the address git will really use.
