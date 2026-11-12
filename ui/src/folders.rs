@@ -371,7 +371,7 @@ pub fn panels(s: &State) -> Vec<El> {
             continue;
         }
         tree_col = tree_col.child(col().w_full().px(d.item_px()).pt(d.pad()).pb(d.gap() * 0.5).gap(2.0)
-            .child(text(gname.to_uppercase()).font(style(&d, type_::SECTION)).color(t.text_secondary))
+            .child(text(gname.clone()).font(style(&d, type_::SECTION)).color(t.text_secondary))
             .child(text(gdesc).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
         for dir in list {
             if !shown.insert(dir.clone()) {
@@ -404,7 +404,7 @@ pub fn panels(s: &State) -> Vec<El> {
     let mut sugg_col = col().w_full().gap(d.gap());
     if !sugg.is_empty() {
         sugg_col = sugg_col.child(row().w_full().gap(d.gap()).center_y()
-            .child(heading(&d, "SUGGESTED FOLDERS").grow(1.0))
+            .child(heading(&d, "Suggested folders").grow(1.0))
             .child(button(&d, "sg-all", format!("Accept all {}", sugg.len()), false, |s: &mut State| {
                 for sg in suggestions(s) { s.accept(&sg); }
             })));
@@ -426,8 +426,8 @@ pub fn panels(s: &State) -> Vec<El> {
     // the bottom bar: what "file now" will do
     let n_moves = s.tplan.as_ref().map(|p| p.moves.len()).unwrap_or(0);
     let bar = row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y()
-        .child(text(format!("{n_moves} files would move tonight")).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0))
-        .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", true, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
+        .child(text(if n_moves == 0 { "Nothing to file".to_string() } else { format!("{} would move tonight", crate::today::count(n_moves, "file", "files")) }).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0).shrink().min_w(0.0).truncate())
+        .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", n_moves > 0, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
 
     let banner = s.moving.and_then(|i| s.tree.folders.get(i)).map(|f| row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
             .child(text(format!("Click the folder to put “{}” inside, or the top level:", f.path)).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0).wrap_anywhere())
@@ -437,9 +437,9 @@ pub fn panels(s: &State) -> Vec<El> {
     let mut center = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(col().w_full().px(d.item_px()).py(d.gap() * 0.5).gap(d.gap())
             .child(text("Files").font(style(&d, type_::TITLE)).color(t.text))
-            .child(text("All your files, sorted by purpose. Choose a folder to see what goes in it. Hestia leaves your projects and special folders alone.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
-            .child(heading(&d, "WATCHED FOLDERS"))
-            .child(text("Hestia sorts new files that land in these. Click one to stop watching it; your files stay where they are.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
+            .child(text("Choose a folder to see what goes in it. Projects and special folders are left alone.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
+            .child(heading(&d, "Watched folders"))
+            .child(text("New files that land here get sorted. Click one to stop watching it; nothing is moved.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
             .child(inbox)
             .child(field(&d, "inbox-add", &s.f_inbox, "Add a folder to watch, like Downloads", |s: &mut State| &mut s.f_inbox).on_submit(|s: &mut State, _: &mut Tx| s.add_inbox())));
     if let Some(b) = banner {
@@ -456,7 +456,7 @@ pub fn panels(s: &State) -> Vec<El> {
         body = body.child(col().w_full().gap(d.gap())
             .child(text(f.path.clone()).font(TextStyle { size: d.size(16.0), ..style(&d, type_::TITLE) }).color(t.text).wrap_anywhere().shrink())
             .child(text(if here > 0 { format!("{here} files will be moved here tonight") } else { "Nothing will be moved here tonight.".to_string() }).font(style(&d, type_::LABEL)).color(if here > 0 { acc } else { t.text_secondary }))
-            .child(heading(&d, "HESTIA PUTS THESE KINDS OF FILES HERE"))
+            .child(heading(&d, "What goes in this folder"))
             .child(text(format!("~/{}", f.path)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).wrap_anywhere().shrink())
             .child(field(&d, "f-path", &s.f_path, "rename this folder (its contents come along)", |s: &mut State| &mut s.f_path))
             .child(field(&d, "f-kind", &s.f_kind, "kinds, like image, video/camera", |s: &mut State| &mut s.f_kind))
@@ -469,9 +469,9 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(button(&d, "f-move", "Move to another folder…".into(), false, |s: &mut State| s.moving = Some(s.tsel)))
                 .child(button(&d, "f-delete", "Stop using this folder".into(), false, |s: &mut State| s.delete_folder()))));
     }
-    body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "CONTENTS")).child(super::contents::list(s)));
+    body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "Contents")).child(super::contents::list(s)));
     body = body.child(col().w_full().gap(d.gap())
-        .child(heading(&d, "ADD A FOLDER"))
+        .child(heading(&d, "Add a folder"))
         .child(field(&d, "f-new", &s.f_new, "Documents/Taxes ↵", |s: &mut State| &mut s.f_new).on_submit(|s: &mut State, _: &mut Tx| s.add_folder())));
 
     if let Some((from, to)) = &s.pending_move {
@@ -483,7 +483,7 @@ pub fn panels(s: &State) -> Vec<El> {
     }
 
     // what would move, and the confirmation
-    let mut prev = col().w_full().gap(d.gap()).child(heading(&d, "WHAT WOULD MOVE"));
+    let mut prev = col().w_full().gap(d.gap()).child(heading(&d, "What would move"));
     match &s.tplan {
         Some(p) => {
             let mut by: BTreeMap<String, (usize, u64)> = BTreeMap::new();

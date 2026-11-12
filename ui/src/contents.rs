@@ -63,9 +63,9 @@ pub fn list(s: &State) -> El {
         )
         .child(text(tilde(&s.cwd)).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
         .child(
-            row().key("new-note").h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM)).fill(acc)
+            row().key("new-note").h(d.row_h()).px(d.pad()).center_y().radius(d.r(tok::radius::SM)).fill(t.control_off)
                 .on_press(|s: &mut State| s.new_note())
-                .child(text("New note").font(style(&d, type_::LABEL)).color(d.on_accent())),
+                .child(text("New note").font(style(&d, type_::LABEL)).color(t.text)),
         );
     let mut c = col().w_full().gap(d.gap()).child(header)
         .child(text(format!("{} items · updates by itself", s.entries.len())).font(style(&d, type_::SECTION)).color(t.text_secondary))
