@@ -73,11 +73,7 @@ pub fn panels(s: &State) -> Vec<El> {
     }
     let (total_add, total_del): (u32, u32) = s.changes.iter().fold((0, 0), |a, c| (a.0 + c.add, a.1 + c.del));
     let msg = s.commits.get(s.csel).map(|c| plain(&c.subject)).unwrap_or_default();
-    let changed = col().w(230.0).shrink().min_w(200.0).padding(d.pad()).gap(d.gap()).panel(&d)
-        .child(text(msg).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink())
-        .child(text(tally(s.changes.len(), total_add, total_del).unwrap_or_else(|| "Nothing to show for this one.".into())).font(style(&d, type_::LABEL)).color(t.text_secondary))
-        .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(files));
-
+    let summary = tally(s.changes.len(), total_add, total_del);
     // ---- diff
     let mut lines = col().w_full();
     for (i, l) in s.diff.iter().enumerate() {
@@ -97,11 +93,22 @@ pub fn panels(s: &State) -> Vec<El> {
         );
     }
     let path = s.changes.get(s.fsel).map(|c| c.path.clone()).unwrap_or_default();
-    let diff = col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.gap()).panel(&d)
-        .child(text(if path.is_empty() { "Choose a file to see what changed".to_string() } else { path }).font(style(&d, type_::TITLE)).color(t.text).truncate())
-        .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(lines));
+    let mut diff = col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.gap()).panel(&d)
+        .child(text(msg).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink());
+    match summary {
+        None => {
+            diff = diff.child(text("This save has no file changes to show.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary));
+        }
+        Some(line) => {
+            diff = diff
+                .child(text(line).font(style(&d, type_::LABEL)).color(t.text_secondary))
+                .child(col().w_full().max_h(d.size(150.0)).scroll(scroll()).shrink().child(files))
+                .child(text(path).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).truncate())
+                .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(lines));
+        }
+    }
 
-    vec![commits, changed, diff]
+    vec![commits, diff]
 }
 
 #[cfg(test)]

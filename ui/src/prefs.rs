@@ -149,7 +149,7 @@ pub fn panels(s: &State) -> Vec<El> {
             body = body
                 .child(setting(&d, "Menu bar icon", "Shows how many questions are waiting. Click it to open Hestia.",
                     on_off(&d, "tray", s.settings.tray, |s, on| s.change_schedule(|st| st.tray = on))))
-                .child(setting(&d, "Keep my backup up to date", "Hestia notices changes to your settings, programs and config files and saves them when your computer is quiet. Nothing is sent anywhere.",
+                .child(setting(&d, "Keep the backup up to date", if s.account_user.is_some() { "Hestia notices changes to your settings, programs and config files and saves them when your computer is quiet. It also keeps a copy in a private repository on your GitHub account. Your documents are never uploaded." } else { "Hestia notices changes to your settings, programs and config files and saves them on this computer when it is quiet. After you sign in to GitHub it also keeps a copy in a private repository on your account. Your documents are never uploaded." },
                     on_off(&d, "watch", s.settings.watch_on, |s, on| s.change_schedule(|st| st.watch_on = on))))
                 .child(setting(&d, "Check for changes", "How often Hestia looks for changes.",
                     segmented(&d, "watchmins", &["Every 5 min", "Every 15 min", "Hourly"], match s.settings.watch_mins { 5 => 0, 60 => 2, _ => 1 },
