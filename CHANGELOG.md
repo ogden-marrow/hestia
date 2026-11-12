@@ -8,6 +8,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **The standalone launcher window** (`hestia --launch`, its toggle and sizing): the Shell extension owns Alt+Space. Search inside the app and `hestia --serve` (the engine behind the Shell bar) are unchanged; the desktop entry's "Search…" action opens the app's Search screen.
 
 ### Added
+- **A calm backup status on Today**: "Everything is backed up · last backup 12 minutes ago", or "Your backup needs you" with one plain action (back up now, or sign in).
 - **Undo for filing** (engine): every batch of moves is written down; `lifestream file --undo` puts the last batch back, one file at
   a time, never overwriting, never leaving your home folder, and leaves what it could not restore to be retried.
 - **Sign in with GitHub** (engine and screens): device-flow sign-in, find, adopt or create your private home repository.
