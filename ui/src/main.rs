@@ -159,11 +159,10 @@ impl Default for State {
         s.restyle();
         if !s.settings.welcomed { s.pane = Pane::Welcome; }
         let args = rune::extra_args();
-        if let Some(key) = args.iter().find_map(|a| a.strip_prefix("--pane=")) {
-            if let Some(p) = launcher::pane_of(key) {
+        if let Some(key) = args.iter().find_map(|a| a.strip_prefix("--pane="))
+            && let Some(p) = launcher::pane_of(key) {
                 s.pane = p;
             }
-        }
         if args.iter().any(|a| a == "--launch") {
             s.pane = Pane::Ask;
             s.launched_ask = true;
@@ -606,7 +605,7 @@ fn setup(s: &mut State, wake: rune::Waker) {
     std::thread::spawn(move || {
         let mut tick = 0u64;
         loop {
-            let status = (tick % 2 == 0).then(|| (system::gather(&load_all(&stream).unwrap_or_default(), &stream), desktop()));
+            let status = tick.is_multiple_of(2).then(|| (system::gather(&load_all(&stream).unwrap_or_default(), &stream), desktop()));
             let cwd = watch.lock().unwrap().clone();
             *slot.lock().unwrap() = Some(Fresh { status, repo: repo::stamp(&repo_dir), dir: files::fingerprint(&cwd) });
             wake();

@@ -32,7 +32,7 @@ impl State {
         if let Some(d) = self.domains.get(i).cloned() {
             self.d_name = TextEdit::new(&d.name);
             self.d_desc = TextEdit::new(&d.description);
-            self.d_kinds = TextEdit::new(&csv(&d.kinds));
+            self.d_kinds = TextEdit::new(csv(&d.kinds));
             self.d_folder = TextEdit::new(&d.folder);
             self.dom_edit = d;
         }

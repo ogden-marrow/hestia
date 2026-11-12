@@ -307,8 +307,7 @@ impl State {
 ///   {"q":"fire"}  ->  {"hits":[{"i":0,"top":true,"group":"Applications","title":"Firefox","sub":"Web Browser","kind":"app","path":"/usr/share/applications/firefox.desktop"}]}
 ///   {"run":0}     ->  {"done":true}  or  {"copy":"text"} for a clipboard item (the Shell owns the clipboard)
 pub fn serve() {
-    let mut s = State::default();
-    s.launched_ask = true;
+    let s = State { launched_ask: true, ..State::default() };
     serve_with(s, std::io::stdin().lock(), std::io::stdout().lock());
 }
 
@@ -475,9 +474,7 @@ mod tests {
         let text = format!("[Desktop Entry]\nType=Application\nName=Zzfake Thing\nExec=touch {}\n", marker.display());
         std::fs::write(&entry, &text).unwrap();
         let state = || {
-            let mut s = State::default();
-            s.launched_ask = true;
-            s.apps = vec![parse_entry("zzfake.desktop", &entry, &text).unwrap()];
+            let mut s = State { launched_ask: true, apps: vec![parse_entry("zzfake.desktop", &entry, &text).unwrap()], ..State::default() };
             s.clips.clear();
             s
         };

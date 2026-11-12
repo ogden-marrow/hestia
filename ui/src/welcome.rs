@@ -69,7 +69,7 @@ pub fn screen(s: &State) -> El {
                     .child(crate::questions::action(&d, "w-ext", "Turn on", "Turning on…", !on, s.jobs.running("search-on"), |s: &mut State| s.turn_on_search()))
                     .child(text(if on { "on".to_string() } else { format!("not yet: {state}") }).font(style(&d, type_::LABEL)).color(if on { acc } else { t.text_secondary })))
                 .child(line(s, "Remember what you copy (optional)", crate::clipboard::PRIVACY))
-                .child(row().child(crate::prefs::on_off(&d, "w-clip", s.settings.clipboard_on, |s, on| crate::prefs::set_clipboard(s, on)))))
+                .child(row().child(crate::prefs::on_off(&d, "w-clip", s.settings.clipboard_on, crate::prefs::set_clipboard))))
         }
         _ => ("You are set", col().w_full().gap(d.section())
             .child(line(s, "That is all.", "Your first scan runs tonight. Until then Hestia shows what it already knows."))
@@ -128,8 +128,7 @@ mod tests {
     #[test]
     fn every_step_renders() {
         for step in 0..STEPS {
-            let mut s = State::default();
-            s.wstep = step;
+            let s = State { wstep: step, ..State::default() };
             let _ = screen(&s);
         }
     }
