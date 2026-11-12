@@ -68,6 +68,7 @@ if want packages; then
   fi
   while read -r name chan flag; do
     [ -n "${name:-}" ] || continue
+    # shellcheck disable=SC2086 # ${flag:-} is "" or "--classic": it must vanish when empty, so it is deliberately unquoted
     run sudo snap install "$name" --channel="${chan:-stable}" ${flag:-} || fail+=("snap:$name")
   done < "$here/snap.txt" 2>/dev/null
   while read -r app origin; do

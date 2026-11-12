@@ -58,6 +58,7 @@ done <<< "$scan_out"
 for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)); done
 for f in "${!redact[@]}"; do
   [ -f "$f" ] && [ -z "${drop[$f]:-}" ] || continue
+  # shellcheck disable=SC2086 # the recorded line numbers are a space-separated list: splitting is the point
   for n in $(printf '%s\n' ${redact[$f]} | sort -un); do
     sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f" && redacted=$((redacted+1))
   done
@@ -71,8 +72,8 @@ done
 live() { for p in "$@"; do if [ -n "$(find "$repo/$p" -type f 2>/dev/null | head -1)" ] || [ -n "$(git -C "$repo" ls-files -- "$p")" ]; then printf '%s\n' "$p"; fi; done; }
 
 # ---- one commit per kind of change
-commit_area() { # label, message-builder-output, paths...
-  local label="$1" msg="$2"; shift 2
+commit_area() { # kind-of-change (for the reader of the call), message, paths...
+  local msg="$2"; shift 2
   mapfile -t paths < <(live "$@"); set -- "${paths[@]}"; [ $# -gt 0 ] || return
   git -C "$repo" add -A -- "$@" 2>/dev/null
   git -C "$repo" diff --cached --quiet -- "$@" && return

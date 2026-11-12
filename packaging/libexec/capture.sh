@@ -22,7 +22,7 @@ snap list 2>/dev/null | awk 'NR>1' | while read -r name _ver _rev track _pub not
 done | sort > snap.txt
 
 flatpak list --app --columns=application,origin 2>/dev/null | sort > flatpak.txt || : > flatpak.txt
-ls ~/.cargo/bin 2>/dev/null | grep -Ev '^(cargo|cargo-.*|clippy-driver|rls|rust-.*|rustc|rustdoc|rustfmt|rustup)$' | sort > cargo-bins.txt || : > cargo-bins.txt
+{ find ~/.cargo/bin -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null || true; } | grep -Ev '^(cargo|cargo-.*|clippy-driver|rls|rust-.*|rustc|rustdoc|rustfmt|rustup)$' | sort > cargo-bins.txt || : > cargo-bins.txt
 docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | sort > docker-images.txt || : > docker-images.txt
 
 # --- apt third-party sources (keys must be re-fetched; see bootstrap.sh) ----
@@ -50,6 +50,7 @@ trap 'rm -rf "$new"' EXIT
 while IFS= read -r line; do
   p="${line%%#*}"; p="$(echo "$p" | xargs)"
   [ -z "$p" ] && continue
+  # shellcheck disable=SC2088 # a literal "~/" is what the capture list contains
   case "$p" in "~/"*) rel="${p#\~/}" ;; *) echo "skip (not under ~): $p" >&2; continue ;; esac
   # one deny-list for everything (lifestream deny-path); if it cannot be asked, nothing is captured from home
   if ! "${LIFESTREAM:-lifestream}" deny-path "$rel" >/dev/null 2>&1; then

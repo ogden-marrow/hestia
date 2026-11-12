@@ -77,3 +77,15 @@ jobs:
         env:
           RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.sha) }}
         run: bash tests/privacy.sh
+
+  # The shell scripts are the part that runs unattended on a person's computer: lint them (warnings fail).
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck (warnings fail)
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y shellcheck; }
+          shellcheck -x -S warning install.sh uninstall.sh packaging/libexec/*.sh packaging/build-release.sh tests/*.sh

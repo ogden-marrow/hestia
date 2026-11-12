@@ -53,6 +53,7 @@ grep -q "not pushed: remote is not a GitHub repository" "$XDG_DATA_HOME/hestia/w
 # 3b. one setting decides: pointing it elsewhere (absolute, ~/ and relative forms) moves the watcher, and nothing else is touched
 before=$(git -C "$HESTIA_HOME" rev-list --count HEAD)
 mkdir -p "$HOME/Other"; ( cd "$HOME/Other" && git init -q . && touch tree.toml && git add -A && git commit -qm "other" )
+# shellcheck disable=SC2088 # "~/Other" is a literal setting value, not a path for the shell to expand
 for form in "$HOME/Other" "~/Other" "Other"; do
   sed -i '/^home=/d' "$HOME/.config/hestia/settings"; echo "home=$form" >> "$HOME/.config/hestia/settings"
   bash "$PREFIX/libexec/hestia/watch.sh" || fail "the watcher failed for home=$form"
