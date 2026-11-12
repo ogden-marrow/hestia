@@ -72,7 +72,7 @@ pub fn normalize(input: &str, home: &Path) -> Result<String, String> {
         return Err("type a path under your home folder, like ~/.vimrc".into());
     }
     if secret_path(&rel) {
-        return Err(format!("~/{rel} looks like it holds secrets, so it is never captured"));
+        return Err(format!("~/{rel} is, or contains, something private, so it is never captured. Add the specific file you want instead"));
     }
     if !home.join(&rel).exists() {
         return Err(format!("~/{rel} does not exist"));
@@ -320,6 +320,10 @@ mod tests {
         assert_eq!(dest_of(".bashrc"), "dotfiles/.bashrc");
         assert!(normalize("~/.ssh", home).is_err());
         assert!(normalize("", home).is_err());
+        // parents that would carry secrets along are refused too (#170): the one list is lifestream::deny
+        for parent in ["~/.config", "~/.docker", "~/.local/share", "~/"] {
+            assert!(normalize(parent, home).is_err(), "{parent}");
+        }
     }
 
     #[test]
