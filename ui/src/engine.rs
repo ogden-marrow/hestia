@@ -72,10 +72,26 @@ fn is_final(e: &Event) -> bool {
     !matches!(e, Event::Code(_))
 }
 
+/// Start the engine. A program that was written a moment ago can briefly be "text file busy" (ETXTBSY) when
+/// another thread forks while the file is still open for writing; that clears within milliseconds, so try again.
+fn spawn_patiently(bin: &Path, args: &[&str]) -> std::io::Result<std::process::Child> {
+    const TEXT_FILE_BUSY: i32 = 26;
+    let mut tries = 0;
+    loop {
+        match Command::new(bin).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() {
+            Err(e) if e.raw_os_error() == Some(TEXT_FILE_BUSY) && tries < 50 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Run one command and hand each event to `sink` as it arrives. `pid` holds the running process so
 /// the UI can cancel it; if it was cancelled, no failure is reported for the exit.
 pub fn stream(bin: &Path, args: &[&str], pid: &Mutex<Option<u32>>, mut sink: impl FnMut(Event)) {
-    let spawned = Command::new(bin).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+    let spawned = spawn_patiently(bin, args);
     let mut child = match spawned {
         Ok(c) => c,
         Err(_) => return sink(Event::Failed(Fail::Other("Hestia's helper program isn't installed, so it can't sign in yet.".into()))),
@@ -203,7 +219,8 @@ mod tests {
     /// A fake engine printing the contract's lines, driven through the real streaming code.
     fn fake(script: &str) -> (PathBuf, PathBuf) {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("hestia-engine-{}-{}", std::process::id(), script.len()));
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("hestia-engine-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join("lifestream");
         std::fs::write(&bin, format!("#!/bin/sh\n{script}\n")).unwrap();
@@ -232,6 +249,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
         let got = collect(Path::new("/nonexistent/lifestream"));
         assert!(matches!(got.as_slice(), [Event::Failed(Fail::Other(m))] if m.contains("isn't installed")), "{got:?}");
+    }
+
+    /// Regression for #123: many fakes written and run at once must never fail to start.
+    #[test]
+    fn a_fake_engine_starts_reliably_even_when_many_start_at_once() {
+        let threads: Vec<_> = (0..8).map(|_| std::thread::spawn(|| {
+            for _ in 0..25 {
+                let (dir, bin) = fake(r#"echo '{"event":"failed","kind":"denied"}'; exit 1"#);
+                assert_eq!(collect(&bin), vec![Event::Failed(Fail::Denied)]);
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        })).collect();
+        for t in threads {
+            t.join().expect("a fake engine failed to start");
+        }
     }
 
     #[test]
