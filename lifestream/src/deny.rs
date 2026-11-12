@@ -19,7 +19,7 @@ pub const SENSITIVE_DIRS: &[(&str, &str)] = &[
 ];
 
 /// A path containing any of these words is refused wherever it is.
-const SENSITIVE_WORDS: &[&str] = &["password", "secret", "token", ".pem", ".key", "id_rsa", "id_ed25519"];
+const SENSITIVE_WORDS: &[&str] = &["password", "secret", "token", "bookmarks", ".pem", ".key", "id_rsa", "id_ed25519"];
 
 /// Should this path (relative to the home folder) never be captured?
 pub fn capture_refused(rel: &str) -> bool {
@@ -46,7 +46,7 @@ mod tests {
     #[test]
     fn refuses_keys_sessions_accounts_and_secret_looking_names() {
         for p in [".ssh", ".ssh/id_ed25519", ".gnupg/pubring.kbx", ".config/gh/hosts.yml", ".config/Claude/x", ".local/share/keyrings/login.keyring",
-                  "notes/my-password-list.txt", "a/../b", ".config/app/api_token.json", "certs/site.pem", ".env", "x/id_rsa", ".sshconfig-backup"] {
+                  "notes/my-password-list.txt", ".config/gtk-3.0/bookmarks", "a/../b", ".config/app/api_token.json", "certs/site.pem", ".env", "x/id_rsa", ".sshconfig-backup"] {
             assert!(capture_refused(p), "{p} must be refused");
         }
     }
