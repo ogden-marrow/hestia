@@ -181,6 +181,9 @@ pub fn steam_games(home: &Path) -> Vec<Item> {
             }
         }
     }
+    // the same game can be listed under two Steam roots that are one folder (a symlink): keep one
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|g| seen.insert(g.id.clone()));
     out
 }
 
@@ -291,7 +294,8 @@ mod tests {
 }
 
 /// Which items to show, and in what order. `show`: 0 all, 1 games, 2 apps (not games).
-/// `sort`: 0 by name, 1 most used first (our own launch counts, then Steam play time). Names break every tie.
+/// `sort`: 1 most used first (our own launch counts, then Steam play time); 0, 2 and 3 are by name (the view
+/// groups 2 by kind and 3 by source, so those shelves are listed together). Names break every tie.
 pub fn visible(items: &[Item], q: &str, show: usize, sort: usize, counts: &HashMap<String, u32>) -> Vec<usize> {
     let q = q.trim().to_lowercase();
     let mut out: Vec<(u32, usize)> = items.iter().enumerate().filter(|(_, a)| match show { 1 => a.game, 2 => !a.game, _ => true }).filter_map(|(i, a)| {
@@ -304,7 +308,9 @@ pub fn visible(items: &[Item], q: &str, show: usize, sort: usize, counts: &HashM
     out.sort_by(|(sa, a), (sb, b)| {
         let (x, y) = (&items[*a], &items[*b]);
         let used = |it: &Item| (counts.get(&it.id).copied().unwrap_or(0), it.last_played.unwrap_or(0));
+        let shelf = |it: &Item| match sort { 2 => it.group, 3 => it.source.label(), _ => "" };
         sb.cmp(sa)
+            .then_with(|| shelf(x).cmp(shelf(y)))
             .then_with(|| if sort == 1 { used(y).cmp(&used(x)) } else { std::cmp::Ordering::Equal })
             .then_with(|| x.name.to_lowercase().cmp(&y.name.to_lowercase()))
     });
@@ -349,6 +355,8 @@ mod view_tests {
         assert_eq!(visible(&items, "fire", 0, 0, &none), [3]);
         let used: HashMap<String, u32> = [("Zed".to_string(), 9)].into();
         assert_eq!(visible(&items, "", 0, 1, &used)[0], 0);
+        // by kind lists the shelves together: Games (Alpha, Beta) before Other (Firefox, Zed)
+        assert_eq!(visible(&items, "", 0, 2, &none), [1, 2, 3, 0]);
     }
 }
 
