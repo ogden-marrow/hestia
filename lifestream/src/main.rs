@@ -113,6 +113,15 @@ enum Cmd {
         #[arg(long, conflicts_with = "apply")]
         undo: bool,
     },
+    /// Rename or create one folder, journaled so `file --undo` can take it back. One JSON line; exit 1 with a "failed" event if refused.
+    Folder {
+        #[command(subcommand)]
+        cmd: FolderCmd,
+        #[arg(long, global = true)]
+        out: Option<PathBuf>,
+        #[arg(long, global = true)]
+        manifest: Option<PathBuf>,
+    },
     /// Fingerprint this computer into machines/<name>/machine.toml (--write), or just print it
     Machine {
         /// the home repository (default: search upward for tree.toml)
@@ -160,6 +169,14 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum FolderCmd {
+    /// Rename FROM to TO (both relative to your home folder, e.g. Documents/Old Archive/Old); same disk only, never merges
+    Move { from: String, to: String },
+    /// Create one new empty folder PATH (relative to your home folder); its parent must exist
+    New { path: String },
 }
 
 #[derive(Subcommand)]
@@ -246,6 +263,13 @@ fn main() -> Result<()> {
     match cmd {
         Cmd::Tree { tree, apply, r#move } => lifestream::tree::cmd_tree(tree, apply, r#move),
         Cmd::File { tree, out, manifest, apply, undo } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply, undo),
+        Cmd::Folder { cmd, out, manifest } => {
+            let stream = stream_dir(out)?;
+            match cmd {
+                FolderCmd::Move { from, to } => lifestream::tree::cmd_folder_move(&from, &to, &stream, manifest),
+                FolderCmd::New { path } => lifestream::tree::cmd_folder_new(&path, &stream),
+            }
+        }
         Cmd::Machine { repo, write } => {
             let m = lifestream::machine::probe(&chrono_today());
             if write {

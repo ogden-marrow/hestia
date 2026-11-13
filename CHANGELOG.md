@@ -8,6 +8,10 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **The standalone launcher window** (`hestia --launch`, its toggle and sizing): the Shell extension owns Alt+Space. Search inside the app and `hestia --serve` (the engine behind the Shell bar) are unchanged; the desktop entry's "Search…" action opens the app's Search screen.
 
 ### Added
+- **Undoable folder moves and new folders** (engine): `lifestream folder move FROM TO` renames a folder (same disk only, never merges or overwrites,
+  refuses symlinks anywhere on the path, hidden or sensitive places and moving a folder into itself) and `lifestream folder new PATH` makes one empty
+  folder. Both are written to the undo journal; `lifestream file --undo` renames a folder back (never overwriting) and removes a new folder only
+  while it is still empty, otherwise it says it kept it.
 - **Folders** (Explore): a real tree of your home folder. Expand and collapse, breadcrumbs, select; rename or move a file with Undo, through the same journaled mover as filing. Nothing is ever deleted. Moving whole folders waits for an engine API.
 - **Applications** (Explore): every installed app and game in one list with its icon: desktop entries (native, Flatpak, Snap, your own), Steam shortcuts and installed Steam games from Steam's own manifests. Search, All / Games / Apps, group by kind or source, sort by name or most used; click to open.
 - **A calm backup status**: the header says "Backed up 12 minutes ago" on every screen; when it is not true, Today shows "Your backup needs you" with one plain action (back up now, or sign in).

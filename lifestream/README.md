@@ -80,6 +80,7 @@ Hestia edits it; the nightly flow reads it.
 **Editing the tree.** `Tree::move_folder(from, to)` is drag and drop (children carry their
 paths); `move_on_disk` renames the real folder and rewrites stream paths (never merges, never
 touches sensitive paths, same disk only); `Tree::add_folder` accepts a suggestion. From the
-shell: `lifestream tree --move FROM TO [--apply]`. The classifier's label set is the built-in
+shell: `lifestream tree --move FROM TO [--apply]`. `move_dir` / `make_dir` (`lifestream folder move|new`) are the journaled, undoable
+versions (`lifestream file --undo` takes the last one back). The classifier's label set is the built-in
 kinds plus every kind in `tree.toml` (`bundle::kinds_for`), and a changed tree makes cached
 folder suggestions stale, so `lifestream suggest` always works from the latest tree.
