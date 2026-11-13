@@ -438,10 +438,10 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         nav::Place::Stream => "Stream", nav::Place::Library => "Library", nav::Place::Computer => "Computer",
         nav::Place::Settings => if s.pane == Pane::Welcome { "Welcome" } else { "Settings" },
     };
-    let (status_text, status_color) = match &s.backup {
-        backup::Verdict::Safe { when } => (format!("Backed up {when}"), t.text_secondary),
-        backup::Verdict::NeedsYou { .. } => ("Backup needs you".to_string(), d.danger()),
-        _ => (String::new(), t.text_secondary),
+    let (status_text, dot) = match &s.backup {
+        backup::Verdict::Safe { when } => (format!("Backed up {when}"), Some(d.ok())),
+        backup::Verdict::NeedsYou { .. } => ("Backup needs you".to_string(), Some(d.danger())),
+        _ => (String::new(), None),
     };
     let header = row().w_full().h(d.size(28.0)).px(pad).center_y().fill(t.card)
         .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
@@ -449,10 +449,9 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
             .child(rune::icon(&icons::FLAME, d.size(16.0)).color(acc))
             .child(text("Hestia").font(style(&d, type_::LABEL)).color(t.text_secondary)))
         .child(text(title).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
-        .child(
-            text(status_text).key("need-you").font(style(&d, type_::LABEL)).color(status_color)
-                .on_press(|s: &mut State| s.go_pane(Pane::Machine)),
-        );
+        .child(row().key("need-you").gap(d.gap()).center_y().on_press(|s: &mut State| s.go_pane(Pane::Machine))
+            .child(match dot { Some(c) => el().size(8.0, 8.0).radius(4.0).fill(c), None => el().size(0.0, 0.0) })
+            .child(text(status_text).font(style(&d, type_::LABEL)).color(if matches!(s.backup, backup::Verdict::NeedsYou { .. }) { d.danger() } else { t.text_secondary })));
 
     // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"
     let info = match s.pane {

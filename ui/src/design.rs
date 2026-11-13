@@ -172,6 +172,11 @@ impl Design {
         if self.dark { oklch(0.72, 0.17, 25.0) } else { oklch(0.52, 0.19, 25.0) }
     }
 
+    /// The one green: something is fine (a status dot, never a button).
+    pub fn ok(&self) -> Color {
+        if self.dark { oklch(0.74, 0.14, 150.0) } else { oklch(0.58, 0.14, 150.0) }
+    }
+
     /// Text on top of a solid accent fill.
     pub fn on_accent(&self) -> Color {
         oklch(0.99, 0.0, 0.0)
