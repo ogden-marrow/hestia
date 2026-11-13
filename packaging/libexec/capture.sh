@@ -26,8 +26,12 @@ flatpak list --app --columns=application,origin 2>/dev/null | sort > flatpak.txt
 docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | sort > docker-images.txt || : > docker-images.txt
 
 # --- apt third-party sources (keys must be re-fetched; see bootstrap.sh) ----
+# Both formats: one-line *.list and deb822 *.sources. ubuntu.sources / debian.sources are the distribution's own and
+# belong to the release, so they are not captured (restoring one onto another release would break apt).
 rm -f apt-sources/*.list apt-sources/*.sources
-for f in /etc/apt/sources.list.d/*.list; do
+srcdir="${HESTIA_APT_SOURCES_DIR:-/etc/apt/sources.list.d}"
+for f in "$srcdir"/*.list "$srcdir"/*.sources; do
+  case "${f##*/}" in ubuntu.sources|debian.sources) continue ;; esac
   [ -e "$f" ] && cp "$f" apt-sources/
 done
 
@@ -52,6 +56,22 @@ new=".capture-new.$$"; rm -rf "$new"; mkdir -p "$new/dotfiles" "$new/config"
 skipped="$new.skipped"; : > "$skipped"
 trap 'rm -rf "$new" "$skipped" "$new.err"' EXIT
 home_rel() { case "$1" in "$new/config/"*) printf '.config/%s' "${1#"$new/config/"}" ;; "$new/dotfiles/"*) printf '%s' "${1#"$new/dotfiles/"}" ;; esac; }
+# A symlink target is captured only when it is a real file inside the home folder that the deny-list allows.
+home_real="$(readlink -f ~)"
+link_ok() { # <resolved path>
+  case "$1" in "$home_real"/*) ;; *) return 1 ;; esac
+  [ -e "$1" ] || return 1
+  "${LIFESTREAM:-lifestream}" deny-path "${1#"$home_real"/}" >/dev/null 2>&1
+}
+fix_links() { # <copied tree> <where it came from>: replace each symlink in the copy by its target's content, or drop and list it
+  local tree="$1" orig="$2" l r t
+  while IFS= read -r -d '' l; do
+    r="${l#"$tree"}"; t="$(readlink -f "$orig$r" 2>/dev/null || true)"
+    rm -f -- "$l"
+    if [ -n "$t" ] && [ -f "$t" ] && link_ok "$t"; then cp -p -- "$t" "$l"
+    else printf 'symlink not captured (target is not a file inside the home folder, or never captured): ~/%s\n' "$(home_rel "$l" | tr '\n' '?')" >> "$skipped"; fi
+  done < <(find "$tree" -type l -print0)
+}
 while IFS= read -r line; do
   # a # starts a comment only at the start of a line or after a space: a path may hold one. Quotes are ordinary characters.
   p="${line%%[[:space:]]#*}"; p="${p#"${p%%[![:space:]]*}"}"; p="${p%"${p##*[![:space:]]}"}"
@@ -68,15 +88,31 @@ while IFS= read -r line; do
   real="$(readlink -f ~/"$rel")"
   case "$real" in
     "$repo_root"/*) cp -aL "$real" "$dest" ;;  # symlinked into this repository: copy what it points at
-    *) # tar, not cp: it carries on past a file it cannot read (cp stops at the first), and says which
+    *) if [ -L ~/"$rel" ]; then
+         # a symlinked dotfile (a stow layout): capture what it points at, never the link. The target must be inside the home
+         # folder and pass the deny-list; otherwise it is skipped and listed.
+         if link_ok "$real"; then
+           stage="$new.link"; rm -rf "$stage"; mkdir -p "$stage"
+           tar --exclude=.git -C "$(dirname "$real")" -cf - -- "$(basename "$real")" 2>/dev/null | tar -C "$stage" -xpf - \
+             && mv "$stage/$(basename "$real")" "$dest"
+           rm -rf "$stage"; [ -d "$dest" ] && fix_links "$dest" "$real"
+         else
+           printf 'symlink not captured (target outside the home folder or never captured): ~/%s\n' "$rel" >> "$skipped"
+         fi
+         continue
+       fi
+       # tar, not cp: it carries on past a file it cannot read (cp stops at the first), and says which.
+       # --exclude=.git: a nested git repository (a cloned ~/.config/nvim) is stored as its files, never as a gitlink.
        pre="${rel%/*}/"; [ "$pre" = "$rel/" ] && pre=""
-       tar -C "$HOME/$pre" -cf - -- "${rel##*/}" 2>"$new.err" | tar -C "$(dirname "$dest")" -xpf - || {
+       tar --exclude=.git -C "$HOME/$pre" -cf - -- "${rel##*/}" 2>"$new.err" | tar -C "$(dirname "$dest")" -xpf - || {
          [ "${PIPESTATUS[1]}" = 0 ] || exit 1
          grep -v '^tar: Exiting with failure' "$new.err" | while IFS= read -r e; do
            e="${e#tar: }"; printf '%s\n' "${e//$'\n'/?}" | sed -E "s#^(.*): Cannot [a-z ]+: (.*)\$#unreadable (\2): ~/$pre\1#" >> "$skipped"
          done; }
        ;;
   esac
+  # links INSIDE a captured folder are resolved the same way
+  [ -d "$dest" ] && fix_links "$dest" ~/"$rel"
 done < capture-paths.txt
 # one big file must not wedge every later push: it is left out and listed
 max="${HESTIA_MAX_FILE_BYTES:-52428800}"

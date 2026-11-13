@@ -163,13 +163,9 @@ pub fn looks_secret(name: &str) -> bool {
         }
     }
     // private keys: id_rsa, id_ed25519, foo_ed25519 ... but not the public halves
-    if !n.ends_with(".pub")
+    !n.ends_with(".pub")
         && (n.starts_with("id_rsa") || n.starts_with("id_dsa") || n.starts_with("id_ed25519") || n.starts_with("id_ecdsa")
             || n.ends_with("_ed25519") || n.ends_with("_rsa"))
-    {
-        return true;
-    }
-    false
 }
 
 pub fn home() -> Result<PathBuf> {
