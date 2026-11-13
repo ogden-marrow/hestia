@@ -492,30 +492,11 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
                 .on_press(|s: &mut State| s.go_pane(Pane::Machine)),
         );
 
-    // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"
-    let info = match s.pane {
-        Pane::Today => if s.bundles.is_empty() { format!("{} sorted · nothing waiting for you", today::count(s.total, "file", "files")) } else { format!("{} sorted · {} waiting for you", today::count(s.total, "file", "files"), today::count(s.bundles.len(), "folder", "folders")) },
-        Pane::Questions => if s.bundles.is_empty() { "No questions waiting".to_string() } else { format!("{} · {}", today::count(s.bundles.len(), "folder", "folders"), today::count(s.bundles.iter().map(|b| b.ids.len()).sum::<usize>(), "file", "files")) },
-        Pane::Files => format!("{} · {} · {}", today::count(s.tree.folders.len(), "folder", "folders"), today::count(s.tree.inbox.len(), "watched folder", "watched folders"), files::tilde(&s.cwd)),
-        Pane::History => format!("{} saved", today::count(s.commits.len(), "change", "changes")),
-        Pane::Time => today::count(s.days.len(), "day with files", "days with files"),
-        Pane::Machine => format!("{} since your last backup", today::count(s.mach.iter().map(|c| c.drift()).sum::<usize>(), "change", "changes")),
-        Pane::System => format!("models {}", if s.status.ollama_up { "ready" } else { "off" }),
-        Pane::Folders => if s.msg.is_empty() { "your home folder".to_string() } else { s.msg.clone() },
-        Pane::Apps => format!("{} installed", today::count(s.library.len(), "application", "applications")),
-        Pane::Ask => "apps, files, clipboard and Hestia, on this computer".into(),
-        Pane::Settings => "changes apply right away  ·  Ctrl+, opens Settings, Ctrl+F searches".into(),
-        Pane::Welcome => "a short tour".into(),
-    };
-    let footer = row().w_full().h(d.size(24.0)).px(pad).center_y().fill(t.card)
+    // The status strip is only for what is happening or what just happened (press to dismiss); at rest there is none.
+    let footer = (s.jobs.any() || !s.msg.is_empty()).then(|| row().w_full().h(d.size(24.0)).px(pad).center_y().fill(t.card)
         .border_sides([1.0, 0.0, 0.0, 0.0], t.card_border)
-        .child(if s.msg.is_empty() && !s.jobs.any() {
-            text(info).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0).shrink().min_w(0.0).truncate()
-        } else {
-            // one status strip on every screen: what is happening, or what just happened (press to dismiss)
-            text(format!("{}{}", if s.jobs.any() { "●  " } else { "" }, s.msg)).key("status").font(style(&d, type_::LABEL)).color(acc).grow(1.0).shrink().min_w(0.0).truncate()
-                .on_press(|s: &mut State| if !s.jobs.any() { s.msg.clear() })
-        });
+        .child(text(format!("{}{}", if s.jobs.any() { "●  " } else { "" }, s.msg)).key("status").font(style(&d, type_::LABEL)).color(acc).grow(1.0).shrink().min_w(0.0).truncate()
+            .on_press(|s: &mut State| if !s.jobs.any() { s.msg.clear() })));
 
     let views = sidebar::panel(s);
 
@@ -548,7 +529,7 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     col().w_full().h_full().padding(0.0).gap(0.0).backdrop(&d)
         .child(header)
         .child(body)
-        .child(footer)
+        .children(footer)
 }
 
 /// Everything that is running: timers and services, models, GPU, pipeline progress.
