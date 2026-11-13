@@ -680,7 +680,7 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
 fn field(d: &Design, key: &str, edit: &TextEdit, hint: &str, get: fn(&mut State) -> &mut TextEdit) -> El {
     let t = d.theme();
     text_input(edit, style(d, type_::BODY)).key(key).single_line().w_full().h(d.row_h()).px(d.item_px()).py((d.row_h() - d.size(13.0) * 1.25) / 2.0).radius(d.r(tok::radius::SM))
-        .fill(t.control_track).color(t.text).placeholder(hint, t.text_secondary)
+        .fill(t.control_track).border(1.0, d.hairline()).color(t.text).placeholder(hint, t.text_secondary)
         .on_edit(get)
 }
 
