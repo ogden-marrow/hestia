@@ -361,6 +361,32 @@ mod view_tests {
 }
 
 #[cfg(test)]
+mod open_tests {
+    use super::*;
+
+    /// Opening an application runs its entry (a harmless `touch` here, never a real program) and counts the launch.
+    #[test]
+    fn opening_an_entry_runs_it_and_counts_it() {
+        let dir = std::env::temp_dir().join(format!("hestia-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::launcher::TEST_LAUNCHES.with(|t| *t.borrow_mut() = Some(dir.join("launches.tsv")));
+        let (marker, entry) = (dir.join("ran"), dir.join("zzfake.desktop"));
+        let text = format!("[Desktop Entry]\nType=Application\nName=Zzfake\nExec=touch {}\n", marker.display());
+        std::fs::write(&entry, &text).unwrap();
+        let item = parse_entry("zzfake.desktop", &entry, &text).unwrap();
+        let mut counts = HashMap::new();
+        open(&item, &mut counts).unwrap();
+        for _ in 0..50 {
+            if marker.exists() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(marker.exists(), "the entry was not started");
+        assert_eq!(counts.get("zzfake.desktop"), Some(&1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
 mod machine_smoke {
     /// Reads this computer's real applications and prints what it found: `cargo test -p hestia real_apps -- --ignored --nocapture`.
     #[test]

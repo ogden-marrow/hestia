@@ -82,7 +82,7 @@ pub fn parse_entry(id: &str, path: &std::path::Path, text: &str) -> Option<App> 
 }
 
 #[cfg(test)]
-thread_local!(static TEST_LAUNCHES: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) });
+thread_local!(pub(crate) static TEST_LAUNCHES: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) });
 
 fn launches_file() -> PathBuf {
     #[cfg(test)]
