@@ -16,7 +16,18 @@ repo="${1:-$(hestia_home_repo)}"   # the one setting the app shows; an argument 
 rel="applications/linux/${ID:-linux}/${VERSION_ID:-unknown}"
 here="$repo/$rel"
 mkdir -p "$here/apt-sources"
-[ -e "$here/capture-paths.txt" ] || cp "$libexec/capture-paths.default" "$here/capture-paths.txt"
+# One capture list that survives an OS upgrade: a new version folder starts from the nearest other version's list
+# (the newest one below this version, else the newest of any), and only a machine that never had one gets the default.
+if [ ! -e "$here/capture-paths.txt" ]; then
+  osdir="$repo/applications/linux/${ID:-linux}"; cur="${VERSION_ID:-unknown}"; below=""; any=""
+  while IFS= read -r v; do
+    [ "$v" = "$cur" ] && { below="$any"; continue; }
+    [ -e "$osdir/$v/capture-paths.txt" ] && any="$v"
+  done < <({ ls -1 "$osdir" 2>/dev/null; echo "$cur"; } | sort -uV)
+  prev="${below:-$any}"
+  if [ -n "$prev" ]; then cp "$osdir/$prev/capture-paths.txt" "$here/capture-paths.txt"
+  else cp "$libexec/capture-paths.default" "$here/capture-paths.txt"; fi
+fi
 state="${XDG_DATA_HOME:-$HOME/.local/share}/hestia"; mkdir -p "$state"
 
 withheld_note=""
