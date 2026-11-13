@@ -42,7 +42,7 @@ pub fn kinds(recs: &[Record]) -> HashMap<String, String> {
 }
 
 fn stamp(t: SystemTime) -> String {
-    chrono::DateTime::<chrono::Local>::from(t).format("%Y-%m-%d %H:%M").to_string()
+    chrono::DateTime::<chrono::Local>::from(t).format("%b %-d, %Y, %-I:%M %p").to_string()
 }
 
 /// Folders first, then files, each A to Z; hidden files left out.

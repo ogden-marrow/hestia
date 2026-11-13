@@ -13,6 +13,7 @@ mod fixture;
 mod folders;
 mod history;
 mod icons;
+mod kinds;
 mod jobs;
 mod launcher;
 mod machine;
@@ -588,9 +589,9 @@ fn system_panel(s: &State) -> El {
     }
 
     let pipe = card("Progress")
-        .child(kv(&d, "stream last updated", &st.stream_age))
-        .child(kv(&d, "files waiting for you", &st.pending.to_string()))
-        .child(kv(&d, "folders suggested by the models", &format!("{} of {}", st.suggested, st.folders)));
+        .child(kv(&d, "Stream last updated", if st.stream_age.is_empty() { "Never" } else { &st.stream_age }))
+        .child(kv(&d, "Files waiting for you", &st.pending.to_string()))
+        .child(kv(&d, "Folders with a model suggestion", &if st.folders == 0 { "None yet".to_string() } else { format!("{} of {}", st.suggested, st.folders) }));
 
     let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(row().w_full().gap(d.pad()).child(pipe.grow(1.0)).child(if st.gpu.is_some() { hw.grow(1.0) } else { col().size(0.0, 0.0) }));
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)

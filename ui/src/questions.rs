@@ -128,10 +128,10 @@ pub fn panels(s: &State) -> Vec<El> {
         let (parent, name) = b.root.trim_start_matches("~/").rsplit_once('/').map(|(a, n)| (a.to_string(), n.to_string())).unwrap_or((String::new(), b.root.clone()));
         let mut chips = row().w_full().shrink().min_w(0.0).gaps(d.gap(), d.gap() * 0.5).flex_wrap();
         match sug {
-            Some(c) if c.agree() => chips = chips.child(chip(&d, format!("Both models: {}", c.suggestions[0].kind), true)),
+            Some(c) if c.agree() => chips = chips.child(chip(&d, format!("Both models: {}", crate::kinds::label(&c.suggestions[0].kind)), true)),
             Some(c) if !c.suggestions.is_empty() => {
                 for g in &c.suggestions {
-                    chips = chips.child(chip(&d, g.kind.clone(), false));
+                    chips = chips.child(chip(&d, crate::kinds::label(&g.kind), false));
                 }
             }
             _ => {}
@@ -187,7 +187,7 @@ pub fn panels(s: &State) -> Vec<El> {
             let kind = c.kind.clone();
             let mut card = col().w_full().padding(d.item_px()).gap(d.gap() * 0.5).tile(&d)
                 .child(row().w_full().gap(d.gap()).center_y()
-                    .child(text(c.kind.clone()).font(style(&d, type_::TITLE)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
+                    .child(text(crate::kinds::label(&c.kind)).font(style(&d, type_::TITLE)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
                     .child(if n == 0 && c.reasons.len() > 1 { chip(&d, "best guess".into(), true) } else { col().size(0.0, 0.0) }));
             for r in &c.reasons {
                 card = card.child(text(format!("•  {r}")).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
