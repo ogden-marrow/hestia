@@ -471,17 +471,14 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     let pad = d.pad();
 
     // ---- header: the morning briefing
-    let needs = s.bundles.len(); // one unit everywhere: folders waiting (#30)
-    let title = match s.pane {
-        Pane::Today => "Today", Pane::Questions => "Questions", Pane::System => "System",
-        Pane::Apps => "Applications", Pane::Folders => "Folders", Pane::Ask => "Search", Pane::History => "History", Pane::Files => "Files", Pane::Time => "Time",
-        Pane::Machine => "Machine", Pane::Settings => "Settings", Pane::Welcome => "Welcome",
+    let title = match nav::place_of(s.pane) {
+        nav::Place::Stream => "Stream", nav::Place::Library => "Library", nav::Place::Computer => "Computer",
+        nav::Place::Settings => if s.pane == Pane::Welcome { "Welcome" } else { "Settings" },
     };
-    let (status_text, status_color) = match (&s.backup, needs) {
-        (_, n) if n > 0 => (crate::today::count(n, "question", "questions"), acc),
-        (backup::Verdict::Safe { when }, _) => (format!("Backed up {when}"), t.text_secondary),
-        (backup::Verdict::NeedsYou { .. }, _) => ("Backup needs you".to_string(), d.danger()),
-        _ => ("All clear".to_string(), t.text_secondary),
+    let (status_text, status_color) = match &s.backup {
+        backup::Verdict::Safe { when } => (format!("Backed up {when}"), t.text_secondary),
+        backup::Verdict::NeedsYou { .. } => ("Backup needs you".to_string(), d.danger()),
+        _ => (String::new(), t.text_secondary),
     };
     let header = row().w_full().h(d.size(28.0)).px(pad).center_y().fill(t.card)
         .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
@@ -491,7 +488,7 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         .child(text(title).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
         .child(
             text(status_text).key("need-you").font(style(&d, type_::LABEL)).color(status_color)
-                .on_press(move |s: &mut State| s.pane = if needs > 0 { Pane::Questions } else { Pane::Today }),
+                .on_press(|s: &mut State| s.go_pane(Pane::Machine)),
         );
 
     // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"
