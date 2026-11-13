@@ -4,6 +4,7 @@
 mod account;
 mod apps;
 mod appview;
+mod nav;
 mod treeview;
 mod backup;
 mod clipboard;
@@ -537,10 +538,15 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         Pane::Time => vec![timeview::panel(s)],
         Pane::Welcome => vec![],
     };
-    let mut body = row().w_full().grow(1.0).gap(0.0).min_h(0.0).child(views);
+    let mut screens = row().w_full().grow(1.0).gap(0.0).min_h(0.0);
     for p in panes {
-        body = body.child(p);
+        screens = screens.child(p);
     }
+    let mut shown = col().grow(1.0).shrink().min_w(0.0).gap(0.0);
+    if let Some(tabs) = nav::tab_bar(s, &d) {
+        shown = shown.child(tabs);
+    }
+    let body = row().w_full().grow(1.0).gap(0.0).min_h(0.0).child(views).child(shown.child(screens));
     col().w_full().h_full().padding(0.0).gap(0.0).backdrop(&d)
         .child(header)
         .child(body)
@@ -868,7 +874,7 @@ mod tests {
         let recs = vec![rec("a", "~/Downloads/App/x/1.dat")];
         let mut rt = Runtime::new(State::with(recs, None), view, (1280.0, 760.0), Env { system_dark: true, scale: 1.0 });
         rt.frame(0.0);
-        let (x, y) = rt.find("view-q").unwrap();
+        let (x, y) = rt.find("tab-Questions").expect("Questions is a tab of the Stream");
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(0.1);
@@ -930,11 +936,16 @@ mod today_tests {
     use rune::{Env, Runtime};
 
     #[test]
-    fn it_opens_on_today_and_the_sidebar_leads_somewhere() {
+    fn it_opens_on_today_and_the_places_lead_somewhere() {
         let mut rt = Runtime::new(State::with(vec![], None), view, (1280.0, 800.0), Env { system_dark: true, scale: 1.0 });
         rt.frame(0.0);
         assert_eq!(rt.state.pane, Pane::Today);
-        let (x, y) = rt.find("view-time").expect("the Time item is in the sidebar");
+        let (x, y) = rt.find("nav-library").expect("Library is in the sidebar");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(0.1);
+        assert_eq!(rt.state.pane, Pane::Apps, "Library opens on its first tab");
+        let (x, y) = rt.find("tab-Time").expect("Time is a tab of the Library");
         rt.pointer_down(x, y);
         rt.pointer_up(x, y);
         rt.frame(0.1);
