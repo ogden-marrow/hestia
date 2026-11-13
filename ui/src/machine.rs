@@ -200,7 +200,7 @@ impl State {
         let repo = self.repo_dir.clone();
         self.msg = "capturing this machine…".into();
         self.jobs.start("capture", Some(|s: &mut State| s.reload_machine()),
-            move || super::jobs::run(Command::new("bash").arg(&script).arg(&repo).env("HESTIA_NOW", "1"), "the capture").map(|_| "captured. History shows what changed".to_string()));
+            move || super::jobs::run(Command::new("bash").arg(&script).arg(&repo).env("HESTIA_NOW", "1"), "the capture").map(|_| "captured. Saves shows what changed".to_string()));
     }
     fn add_capture(&mut self) {
         let d = dir(&self.repo_dir);
@@ -243,7 +243,7 @@ pub fn panels(s: &State) -> Vec<El> {
         );
     }
     let left = col().w(240.0).padding(d.gap()).gap(d.gap()).side(&d)
-        .child(text("Machine").font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).py(d.gap() * 0.5))
+        .child(text("Backup").font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).py(d.gap() * 0.5))
         .child(cats);
 
     let cat = s.mach.get(s.mcat);
@@ -269,7 +269,7 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(row().w_full().gap(d.gap()).center_y().px(d.item_px())
             .child(super::questions::button(&d, "m-refresh", "Refresh".into(), false, |s: &mut State| s.reload_machine()))
             .child(super::questions::action(&d, "m-capture", "Back up now", "Backing up…", s.mach.iter().any(|c| c.drift() > 0), s.jobs.running("capture"), |s: &mut State| s.capture_now())))
-        .child(text(if s.msg.is_empty() { "How this computer differs from your last backup. Back up now to save the current state; History shows what changed.".to_string() } else { s.msg.clone() })
+        .child(text(if s.msg.is_empty() { "How this computer differs from your last backup. Back up now to save the current state; Saves shows what changed.".to_string() } else { s.msg.clone() })
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
 

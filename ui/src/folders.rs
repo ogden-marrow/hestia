@@ -437,7 +437,7 @@ pub fn panels(s: &State) -> Vec<El> {
 
     let mut center = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(col().w_full().px(d.item_px()).py(d.gap() * 0.5).gap(d.gap())
-            .child(text("Files").font(style(&d, type_::TITLE)).color(t.text))
+            .child(text("Rules").font(style(&d, type_::TITLE)).color(t.text))
             .child(text("Choose a folder to see what goes in it. Projects and special folders are left alone.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
             .child(heading(&d, "Watched folders"))
             .child(text("New files that land here get sorted. Click one to stop watching it; nothing is moved.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
