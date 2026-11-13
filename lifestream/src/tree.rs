@@ -377,21 +377,36 @@ fn journal_path(stream: &Path) -> PathBuf {
     stream.join("moves.jsonl")
 }
 
-/// One line per file `apply` moved, all sharing one batch id (the time), appended to `<stream>/moves.jsonl`.
-fn journal_batch(stream: &Path, home: &Path, done: &[&Move]) -> Result<()> {
-    if done.is_empty() {
+/// The journal is `<stream>/moves.jsonl`, one JSON object per line; lines that share a `batch` (the time) are undone together.
+/// Three kinds, told apart by `kind` (a line without one is a file move):
+///   file   {"batch","id","from","to"}               `apply` moved a file from `from` to `to` (paths as `~/...`)
+///   dir    {"batch","kind":"dir","from","to"}       `move_dir` renamed a folder
+///   mkdir  {"batch","kind":"mkdir","to"}            `make_dir` created an empty folder
+/// A journal is a file on disk, so undo treats every line as untrusted.
+fn journal_append(stream: &Path, lines: &[serde_json::Value]) -> Result<()> {
+    if lines.is_empty() {
         return Ok(());
     }
-    let batch = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
     let mut body = String::new();
-    for m in done {
-        body.push_str(&serde_json::json!({"batch": batch, "id": m.id, "from": tilde(&m.from, home), "to": tilde(&m.to, home)}).to_string());
+    for l in lines {
+        body.push_str(&l.to_string());
         body.push('\n');
     }
     fs::create_dir_all(stream)?;
     use std::io::Write;
     fs::OpenOptions::new().create(true).append(true).open(journal_path(stream))?.write_all(body.as_bytes())?;
     Ok(())
+}
+
+fn new_batch() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}
+
+/// One line per file `apply` moved, all sharing one batch id.
+fn journal_batch(stream: &Path, home: &Path, done: &[&Move]) -> Result<()> {
+    let batch = new_batch();
+    let lines: Vec<_> = done.iter().map(|m| serde_json::json!({"batch": batch, "id": m.id, "from": tilde(&m.from, home), "to": tilde(&m.to, home)})).collect();
+    journal_append(stream, &lines)
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -417,17 +432,59 @@ pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
     let Some(batch) = lines.last().and_then(|v| v["batch"].as_str()).map(String::from) else { return Ok(UndoReport::default()) };
     let mut recs = load_all(stream)?;
     let mut report = UndoReport::default();
-    let mut restored_lines: Vec<usize> = Vec::new();
+    let mut stream_changed = false;
+    let mut settled: Vec<usize> = Vec::new();
     for (i, v) in lines.iter().enumerate().rev() {
         if v["batch"].as_str() != Some(batch.as_str()) {
             continue;
         }
-        let (Some(id), Some(from_s), Some(to_s)) = (v["id"].as_str(), v["from"].as_str(), v["to"].as_str()) else { continue };
+        let kind = v["kind"].as_str().unwrap_or("file");
+        let (Some(to_s), from_s) = (v["to"].as_str(), v["from"].as_str().unwrap_or("")) else { continue };
         let skip = |why: &str, rep: &mut UndoReport| rep.skipped.push((to_s.to_string(), why.to_string()));
-        let (Some(from), Some(to)) = (under_home(home, from_s), under_home(home, to_s)) else {
+        let Some(to) = under_home(home, to_s) else {
             skip("not a plain path inside your home folder", &mut report);
             continue;
         };
+        if kind == "mkdir" {
+            match fs::symlink_metadata(&to) {
+                Ok(m) if m.file_type().is_dir() => {}
+                Ok(_) => { skip("it is not a plain folder any more", &mut report); continue }
+                Err(_) => { skip("it is no longer there", &mut report); continue }
+            }
+            if real_dirs(home, &to).is_err() {
+                skip("a symlink is on the way to it", &mut report);
+                continue;
+            }
+            // rmdir, never recursive: a folder that gained anything since is the person's now
+            match fs::remove_dir(&to) {
+                Ok(()) => report.restored += 1,
+                Err(e) if e.kind() == ErrorKind::DirectoryNotEmpty => skip("kept: no longer empty", &mut report),
+                Err(e) => { skip(&e.to_string(), &mut report); continue }
+            }
+            settled.push(i); // removed, or deliberately kept: either way there is nothing left to retry
+            continue;
+        }
+        let Some(from) = under_home(home, from_s) else {
+            skip("not a plain path inside your home folder", &mut report);
+            continue;
+        };
+        if kind == "dir" {
+            match fs::symlink_metadata(&to) {
+                Ok(m) if m.file_type().is_dir() => {}
+                Ok(_) => { skip("it is not a plain folder any more", &mut report); continue }
+                Err(_) => { skip("it is no longer there", &mut report); continue }
+            }
+            match rename_dir(home, &to, &from) {
+                Ok(()) => {
+                    report.restored += 1;
+                    settled.push(i);
+                    stream_changed |= retarget(&mut recs, to_s, from_s);
+                }
+                Err(e) => skip(&e.to_string(), &mut report),
+            }
+            continue;
+        }
+        let Some(id) = v["id"].as_str() else { continue };
         match fs::symlink_metadata(&to) {
             Ok(m) if m.file_type().is_file() => {}
             Ok(_) => { skip("it is not a plain file any more", &mut report); continue }
@@ -440,7 +497,8 @@ pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
         match move_file(&to, &from) {
             Ok(()) => {
                 report.restored += 1;
-                restored_lines.push(i);
+                settled.push(i);
+                stream_changed = true;
                 if let Some(r) = recs.iter_mut().find(|r| r.id == id) {
                     if let Some(s) = r.sources.iter_mut().find(|s| s.as_str() == to_s) {
                         *s = from_s.to_string();
@@ -451,14 +509,127 @@ pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
             Err(e) => skip(&e.to_string(), &mut report),
         }
     }
-    if report.restored > 0 {
-        write_all(stream, &recs)?;
-        let keep: String = text.lines().enumerate().filter(|(i, _)| !restored_lines.contains(i)).map(|(_, l)| format!("{l}\n")).collect();
+    if !settled.is_empty() {
+        if stream_changed {
+            write_all(stream, &recs)?;
+        }
+        let keep: String = text.lines().enumerate().filter(|(i, _)| !settled.contains(i)).map(|(_, l)| format!("{l}\n")).collect();
         let tmp = journal_path(stream).with_extension("jsonl.tmp");
         fs::write(&tmp, keep)?;
         fs::rename(&tmp, journal_path(stream))?;
     }
     Ok(report)
+}
+
+/// Every part of `p` below the home folder must be a real folder: a symlink anywhere on the way down could point the
+/// operation somewhere the person never meant (the home folder itself may be reached through a link; below it nothing may).
+fn real_dirs(home: &Path, p: &Path) -> Result<()> {
+    let rel = p.strip_prefix(home).with_context(|| format!("{} is outside your home folder", p.display()))?;
+    let mut cur = home.to_path_buf();
+    for c in rel.components() {
+        cur.push(c);
+        let m = fs::symlink_metadata(&cur).with_context(|| format!("{} does not exist", cur.display()))?;
+        if !m.file_type().is_dir() {
+            bail!("{} is a symlink or not a folder", cur.display());
+        }
+    }
+    Ok(())
+}
+
+/// A folder and everything in it must live on one device: a mount point inside would make the rename fail, so
+/// anything that is not one filesystem is refused.
+fn one_device(root: &Path, dev: u64) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in fs::read_dir(&d).with_context(|| format!("cannot read {}", d.display()))? {
+            let p = e?.path();
+            let m = fs::symlink_metadata(&p)?;
+            if m.file_type().is_dir() {
+                if m.dev() != dev {
+                    bail!("{} is on another disk or a mount point: not moved", p.display());
+                }
+                stack.push(p);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The one way a folder is renamed: both ends real folders (no symlink on the way), the destination does not exist,
+/// the source is not a mount point and holds no other device, and the destination is on the same device. A rename, never
+/// copy and delete. (Linux lets rename replace an EMPTY destination folder in a race; it can never replace one with files.)
+fn rename_dir(home: &Path, src: &Path, dst: &Path) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    if src == home || dst.starts_with(src) {
+        bail!("cannot move {} into itself or move your home folder", src.display());
+    }
+    real_dirs(home, src)?;
+    let parent = dst.parent().context("no destination folder")?;
+    real_dirs(home, parent).context("the destination's folder must already exist")?;
+    if fs::symlink_metadata(dst).is_ok() {
+        bail!("{} already exists: not merging or overwriting", dst.display());
+    }
+    let dev = fs::symlink_metadata(src)?.dev();
+    if fs::symlink_metadata(src.parent().context("no parent")?)?.dev() != dev || fs::symlink_metadata(parent)?.dev() != dev {
+        bail!("{} is a mount point or the destination is on another disk: not moved", src.display());
+    }
+    one_device(src, dev)?;
+    fs::rename(src, dst).with_context(|| format!("moving {} to {}", src.display(), dst.display()))
+}
+
+/// Swap the `old` prefix for `new` in every stream path; says whether anything changed.
+fn retarget(recs: &mut [Record], old: &str, new: &str) -> bool {
+    let mut changed = false;
+    for r in recs {
+        for s in r.sources.iter_mut().chain(r.was.iter_mut()) {
+            if under(s, old) {
+                *s = format!("{new}{}", &s[old.len()..]);
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// Rename a real folder (paths relative to home), journal it so it can be undone, and rewrite every stream path under it.
+/// Refuses what `rename_dir` refuses, hidden or odd paths, a move into itself, and sensitive paths (also a folder that
+/// contains one). The journal line is written only after the rename succeeded.
+pub fn move_dir(home: &Path, from: &str, to: &str, excluded: &[PathBuf], stream: &Path) -> Result<()> {
+    if !rel_ok(from) || !rel_ok(to) {
+        bail!("use visible folders inside your home folder (no hidden folders, no .. or empty parts)");
+    }
+    if under(to, from) {
+        bail!("cannot move a folder into itself");
+    }
+    let (src, dst) = (home.join(from), home.join(to));
+    if excluded.iter().any(|e| src.starts_with(e) || dst.starts_with(e) || e.starts_with(&src)) {
+        bail!("{from} is or holds a sensitive path: not moved");
+    }
+    rename_dir(home, &src, &dst)?;
+    let (old, new) = (format!("~/{from}"), format!("~/{to}"));
+    journal_append(stream, &[serde_json::json!({"batch": new_batch(), "kind": "dir", "from": old, "to": new})])?;
+    let mut recs = load_all(stream)?;
+    if retarget(&mut recs, &old, &new) {
+        write_all(stream, &recs)?;
+    }
+    Ok(())
+}
+
+/// Create exactly one new folder (path relative to home): its parent must already be a real folder, it must not exist,
+/// and it is journaled so undo can remove it again, but only while it is still empty.
+pub fn make_dir(home: &Path, path: &str, stream: &Path) -> Result<()> {
+    if !rel_ok(path) {
+        bail!("use a visible folder inside your home folder (no hidden folders, no .. or empty parts)");
+    }
+    let dir = home.join(path);
+    real_dirs(home, dir.parent().context("no parent folder")?).context("the folder to put it in must already exist")?;
+    match fs::create_dir(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => bail!("{path} already exists"),
+        Err(e) => return Err(e).with_context(|| format!("creating {path}")),
+    }
+    journal_append(stream, &[serde_json::json!({"batch": new_batch(), "kind": "mkdir", "to": format!("~/{path}")})])
 }
 
 /// Rename a real folder (the disk half of a drag and drop) and rewrite every stream path under it.
@@ -478,18 +649,10 @@ pub fn move_on_disk(home: &Path, from: &str, to: &str, excluded: &[PathBuf], str
         fs::create_dir_all(d)?;
     }
     fs::rename(&src, &dst).with_context(|| format!("moving {from} to {to} (same disk only)"))?;
-    let (old, new) = (format!("~/{from}"), format!("~/{to}"));
-    let swap = |s: &mut String| {
-        if under(s, &old) {
-            *s = format!("{new}{}", &s[old.len()..]);
-        }
-    };
     let mut recs = load_all(stream)?;
-    for r in &mut recs {
-        r.sources.iter_mut().for_each(swap);
-        r.was.iter_mut().for_each(swap);
+    if retarget(&mut recs, &format!("~/{from}"), &format!("~/{to}")) {
+        write_all(stream, &recs)?;
     }
-    write_all(stream, &recs)?;
     Ok(())
 }
 
@@ -547,6 +710,32 @@ pub fn cmd_file(tree_path: Option<PathBuf>, stream: &Path, manifest: Option<Path
     }
     if !failed.is_empty() {
         bail!("{} move(s) failed", failed.len());
+    }
+    Ok(())
+}
+
+/// `lifestream folder move FROM TO`. One JSON line, exit 1 if refused:
+/// {"event":"moved","from","to"} or {"event":"failed","kind":"refused","message"}
+pub fn cmd_folder_move(from: &str, to: &str, stream: &Path, manifest: Option<PathBuf>) -> Result<()> {
+    let home = crate::home()?;
+    let res = manifest.or_else(find_manifest).context("cannot find manifest/rules.toml (sensitive-path list); refusing to move folders without it")
+        .and_then(|m| sensitive_paths(&m, &home))
+        .and_then(|excluded| move_dir(&home, from, to, &excluded, stream));
+    folder_event(res, serde_json::json!({"event": "moved", "from": from, "to": to}))
+}
+
+/// `lifestream folder new PATH`: {"event":"created","path"} or the same "failed" event.
+pub fn cmd_folder_new(path: &str, stream: &Path) -> Result<()> {
+    folder_event(make_dir(&crate::home()?, path, stream), serde_json::json!({"event": "created", "path": path}))
+}
+
+fn folder_event(res: Result<()>, ok: serde_json::Value) -> Result<()> {
+    match res {
+        Ok(()) => println!("{ok}"),
+        Err(e) => {
+            println!("{}", serde_json::json!({"event": "failed", "kind": "refused", "message": format!("{e:#}")}));
+            std::process::exit(1);
+        }
     }
     Ok(())
 }
@@ -868,5 +1057,198 @@ mod tests {
         assert_eq!(r.skipped.len(), 4, "{r:?}");
         assert!(h.join("Pictures/Saved/a.png").exists() && !h.join(".ssh/authorized_keys").exists(), "nothing moved outside the rules");
         fs::remove_dir_all(h).unwrap();
+    }
+
+    // ---- folders: move_dir, make_dir and their undo (always under a temp HOME, never the real one) ----
+
+    fn home_box(tag: &str) -> (PathBuf, PathBuf) {
+        let h = sandbox(tag);
+        assert!(h.starts_with(std::env::temp_dir()), "tests only ever touch the temp dir");
+        let h = fs::canonicalize(h).unwrap();
+        (h.clone(), h.join("stream"))
+    }
+
+    #[test]
+    fn move_dir_renames_rewrites_the_stream_and_undo_puts_it_back() {
+        let (h, stream) = home_box("dir1");
+        let id = file(&h, "Documents/Saab/a.bin", b"a");
+        write_all(&stream, &[rec(&id, "document", "~/Documents/Saab/a.bin", 1, "rule", 1.0)]).unwrap();
+        fs::create_dir_all(h.join("Vehicles")).unwrap();
+        move_dir(&h, "Documents/Saab", "Vehicles/Saab", &[], &stream).unwrap();
+        assert!(h.join("Vehicles/Saab/a.bin").exists() && !h.join("Documents/Saab").exists());
+        assert_eq!(load_all(&stream).unwrap()[0].sources, vec!["~/Vehicles/Saab/a.bin".to_string()]);
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!((r.restored, r.skipped.len()), (1, 0), "{r:?}");
+        assert!(h.join("Documents/Saab/a.bin").exists() && !h.join("Vehicles/Saab").exists());
+        assert_eq!(load_all(&stream).unwrap()[0].sources, vec!["~/Documents/Saab/a.bin".to_string()]);
+        assert_eq!(undo_last(&stream, &h).unwrap(), UndoReport::default());
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn move_dir_refusals_leave_everything_in_place() {
+        use std::os::unix::fs::symlink;
+        let (h, stream) = home_box("dir2");
+        file(&h, "Documents/Saab/a.bin", b"a");
+        file(&h, "Taken/keep.bin", b"keep");
+        file(&h, "Documents/Saab/Inner/b.bin", b"b");
+        fs::create_dir_all(h.join("Sensitive/Deep")).unwrap();
+        fs::create_dir_all(h.join(".ssh")).unwrap();
+        fs::create_dir_all(h.join("EmptyDest")).unwrap();
+        symlink(h.join("Documents"), h.join("DocsLink")).unwrap();
+        symlink(h.join("Documents/Saab"), h.join("SaabLink")).unwrap();
+        symlink(h.join("Taken"), h.join("TakenLink")).unwrap();
+        let ex = [h.join("Sensitive/Deep")];
+        for (from, to, why) in [
+            ("Documents/Saab", "Taken", "overwrite of an existing destination"),
+            ("Documents/Saab", "EmptyDest", "replacing an existing empty destination"),
+            ("Documents/Saab", "Nowhere/Saab", "destination parent missing"),
+            ("Documents/Saab", "TakenLink/Saab", "destination parent is a symlink"),
+            ("SaabLink", "Moved", "source is a symlink"),
+            ("DocsLink/Saab", "Moved", "an ancestor of the source is a symlink"),
+            ("Documents/Saab", "DocsLink/Moved", "an ancestor of the destination is a symlink"),
+            ("Documents/Saab", ".hidden", "hidden destination"),
+            ("Documents/Saab", ".ssh/Saab", "hidden destination folder"),
+            ("Documents/Saab", "Documents/Saab", "onto itself"),
+            ("Documents/Saab", "Documents/Saab/Inner/Saab", "into its own descendant"),
+            ("Documents/Saab", "Documents/Saab/Inner", "into itself"),
+            ("Documents", "Documents/Saab/Inner/D", "an ancestor into its own descendant"),
+            ("Documents/Saab", "../Escaped", "outside the home folder"),
+            ("Documents/Saab", "/tmp/Escaped", "absolute path"),
+            ("", "Moved", "the home folder itself"),
+            (".", "Moved", "the home folder as a dot"),
+            (".ssh", "Moved", "a hidden source"),
+            ("Sensitive", "Moved", "a folder that holds a sensitive path"),
+            ("Documents/Saab", "Sensitive/Deep/Saab", "into a sensitive path"),
+            ("Missing", "Moved", "a source that is not there"),
+            ("Taken/keep.bin", "Moved", "a file, not a folder"),
+        ] {
+            assert!(move_dir(&h, from, to, &ex, &stream).is_err(), "{why}: {from} -> {to}");
+        }
+        assert!(h.join("Documents/Saab/a.bin").exists() && h.join("Documents/Saab/Inner/b.bin").exists());
+        assert_eq!(fs::read(h.join("Taken/keep.bin")).unwrap(), b"keep");
+        assert!(h.join("EmptyDest").is_dir() && !h.join("EmptyDest/a.bin").exists());
+        assert!(!h.join("Moved").exists() && !h.join("Documents/Saab/Inner/Saab").exists());
+        assert!(!journal_path(&stream).exists(), "a refusal writes nothing to the journal");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn a_folder_holding_another_device_is_refused() {
+        use std::os::unix::fs::MetadataExt;
+        let (h, _) = home_box("dev");
+        file(&h, "A/B/C/x", b"x");
+        let dev = fs::metadata(h.join("A")).unwrap().dev();
+        assert!(one_device(&h.join("A"), dev).is_ok());
+        assert!(one_device(&h.join("A"), dev + 1).is_err(), "a different device anywhere below fails closed");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn make_dir_creates_one_folder_and_refuses_the_rest() {
+        use std::os::unix::fs::symlink;
+        let (h, stream) = home_box("mk1");
+        fs::create_dir_all(h.join("Documents")).unwrap();
+        symlink(h.join("Documents"), h.join("Link")).unwrap();
+        make_dir(&h, "Documents/New", &stream).unwrap();
+        assert!(h.join("Documents/New").is_dir());
+        for (p, why) in [
+            ("Documents/New", "exists"),
+            ("Documents", "exists"),
+            ("Link", "exists as a symlink"),
+            ("Link/Sub", "symlink parent"),
+            ("Nope/Sub", "parent missing"),
+            (".hidden", "hidden"),
+            ("Documents/.hidden", "hidden"),
+            ("../Out", "outside home"),
+            ("/tmp/Out", "absolute"),
+            ("", "empty"),
+            ("a//b", "empty part"),
+        ] {
+            assert!(make_dir(&h, p, &stream).is_err(), "{why}: {p}");
+        }
+        assert!(!h.join("Documents/.hidden").exists() && !h.join("Nope").exists() && !h.join("Documents/Sub").exists());
+        assert_eq!(fs::read_to_string(journal_path(&stream)).unwrap().lines().count(), 1, "only the success is journaled");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_of_mkdir_removes_an_empty_folder_and_keeps_one_that_gained_a_file() {
+        let (h, stream) = home_box("mk2");
+        make_dir(&h, "Fresh", &stream).unwrap();
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!((r.restored, r.skipped.len()), (1, 0), "{r:?}");
+        assert!(!h.join("Fresh").exists());
+        make_dir(&h, "Used", &stream).unwrap();
+        fs::write(h.join("Used/mine.txt"), b"mine").unwrap();
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!(r.restored, 0);
+        assert_eq!(r.skipped, vec![("~/Used".to_string(), "kept: no longer empty".to_string())]);
+        assert_eq!(fs::read(h.join("Used/mine.txt")).unwrap(), b"mine");
+        assert_eq!(undo_last(&stream, &h).unwrap(), UndoReport::default(), "a kept folder is settled, not retried forever");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_of_a_folder_move_never_overwrites_and_can_be_retried() {
+        let (h, stream) = home_box("dir3");
+        file(&h, "Documents/Saab/a.bin", b"a");
+        move_dir(&h, "Documents/Saab", "Saab", &[], &stream).unwrap();
+        file(&h, "Documents/Saab/other.bin", b"made since");
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!(r.restored, 0);
+        assert!(r.skipped[0].1.contains("already exists"), "{r:?}");
+        assert!(h.join("Saab/a.bin").exists() && h.join("Documents/Saab/other.bin").exists());
+        fs::remove_dir_all(h.join("Documents/Saab")).unwrap();
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1, "asking again retries");
+        assert!(h.join("Documents/Saab/a.bin").exists());
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_takes_back_mixed_kinds_one_batch_at_a_time() {
+        let (h, stream) = home_box("mix");
+        make_dir(&h, "Box", &stream).unwrap();
+        move_dir(&h, "Box", "Crate", &[], &stream).unwrap();
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1);
+        assert!(h.join("Box").is_dir() && !h.join("Crate").exists());
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1);
+        assert!(!h.join("Box").exists());
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_of_folders_treats_the_journal_as_untrusted() {
+        use std::os::unix::fs::symlink;
+        let (h, stream) = home_box("tamper");
+        fs::create_dir_all(h.join(".ssh/keys")).unwrap();
+        fs::create_dir_all(h.join("Real/Empty")).unwrap();
+        symlink(h.join("Real"), h.join("Link")).unwrap();
+        let outside = std::env::temp_dir().join(format!("ls-outside-{}", std::process::id()));
+        fs::create_dir_all(&outside).unwrap();
+        let batch = "9999-12-31T00:00:00.000000000Z";
+        let out_name = outside.file_name().unwrap().to_str().unwrap();
+        let mut evil = String::new();
+        for l in [
+            serde_json::json!({"batch": batch, "kind": "mkdir", "to": "/etc"}),
+            serde_json::json!({"batch": batch, "kind": "mkdir", "to": "~/.ssh/keys"}),
+            serde_json::json!({"batch": batch, "kind": "mkdir", "to": "~/Real/../.ssh/keys"}),
+            serde_json::json!({"batch": batch, "kind": "mkdir", "to": format!("~/../{out_name}")}),
+            serde_json::json!({"batch": batch, "kind": "mkdir", "to": "~/Link/Empty"}),
+            serde_json::json!({"batch": batch, "kind": "dir", "from": "~/.ssh/new", "to": "~/Real/Empty"}),
+            serde_json::json!({"batch": batch, "kind": "dir", "from": "/etc/x", "to": "~/Real/Empty"}),
+            serde_json::json!({"batch": batch, "kind": "dir", "from": "~/Moved", "to": "~/Link/Empty"}),
+            serde_json::json!({"batch": batch, "kind": "dir", "from": "~/Moved", "to": "/etc"}),
+        ] {
+            evil.push_str(&format!("{l}\n"));
+        }
+        fs::create_dir_all(&stream).unwrap();
+        fs::write(journal_path(&stream), evil).unwrap();
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!(r.restored, 0, "{r:?}");
+        assert_eq!(r.skipped.len(), 9, "{r:?}");
+        assert!(h.join(".ssh/keys").is_dir() && h.join("Real/Empty").is_dir() && outside.is_dir() && !h.join(".ssh/new").exists() && !h.join("Moved").exists());
+        fs::remove_dir_all(h).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }
