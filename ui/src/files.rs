@@ -2,9 +2,7 @@
 //! the file), sizes and dates, plus a fingerprint so the screen can notice changes.
 
 use lifestream::Record;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -68,40 +66,12 @@ pub fn list(dir: &Path, kinds: &HashMap<String, String>, hidden: bool) -> Vec<En
     out
 }
 
-/// Changes whenever something in the folder is added, removed, renamed or modified.
-pub fn fingerprint(dir: &Path) -> u64 {
-    let mut h = DefaultHasher::new();
-    let mut names: Vec<(String, u64, Option<SystemTime>)> = std::fs::read_dir(dir).into_iter().flatten().flatten()
-        .filter_map(|e| {
-            let md = e.metadata().ok()?;
-            Some((e.file_name().to_string_lossy().into_owned(), md.len(), md.modified().ok()))
-        })
-        .collect();
-    names.sort_by(|a, b| a.0.cmp(&b.0));
-    names.hash(&mut h);
-    h.finish()
-}
-
-/// Creates an empty dated markdown note in `dir` (never overwrites).
-pub fn new_note(dir: &Path) -> std::io::Result<PathBuf> {
-    let base = chrono::Local::now().format("Note %Y-%m-%d %H%M").to_string();
-    for n in 0..100 {
-        let name = if n == 0 { format!("{base}.md") } else { format!("{base} ({n}).md") };
-        let p = dir.join(name);
-        if !p.exists() {
-            std::fs::write(&p, "# \n")?;
-            return Ok(p);
-        }
-    }
-    Err(std::io::Error::other("too many notes in this minute"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn lists_folders_first_hides_dotfiles_and_notices_changes() {
+    fn lists_folders_first_and_hides_dotfiles() {
         let d = std::env::temp_dir().join(format!("ls-files-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("zdir")).unwrap();
@@ -114,13 +84,6 @@ mod tests {
         assert_eq!(l.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["zdir", "a.txt", "b.txt"]);
         assert_eq!(l[1].kind, "document/text");
         assert_eq!(l[2].kind, "not in the stream yet");
-        let before = fingerprint(&d);
-        assert_eq!(before, fingerprint(&d), "stable when nothing changes");
-        let note = new_note(&d).unwrap();
-        assert!(note.exists());
-        assert_ne!(before, fingerprint(&d), "a new file changes the fingerprint");
-        let again = new_note(&d).unwrap();
-        assert_ne!(note, again, "never overwrites");
         std::fs::remove_dir_all(d).unwrap();
     }
 }
