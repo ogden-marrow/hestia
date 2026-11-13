@@ -21,7 +21,7 @@ pub struct App {
     pub path: PathBuf,
 }
 
-fn dirs() -> Vec<PathBuf> {
+pub fn dirs() -> Vec<PathBuf> {
     let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
     vec![
         home.join(".local/share/applications"),

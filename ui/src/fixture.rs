@@ -59,6 +59,21 @@ pub fn records(pending_folders: bool) -> Vec<Record> {
     v
 }
 
+/// Synthetic applications for snapshots: no icons from this machine, no real names.
+pub fn apps() -> Vec<crate::apps::Item> {
+    use crate::apps::{Item, Open, Source};
+    let mk = |name: &str, about: &str, group: &'static str, game: bool, source: Source| Item {
+        id: name.to_lowercase(), name: name.into(), about: about.into(), group, game, source, open: Open::Steam(1), icon: None, keywords: String::new(), last_played: None,
+    };
+    vec![
+        mk("Calculator", "Do arithmetic", "Utilities", false, Source::Native), mk("Files", "Browse your files", "Utilities", false, Source::Native),
+        mk("Firefox", "Browse the web", "Internet", false, Source::Snap), mk("Image Editor", "Edit pictures", "Graphics", false, Source::Flatpak),
+        mk("Music Player", "Play your music", "Media", false, Source::Flatpak), mk("Text Editor", "Edit text files", "Office", false, Source::Native),
+        mk("Terminal", "Use the command line", "Development", false, Source::Native), mk("Lantern Keep", "Steam game", "Games", true, Source::Steam),
+        mk("Orbit Garden", "Steam game", "Games", true, Source::Steam), mk("Chess", "Play chess", "Games", true, Source::Native),
+    ]
+}
+
 /// Replace everything the live machine would supply with the fixture.
 pub fn apply(s: &mut State, pending_folders: bool) {
     s.settings = crate::settings::Settings::default();
