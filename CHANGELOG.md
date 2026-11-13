@@ -8,6 +8,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **The standalone launcher window** (`hestia --launch`, its toggle and sizing): the Shell extension owns Alt+Space. Search inside the app and `hestia --serve` (the engine behind the Shell bar) are unchanged; the desktop entry's "Search…" action opens the app's Search screen.
 
 ### Added
+- **Applications** (Explore): every installed app and game in one list with its icon: desktop entries (native, Flatpak, Snap, your own), Steam shortcuts and installed Steam games from Steam's own manifests. Search, All / Games / Apps, group by kind or source, sort by name or most used; click to open.
 - **A calm backup status**: the header says "Backed up 12 minutes ago" on every screen; when it is not true, Today shows "Your backup needs you" with one plain action (back up now, or sign in).
 - **Undo for filing** (engine): every batch of moves is written down; `lifestream file --undo` puts the last batch back, one file at
   a time, never overwriting, never leaving your home folder, and leaves what it could not restore to be retried.
