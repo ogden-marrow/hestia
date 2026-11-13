@@ -84,7 +84,6 @@ impl State {
         self.tsel = i;
         self.msg.clear();
         if let Some(f) = self.tree.folders.get(i).cloned() {
-            self.go(super::files::home().join(&f.path));
             self.f_path = TextEdit::new(f.path.rsplit('/').next().unwrap_or(&f.path));
             self.f_kind = TextEdit::new(csv(&f.kind));
             self.f_tag = TextEdit::new(csv(&f.tag));
@@ -472,7 +471,6 @@ pub fn panels(s: &State) -> Vec<El> {
                 .child(button(&d, "f-move", "Move to another folder…".into(), false, |s: &mut State| s.moving = Some(s.tsel)))
                 .child(button(&d, "f-delete", "Stop using this folder".into(), false, |s: &mut State| s.delete_folder()))));
     }
-    body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "Contents")).child(super::contents::list(s)));
     body = body.child(col().w_full().gap(d.gap())
         .child(heading(&d, "Add a folder"))
         .child(field(&d, "f-new", &s.f_new, "Documents/Taxes ↵", |s: &mut State| &mut s.f_new).on_submit(|s: &mut State, _: &mut Tx| s.add_folder())));

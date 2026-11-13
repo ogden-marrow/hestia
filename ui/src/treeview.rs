@@ -18,6 +18,8 @@ pub struct Row {
     pub is_dir: bool,
     pub open: bool,
     pub size: u64,
+    pub modified: String,
+    pub kind: String,
 }
 
 /// The visible rows: the root's children, and the children of every folder in `open`, depth first.
@@ -25,7 +27,7 @@ pub fn rows(root: &Path, open: &HashSet<PathBuf>, kinds: &HashMap<String, String
     fn walk(dir: &Path, depth: usize, open: &HashSet<PathBuf>, kinds: &HashMap<String, String>, hidden: bool, out: &mut Vec<Row>) {
         for e in files::list(dir, kinds, hidden) {
             let is_open = e.is_dir && open.contains(&e.path);
-            out.push(Row { path: e.path.clone(), name: e.name, depth, is_dir: e.is_dir, open: is_open, size: e.size });
+            out.push(Row { path: e.path.clone(), name: e.name, depth, is_dir: e.is_dir, open: is_open, size: e.size, modified: e.modified, kind: e.kind });
             if is_open && depth < 12 {
                 walk(&e.path, depth + 1, open, kinds, hidden, out);
             }
@@ -169,6 +171,27 @@ impl State {
         }
     }
 
+    /// Teach Hestia what kind this file is (a human answer, which later filings follow).
+    pub(crate) fn tree_label_file(&mut self) {
+        let text = self.tree_kind.text.trim().to_string();
+        let mut parts = text.split_whitespace();
+        let Some(kind) = parts.next() else { return };
+        let tags: Vec<String> = parts.map(String::from).collect();
+        let Some(path) = self.tree_sel.as_ref().map(|p| tilde(p)) else { return };
+        let Some(id) = self.recs.iter().find(|r| r.sources.contains(&path)).map(|r| r.id.clone()) else { return };
+        let Some(stream) = self.stream.clone() else { return };
+        match lifestream::teach(&stream, &[id], kind, &tags) {
+            Ok(recs) => {
+                self.recs = recs;
+                self.refresh_derived();
+                self.tree_kind.clear();
+                self.msg = format!("{} is now filed as {}.", path.rsplit('/').next().unwrap_or(&path), kind.to_lowercase());
+                self.reload_tree();
+            }
+            Err(e) => self.msg = format!("Not saved: {e}"),
+        }
+    }
+
     pub(crate) fn tree_rename(&mut self) {
         let Some(from) = self.tree_sel.clone() else { return };
         match valid_name(&self.tree_rename.text) {
@@ -269,7 +292,7 @@ pub fn panel(s: &State) -> El {
             detail = detail
                 .child(text(r.name.clone()).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink())
                 .child(text(tilde(&r.path)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).wrap_anywhere().shrink())
-                .child(text(if r.is_dir { "Folder".to_string() } else { format!("File · {}", lifestream::human(r.size)) }).font(style(&d, type_::LABEL)).color(t.text_secondary));
+                .child(text(if r.is_dir { "Folder".to_string() } else { format!("{} · {}", crate::kinds::label(&r.kind), lifestream::human(r.size)) }).font(style(&d, type_::LABEL)).color(t.text_secondary));
             if r.is_dir {
                 detail = detail
                     .child(super::field(&d, "tv-name", &s.tree_rename, "New name", |s: &mut State| &mut s.tree_rename).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_rename()))
@@ -286,10 +309,14 @@ pub fn panel(s: &State) -> El {
                 }
             } else {
                 detail = detail
+                    .child(text(format!("Modified {}", r.modified)).font(style(&d, type_::LABEL)).color(t.text_secondary))
                     .child(super::field(&d, "tv-name", &s.tree_rename, "New name", |s: &mut State| &mut s.tree_rename).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_rename()))
                     .child(row().w_full().gap(d.gap()).flex_wrap()
                         .child(crate::questions::button(&d, "tv-rename", "Rename".into(), false, |s: &mut State| s.tree_rename()))
                         .child(crate::questions::button(&d, "tv-move", "Move to…".into(), false, { let p = r.path.clone(); move |s: &mut State| { s.tree_moving = Some(p.clone()); s.msg.clear() } })));
+                if s.recs.iter().any(|x| x.sources.contains(&tilde(&r.path))) {
+                    detail = detail.child(super::field(&d, "tv-kind", &s.tree_kind, "Change its kind, like document/manual", |s: &mut State| &mut s.tree_kind).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_label_file()));
+                }
             }
         }
         None => detail = detail.child(text("Select a file or folder.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary)),
