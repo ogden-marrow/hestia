@@ -50,7 +50,7 @@ mutate "deny-list is not applied inside captured folders"  packaging/libexec/cap
 mutate "a secret line is left in a shell file"             packaging/libexec/watch.sh 'sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f"' 'true' bash tests/watcher.sh
 mutate "capture keeps secret-named files whole"            packaging/libexec/watch.sh 'for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)); done' 'true' bash tests/watcher.sh
 mutate "uninstall keeps the clipboard history"             uninstall.sh 'rm -f "$share/hestia/clipboard.jsonl"' 'true' bash tests/uninstall.sh
-mutate "bootstrap restores code that runs by itself"       packaging/libexec/bootstrap.sh 'if is_executable_config "$name/" && [ "$EXEC" != 1 ]; then review+=("config/$name"); continue; fi' 'true' bash tests/bootstrap.sh
+mutate "bootstrap restores code that runs by itself"       packaging/libexec/bootstrap.sh 'if is_executable_config "$rel" && [ "$EXEC" != 1 ]; then review+=("$kind/$rel"); continue; fi' 'true' bash tests/bootstrap.sh
 
 echo; echo "killed $killed, survived $survived"
 [ "$survived" = 0 ]
