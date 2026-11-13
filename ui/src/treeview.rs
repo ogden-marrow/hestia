@@ -61,9 +61,6 @@ pub fn refuse(from: &Path, to: &Path, home: &Path) -> Option<String> {
     if lifestream::deny::capture_refused(&rf.to_string_lossy()) || lifestream::deny::capture_refused(&rt.to_string_lossy()) {
         return Some("That place holds something private, so Hestia does not move things in or out of it.".into());
     }
-    if from.is_dir() {
-        return Some("Moving whole folders is not available from here yet.".into());
-    }
     if to.exists() {
         return Some(format!("{} already exists there. Nothing was overwritten.", to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
     }
@@ -103,11 +100,14 @@ impl State {
         self.msg.clear();
     }
 
-    /// Move one file through the engine's mover, so it is journaled and Undo can put it back.
+    /// Move a file or folder through the engine's journaled mover, so Undo can put it back.
     fn tree_move(&mut self, from: &Path, to: &Path) {
         if let Some(why) = refuse(from, to, &home()) {
             self.msg = why;
             return;
+        }
+        if from.is_dir() {
+            return self.tree_move_dir(from, to);
         }
         let Some(stream) = self.stream.clone() else { self.msg = "There is no stream to record the move in.".into(); return };
         let id = self.recs.iter().find(|r| r.sources.iter().any(|x| *x == tilde(from))).map(|r| r.id.clone()).unwrap_or_default();
@@ -124,6 +124,48 @@ impl State {
             }
             Ok((_, failed)) => self.msg = failed.first().cloned().unwrap_or_else(|| "Nothing was moved.".into()),
             Err(e) => self.msg = format!("Couldn't move it: {e}"),
+        }
+    }
+
+    /// A folder moves together with the rules that name it (if any), through the same journaled call.
+    fn tree_move_dir(&mut self, from: &Path, to: &Path) {
+        let h = home();
+        let (Ok(rf), Ok(rt)) = (from.strip_prefix(&h), to.strip_prefix(&h)) else { return };
+        let (rf, rt) = (rf.to_string_lossy().into_owned(), rt.to_string_lossy().into_owned());
+        let ruled = self.tree.folders.iter().any(|f| f.path == rf || f.path.starts_with(&format!("{rf}/")));
+        let ok = if ruled {
+            self.apply_move(&rf, &rt)
+        } else {
+            let (Some(stream), excluded) = (self.stream.clone(), lifestream::tree::excluded(&self.repo_dir).unwrap_or_default()) else { self.msg = "There is no stream to record the move in.".into(); return };
+            match lifestream::tree::ensure_parents(&h, &rt, &stream).and_then(|()| lifestream::tree::move_dir(&h, &rf, &rt, &excluded, &stream)) {
+                Ok(()) => { self.recs = lifestream::load_all(&stream).unwrap_or_default(); self.refresh_derived(); self.tree_undoable = true; self.msg = format!("Moved ~/{rf} to ~/{rt}."); true }
+                Err(e) => { self.msg = format!("Couldn't move it: {e:#}"); false }
+            }
+        };
+        if ok {
+            self.tree_open.insert(to.to_path_buf());
+            self.tree_sel = Some(to.to_path_buf());
+            self.reload_tree();
+        }
+    }
+
+    /// Make a new folder inside the selected folder (or the home folder), journaled so Undo can remove it.
+    pub(crate) fn tree_new_folder(&mut self) {
+        let h = home();
+        let parent = self.tree_sel.clone().filter(|p| p.is_dir()).unwrap_or_else(|| h.clone());
+        let name = match valid_name(&self.tree_new.text) { Ok(n) => n, Err(why) => { self.msg = why; return } };
+        let rel = parent.join(&name).strip_prefix(&h).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        if rel.is_empty() { return }
+        let Some(stream) = self.stream.clone() else { self.msg = "There is no stream to record it in.".into(); return };
+        match lifestream::tree::make_dir(&h, &rel, &stream) {
+            Ok(()) => {
+                self.tree_open.insert(parent);
+                self.tree_new.clear();
+                self.tree_undoable = true;
+                self.msg = format!("Made the folder ~/{rel}.");
+                self.reload_tree();
+            }
+            Err(e) => self.msg = format!("Couldn't make it: {e:#}"),
         }
     }
 
@@ -181,19 +223,25 @@ pub fn panel(s: &State) -> El {
     let mut list = col().w_full().gap(1.0);
     for r in &s.tree_rows {
         let on = sel.as_deref() == Some(r.path.as_path());
-        let target = r.is_dir && moving.is_some();
+        let hovered = s.tree_hover.as_deref() == Some(r.path.as_path());
+        let target = (r.is_dir && moving.is_some()) || hovered;
         let p = r.path.clone();
         let icon = rune::icon(if r.is_dir { &crate::icons::FOLDER } else { &crate::icons::DOC }, d.size(16.0)).color(if r.is_dir { d.accent_color() } else { t.text_secondary });
-        list = list.child(
-            row().key(format!("tr-{}", r.path.display())).w_full().h(d.row_h()).pl(d.item_px() + r.depth as f32 * d.size(18.0)).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
+        let mut row_el = row().key(format!("tr-{}", r.path.display())).w_full().h(d.row_h()).pl(d.item_px() + r.depth as f32 * d.size(18.0)).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
                 .border(1.0, if target { d.accent_color().alpha(0.45) } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { if s.tree_moving.is_some() { let d = if p.is_dir() { p.clone() } else { p.parent().map(Path::to_path_buf).unwrap_or_default() }; s.tree_drop(&d) } else { s.tree_select(p.clone()) } })
                 .child(chevron(&d, r))
                 .child(icon)
                 .child(text(r.name.clone()).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-                .child(text(if r.is_dir { String::new() } else { lifestream::human(r.size) }).font(style(&d, type_::LABEL)).color(t.text_secondary)),
-        );
+                .child(text(if r.is_dir { String::new() } else { lifestream::human(r.size) }).font(style(&d, type_::LABEL)).color(t.text_secondary));
+        if r.is_dir {
+            let (dir, dir2) = (r.path.clone(), r.path.clone());
+            row_el = row_el
+                .on_drop_files(move |s: &mut State, files: &[PathBuf], _| { s.tree_hover = None; for f in files { let to = dir.join(f.file_name().unwrap_or_default()); s.tree_move(f, &to); } })
+                .on_drop_hover(move |s: &mut State, over, _| s.tree_hover = over.then(|| dir2.clone()));
+        }
+        list = list.child(row_el);
     }
     if s.tree_rows.is_empty() {
         list = list.child(text("Nothing to show in this folder.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).py(d.pad()));
@@ -202,10 +250,15 @@ pub fn panel(s: &State) -> El {
     let mut center = col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.gap()).panel(&d)
         .child(col().w_full().gap(2.0)
             .child(text("Folders").font(style(&d, type_::TITLE)).color(t.text))
-            .child(text("Your home folder. Rename or move a file; Undo puts the last move back. Nothing is ever deleted.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()))
+            .child(text("Your home folder. Rename, move or add; Undo puts the last change back. Nothing is ever deleted.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()))
         .child(crumb_row);
     if let Some(b) = banner {
         center = center.child(b);
+    }
+    if s.tree_undoable && !s.msg.is_empty() {
+        center = center.child(row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
+            .child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0).wrap_anywhere())
+            .child(crate::questions::button(&d, "tv-undo", "Undo".into(), false, |s: &mut State| { s.tree_undoable = false; s.undo_filing() })));
     }
     let center = center.child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(list));
 
@@ -218,6 +271,13 @@ pub fn panel(s: &State) -> El {
                 .child(text(tilde(&r.path)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).wrap_anywhere().shrink())
                 .child(text(if r.is_dir { "Folder".to_string() } else { format!("File · {}", lifestream::human(r.size)) }).font(style(&d, type_::LABEL)).color(t.text_secondary));
             if r.is_dir {
+                detail = detail
+                    .child(super::field(&d, "tv-name", &s.tree_rename, "New name", |s: &mut State| &mut s.tree_rename).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_rename()))
+                    .child(row().w_full().gap(d.gap()).flex_wrap()
+                        .child(crate::questions::button(&d, "tv-rename", "Rename".into(), false, |s: &mut State| s.tree_rename()))
+                        .child(crate::questions::button(&d, "tv-move", "Move to…".into(), false, { let p = r.path.clone(); move |s: &mut State| { s.tree_moving = Some(p.clone()); s.msg.clear() } })))
+                    .child(super::field(&d, "tv-new", &s.tree_new, "New folder inside", |s: &mut State| &mut s.tree_new).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_new_folder()))
+                    .child(row().child(crate::questions::button(&d, "tv-newbtn", "Make folder".into(), false, |s: &mut State| s.tree_new_folder())));
                 if planned > 0 {
                     detail = detail.child(text(format!("{} would be filed from here tonight.", crate::today::count(planned, "file", "files"))).font(style(&d, type_::LABEL)).color(t.text).wrap_anywhere().shrink())
                         .child(row().child(crate::questions::button(&d, "tv-review", "Review in Files".into(), false, |s: &mut State| { s.pane = super::Pane::Files; s.open_files() })));
@@ -228,14 +288,11 @@ pub fn panel(s: &State) -> El {
                 detail = detail
                     .child(super::field(&d, "tv-name", &s.tree_rename, "New name", |s: &mut State| &mut s.tree_rename).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_rename()))
                     .child(row().w_full().gap(d.gap()).flex_wrap()
-                        .child(crate::questions::button(&d, "tv-rename", "Rename".into(), true, |s: &mut State| s.tree_rename()))
+                        .child(crate::questions::button(&d, "tv-rename", "Rename".into(), false, |s: &mut State| s.tree_rename()))
                         .child(crate::questions::button(&d, "tv-move", "Move to…".into(), false, { let p = r.path.clone(); move |s: &mut State| { s.tree_moving = Some(p.clone()); s.msg.clear() } })));
             }
         }
         None => detail = detail.child(text("Select a file or folder.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary)),
-    }
-    if s.tree_undoable {
-        detail = detail.child(row().child(crate::questions::button(&d, "tv-undo", "Undo last move".into(), false, |s: &mut State| { s.tree_undoable = false; s.undo_filing() })));
     }
     vec![center, detail].into_iter().fold(row().grow(1.0).min_w(0.0).min_h(0.0), |r, c| r.child(c))
 }
@@ -284,7 +341,7 @@ mod tests {
         assert!(refuse(&home.join("a.txt"), &home.join(".cache/a.txt"), &home).is_some());
         assert!(refuse(&home.join("a.txt"), &home.join(".ssh/a.txt"), &home).is_some());
         assert!(refuse(&home.join("a.txt"), &home.join("b.txt"), &home).is_some());
-        assert!(refuse(&home.join("dir"), &home.join("dir2"), &home).is_some());
+        assert!(refuse(&home.join("dir"), &home.join("dir2"), &home).is_none(), "folders are allowed; the engine checks the rest");
         assert!(refuse(&home.join("a.txt"), &home.join("dir/a.txt"), &home).is_none());
         let _ = std::fs::remove_dir_all(&home);
     }

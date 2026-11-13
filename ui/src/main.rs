@@ -94,7 +94,9 @@ struct State {
     tree_sel: Option<PathBuf>,
     tree_moving: Option<PathBuf>,
     tree_rename: TextEdit,
+    tree_new: TextEdit,
     tree_undoable: bool,
+    tree_hover: Option<PathBuf>,
     app_q: TextEdit,
     app_show: usize,
     app_sort: usize,
@@ -258,7 +260,7 @@ impl State {
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
             design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), flow_return: None, account_user: None, dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
-            ask: TextEdit::new(""), library: vec![], tree_rows: vec![], tree_open: Default::default(), tree_sel: None, tree_moving: None, tree_rename: TextEdit::new(""), tree_undoable: false, app_q: TextEdit::new(""), app_show: 0, app_sort: 0, teach: TextEdit::new(""), kinds_open: false, ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
+            ask: TextEdit::new(""), library: vec![], tree_rows: vec![], tree_open: Default::default(), tree_sel: None, tree_moving: None, tree_rename: TextEdit::new(""), tree_new: TextEdit::new(""), tree_undoable: false, tree_hover: None, app_q: TextEdit::new(""), app_show: 0, app_sort: 0, teach: TextEdit::new(""), kinds_open: false, ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), backup: backup::Verdict::Unknown, backup_stamp: String::new(), watch_seen: None, commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false, last_filed: 0, undo_lines: vec![], undo_inbox: Default::default(),
             f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), f_filekind: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
@@ -816,6 +818,7 @@ fn main() {
         scenes: &[
             ("today", |s| scene(s, Pane::Today)),
             ("folders", |s| { let h = files::home(); s.tree_open.insert(h.join("Documents")); s.tree_open.insert(h.join("Documents/Taxes")); s.reload_tree(); s.tree_select(h.join("Documents/notes.txt")); scene(s, Pane::Folders) }),
+            ("folders-dir", |s| { let h = files::home(); s.tree_open.insert(h.join("Documents")); s.tree_open.insert(h.join("Documents/Taxes")); s.reload_tree(); s.tree_select(h.join("Documents/Taxes")); s.tree_undoable = true; s.msg = "Moved ~/Documents/receipts to ~/Documents/Taxes.".into(); scene(s, Pane::Folders) }),
             ("apps", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } wait_icons(s); scene(s, Pane::Apps) }),
             ("apps-games", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } s.app_show = 1; wait_icons(s); scene(s, Pane::Apps) }),
             ("questions", |s| scene(s, Pane::Questions)),
