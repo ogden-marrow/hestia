@@ -262,7 +262,7 @@ pub fn panels(s: &State) -> Vec<El> {
         }
     }
     if cat.map(|c| c.items.is_empty()).unwrap_or(true) {
-        list = list.child(text("Nothing here yet. Add a file or folder on the right, or back up now.").font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).py(d.gap()).wrap_anywhere().shrink());
+        list = list.child(text("Nothing here yet. Add a file or folder below, or back up now.").font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).py(d.gap()).wrap_anywhere().shrink());
     }
     let middle = col().grow(1.0).shrink().min_w(270.0).padding(d.gap()).gap(d.gap()).panel(&d)
         .child(text(cat.map(|c| c.name).unwrap_or("")).font(style(&d, type_::TITLE)).color(t.text).px(d.item_px()).wrap_anywhere().shrink())
@@ -271,9 +271,8 @@ pub fn panels(s: &State) -> Vec<El> {
             .child(super::questions::action(&d, "m-capture", "Back up now", "Backing up…", s.mach.iter().any(|c| c.drift() > 0), s.jobs.running("capture"), |s: &mut State| s.capture_now())))
         .child(text(if s.msg.is_empty() { "How this computer differs from your last backup. Back up now to save the current state; Saves shows what changed.".to_string() } else { s.msg.clone() })
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
-        .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
+    ;
 
-    let mut detail = col().w(280.0).shrink().min_w(200.0).padding(d.pad()).gap(d.pad()).panel(&d);
     let mut body = col().w_full().shrink().min_w(0.0).gap(d.pad());
     if let Some(it) = cat.and_then(|c| c.items.get(s.mit)) {
         body = body.child(col().w_full().gap(4.0)
@@ -299,8 +298,9 @@ pub fn panels(s: &State) -> Vec<El> {
             .child(super::field(&d, "f-cap", &s.f_cap, "A path, like ~/.config/kitty", |s: &mut State| &mut s.f_cap).on_submit(|s: &mut State, _: &mut Tx| s.add_capture()))
             .child(text("For your safety, Hestia never copies anything that looks like a password, a key, or private browser or mail data.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
     }
-    detail = detail.child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body));
-    vec![left, middle, detail]
+    // two panes: the categories, and one column with the list, what changed in the chosen item, and the add box
+    let right = middle.child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).gap(d.pad()).child(list).child(body));
+    vec![left, right]
 }
 
 #[cfg(test)]
