@@ -20,27 +20,15 @@ fn nav<F: Fn(&mut State) + 'static>(d: &Design, key: &str, glyph: Option<&'stati
         .child(text(badge).font(style(d, type_::LABEL)).color(t.text_secondary))
 }
 
-fn heading(d: &Design, label: &str) -> El {
-    text(label.to_string()).font(style(d, type_::SECTION)).color(d.theme().text_secondary).px(d.gap()).py(d.gap() * 0.6)
-}
-
 pub fn panel(s: &State) -> El {
     let d = s.design;
-    let p = s.pane;
+    let here = crate::nav::place_of(s.pane);
+    use crate::nav::Place;
     let c = col().w_full().gap(2.0)
-        .child(nav(&d, "nav-today", Some(&icons::TODAY), "Today", String::new(), p == Pane::Today, |s| s.pane = Pane::Today))
-        .child(nav(&d, "view-ask", Some(&icons::ASK), "Search", String::new(), p == Pane::Ask, |s| { s.pane = Pane::Ask; s.ask.focused = true }))
-        .child(heading(&d, "Explore"))
-        .child(nav(&d, "view-apps", Some(&icons::APPS), "Applications", String::new(), p == Pane::Apps, |s| s.pane = Pane::Apps))
-        .child(nav(&d, "view-time", Some(&icons::TIME), "Time", String::new(), p == Pane::Time, |s| s.pane = Pane::Time))
-        .child(nav(&d, "view-files", Some(&icons::FOLDER), "Files", String::new(), p == Pane::Files, |s| { s.pane = Pane::Files; s.open_files() }))
-        .child(nav(&d, "view-hist", Some(&icons::HISTORY), "History", String::new(), p == Pane::History, |s| { s.pane = Pane::History; s.reload_repo() }))
-        .child(nav(&d, "view-machine", Some(&icons::LAPTOP), "Machine", String::new(), p == Pane::Machine, |s| { s.pane = Pane::Machine; s.reload_machine() }))
-        .child(heading(&d, "Organize"))
-        .child(nav(&d, "view-q", Some(&icons::QUESTIONS), "Questions", if s.bundles.is_empty() { String::new() } else { s.bundles.len().to_string() }, p == Pane::Questions, |s| s.pane = Pane::Questions))
-        .child(nav(&d, "view-sys", Some(&icons::SYSTEM), "System", if s.status.ollama_up { "●".into() } else { "○".into() }, p == Pane::System, |s| s.pane = Pane::System))
-        ;
+        .child(nav(&d, "nav-stream", Some(&icons::TODAY), "Stream", if s.bundles.is_empty() { String::new() } else { s.bundles.len().to_string() }, here == Place::Stream, |s| s.go_place(Place::Stream)))
+        .child(nav(&d, "nav-library", Some(&icons::FOLDER), "Library", String::new(), here == Place::Library, |s| s.go_place(Place::Library)))
+        .child(nav(&d, "nav-computer", Some(&icons::LAPTOP), "Computer", String::new(), here == Place::Computer, |s| s.go_place(Place::Computer)));
     col().w(220.0).padding(d.gap()).gap(d.gap()).side(&d)
         .child(c.scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0))
-        .child(nav(&d, "nav-settings", Some(&icons::SETTINGS), "Settings", String::new(), p == Pane::Settings, |s| s.pane = Pane::Settings))
+        .child(nav(&d, "nav-settings", Some(&icons::SETTINGS), "Settings", String::new(), here == Place::Settings, |s| s.go_pane(Pane::Settings)))
 }
