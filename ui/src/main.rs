@@ -744,6 +744,16 @@ fn apply_look(settings: &mut Settings, look: &str) {
     }
 }
 
+/// Snapshots draw one frame, so let the first screenful of icons finish decoding first.
+fn wait_icons(s: &State) {
+    for it in s.library.iter().take(120) {
+        if let Some(p) = &it.icon {
+            let _ = s.icons.app_icon(p, 32.0).wait();
+            let _ = s.icons.app_icon(p, 128.0).wait();
+        }
+    }
+}
+
 fn scene(s: &mut State, pane: Pane) {
     // HESTIA_FIXTURE=1: generic data, folders waiting. HESTIA_FIXTURE=calm: nothing waiting.
     let fixture = std::env::var("HESTIA_FIXTURE").ok();
@@ -792,7 +802,8 @@ fn main() {
     let spec = AppSpec::<State> {
         scenes: &[
             ("today", |s| scene(s, Pane::Today)),
-            ("apps", |s| { s.library = fixture::apps(); scene(s, Pane::Apps) }),
+            ("apps", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } wait_icons(s); scene(s, Pane::Apps) }),
+            ("apps-games", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } s.app_show = 1; wait_icons(s); scene(s, Pane::Apps) }),
             ("questions", |s| scene(s, Pane::Questions)),
             ("time", |s| scene(s, Pane::Time)),
             ("files", |s| scene(s, Pane::Files)),

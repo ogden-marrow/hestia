@@ -181,6 +181,9 @@ pub fn steam_games(home: &Path) -> Vec<Item> {
             }
         }
     }
+    // the same game can be listed under two Steam roots that are one folder (a symlink): keep one
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|g| seen.insert(g.id.clone()));
     out
 }
 

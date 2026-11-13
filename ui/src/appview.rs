@@ -28,11 +28,29 @@ fn tint(name: &str) -> rune::Color {
 fn icon(s: &State, it: &Item) -> El {
     let d = s.design;
     let size = d.size(32.0);
-    match &it.icon {
-        Some(p) => col().size(size, size).pixels(s.icons.app_icon(p, 32.0).pixels()),
+    let img = it.icon.as_ref().map(|p| s.icons.app_icon(p, 32.0));
+    match img.filter(|i| i.error().is_none()) {
+        Some(i) => col().size(size, size).pixels(i.pixels()),
         None => col().size(size, size).center().radius(d.r(tok::radius::MD)).fill(tint(&it.name))
             .child(text(it.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()).font(style(&d, type_::TITLE)).color(d.on_accent())),
     }
+}
+
+/// A game as a cover: Steam's library art when there is some, else its icon on a tinted tile.
+fn cover(s: &State, it: &Item, i: usize) -> El {
+    let d = s.design;
+    let t = d.theme();
+    let (w, h) = (d.size(128.0), d.size(192.0));
+    let img = it.icon.as_ref().map(|p| s.icons.app_icon(p, 128.0)).filter(|i| i.error().is_none());
+    let art = match img {
+        Some(i) if it.source == crate::apps::Source::Steam => col().size(w, h).radius(d.r(tok::radius::MD)).pixels(i.pixels()),
+        Some(i) => col().size(w, h).center().radius(d.r(tok::radius::MD)).fill(tint(&it.name)).child(col().size(d.size(64.0), d.size(64.0)).pixels(i.pixels())),
+        None => col().size(w, h).center().radius(d.r(tok::radius::MD)).fill(tint(&it.name))
+            .child(text(it.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()).font(style(&d, type_::TITLE)).color(d.on_accent())),
+    };
+    col().key(format!("cover-{}", it.id)).w(w).gap(d.gap() * 0.5).on_press(move |s: &mut State| s.open_item(i))
+        .child(art)
+        .child(text(it.name.clone()).font(style(&d, type_::LABEL)).color(t.text).truncate())
 }
 
 pub fn panel(s: &State) -> El {
@@ -45,6 +63,18 @@ pub fn panel(s: &State) -> El {
         .child(super::prefs::segmented(&d, "app-show", &SHOW, s.app_show, |s, i| s.app_show = i))
         .child(super::prefs::segmented(&d, "app-sort", &SORT, s.app_sort, |s, i| s.app_sort = i));
 
+    // Games are a shelf of covers; everything else is a list
+    if s.app_show == 1 && !idx.is_empty() {
+        let mut shelf = row().w_full().gaps(d.pad(), d.pad()).flex_wrap();
+        for &i in &idx {
+            shelf = shelf.child(cover(s, &s.library[i], i));
+        }
+        return col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
+            .child(text(format!("{} installed: {} and {}.", s.library.len(), today_count(s.library.len() - games, "app", "apps"), today_count(games, "game", "games"))).font(style(&d, type_::LABEL)).color(t.text_secondary))
+            .child(super::field(&d, "app-search", &s.app_q, "Find an app or game", |s: &mut State| &mut s.app_q))
+            .child(controls)
+            .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(shelf));
+    }
     let mut list = col().w_full().gap(2.0);
     let mut last = "";
     for &i in &idx {
