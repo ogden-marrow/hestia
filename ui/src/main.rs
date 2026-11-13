@@ -98,7 +98,6 @@ struct State {
     tree_undoable: bool,
     app_q: TextEdit,
     app_show: usize,
-    app_group: usize,
     app_sort: usize,
     teach: TextEdit,
     kinds_open: bool,
@@ -260,7 +259,7 @@ impl State {
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
             design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), flow_return: None, account_user: None, dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
-            ask: TextEdit::new(""), library: vec![], tree_rows: vec![], tree_open: Default::default(), tree_sel: None, tree_moving: None, tree_rename: TextEdit::new(""), tree_new: TextEdit::new(""), tree_undoable: false, app_q: TextEdit::new(""), app_show: 0, app_group: 0, app_sort: 0, teach: TextEdit::new(""), kinds_open: false, ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
+            ask: TextEdit::new(""), library: vec![], tree_rows: vec![], tree_open: Default::default(), tree_sel: None, tree_moving: None, tree_rename: TextEdit::new(""), tree_new: TextEdit::new(""), tree_undoable: false, app_q: TextEdit::new(""), app_show: 0, app_sort: 0, teach: TextEdit::new(""), kinds_open: false, ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), backup: backup::Verdict::Unknown, backup_stamp: String::new(), watch_seen: None, commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false, last_filed: 0, undo_lines: vec![], undo_inbox: Default::default(),
             f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), f_filekind: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
@@ -472,17 +471,14 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     let pad = d.pad();
 
     // ---- header: the morning briefing
-    let needs = s.bundles.len(); // one unit everywhere: folders waiting (#30)
-    let title = match s.pane {
-        Pane::Today => "Today", Pane::Questions => "Questions", Pane::System => "System",
-        Pane::Apps => "Applications", Pane::Folders => "Folders", Pane::Ask => "Search", Pane::History => "History", Pane::Files => "Files", Pane::Time => "Time",
-        Pane::Machine => "Machine", Pane::Settings => "Settings", Pane::Welcome => "Welcome",
+    let title = match nav::place_of(s.pane) {
+        nav::Place::Stream => "Stream", nav::Place::Library => "Library", nav::Place::Computer => "Computer",
+        nav::Place::Settings => if s.pane == Pane::Welcome { "Welcome" } else { "Settings" },
     };
-    let (status_text, status_color) = match (&s.backup, needs) {
-        (_, n) if n > 0 => (crate::today::count(n, "question", "questions"), acc),
-        (backup::Verdict::Safe { when }, _) => (format!("Backed up {when}"), t.text_secondary),
-        (backup::Verdict::NeedsYou { .. }, _) => ("Backup needs you".to_string(), d.danger()),
-        _ => ("All clear".to_string(), t.text_secondary),
+    let (status_text, status_color) = match &s.backup {
+        backup::Verdict::Safe { when } => (format!("Backed up {when}"), t.text_secondary),
+        backup::Verdict::NeedsYou { .. } => ("Backup needs you".to_string(), d.danger()),
+        _ => (String::new(), t.text_secondary),
     };
     let header = row().w_full().h(d.size(28.0)).px(pad).center_y().fill(t.card)
         .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
@@ -492,7 +488,7 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         .child(text(title).font(style(&d, type_::TITLE)).color(t.text).grow(1.0))
         .child(
             text(status_text).key("need-you").font(style(&d, type_::LABEL)).color(status_color)
-                .on_press(move |s: &mut State| s.pane = if needs > 0 { Pane::Questions } else { Pane::Today }),
+                .on_press(|s: &mut State| s.go_pane(Pane::Machine)),
         );
 
     // the info line under every window, as in the classic Finder: "26 items, 4.2 GB available"
@@ -762,6 +758,16 @@ fn apply_look(settings: &mut Settings, look: &str) {
     }
 }
 
+/// Snapshots draw one frame, so let the first screenful of icons finish decoding first.
+fn wait_icons(s: &State) {
+    for it in s.library.iter().take(120) {
+        if let Some(p) = &it.icon {
+            let _ = s.icons.app_icon(p, 32.0).wait();
+            let _ = s.icons.app_icon(p, 128.0).wait();
+        }
+    }
+}
+
 fn scene(s: &mut State, pane: Pane) {
     // HESTIA_FIXTURE=1: generic data, folders waiting. HESTIA_FIXTURE=calm: nothing waiting.
     let fixture = std::env::var("HESTIA_FIXTURE").ok();
@@ -812,7 +818,8 @@ fn main() {
             ("today", |s| scene(s, Pane::Today)),
             ("folders", |s| { let h = files::home(); s.tree_open.insert(h.join("Documents")); s.tree_open.insert(h.join("Documents/Taxes")); s.reload_tree(); s.tree_select(h.join("Documents/notes.txt")); scene(s, Pane::Folders) }),
             ("folders-dir", |s| { let h = files::home(); s.tree_open.insert(h.join("Documents")); s.tree_open.insert(h.join("Documents/Taxes")); s.reload_tree(); s.tree_select(h.join("Documents/Taxes")); s.tree_undoable = true; s.msg = "Moved ~/Documents/receipts to ~/Documents/Taxes.".into(); scene(s, Pane::Folders) }),
-            ("apps", |s| { s.library = fixture::apps(); scene(s, Pane::Apps) }),
+            ("apps", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } wait_icons(s); scene(s, Pane::Apps) }),
+            ("apps-games", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } s.app_show = 1; wait_icons(s); scene(s, Pane::Apps) }),
             ("questions", |s| scene(s, Pane::Questions)),
             ("time", |s| scene(s, Pane::Time)),
             ("files", |s| scene(s, Pane::Files)),

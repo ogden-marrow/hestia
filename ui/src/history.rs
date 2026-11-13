@@ -53,7 +53,7 @@ pub fn panels(s: &State) -> Vec<El> {
         );
     }
     let commits = col().w(250.0).shrink().min_w(200.0).padding(d.gap()).gap(d.gap()).panel(&d)
-        .child(text("Your saved changes".to_string()).font(style(&d, type_::SECTION)).color(t.text_secondary).truncate())
+        .child(text("Saves".to_string()).font(style(&d, type_::SECTION)).color(t.text_secondary).truncate())
         .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(list));
 
     // ---- changed files

@@ -18,9 +18,9 @@ pub(crate) fn segmented<F: Fn(&mut State, usize) + Clone + 'static>(d: &Design, 
         let f = f.clone();
         r = r.child(
             row().key(format!("{key}-{i}")).h(d.row_h() - 2.0).w(seg_w).center()
-                .fill(if i == on { acc } else { rune::Color::TRANSPARENT })
+                .fill(if i == on { d.select() } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| f(s, i))
-                .child(text(l.to_string()).font(style(d, type_::LABEL)).color(if i == on { d.on_accent() } else { t.text })),
+                .child(text(l.to_string()).font(style(d, type_::LABEL)).color(if i == on { acc } else { t.text })),
         );
     }
     r
