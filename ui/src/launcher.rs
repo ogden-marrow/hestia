@@ -416,7 +416,10 @@ pub fn panel(s: &State) -> El {
         c = c.child(col().w_full().h(1.0).fill(t.card_border))
             .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(list));
     } else {
-        c = c.child(text("Type to search apps, files, clipboard (type “clipboard”) and Hestia.").font(style(&d, type_::LABEL)).color(t.text_secondary).px(20.0).py(d.gap()));
+        let try_it = |key: &str, word: &'static str| crate::questions::button(&d, key, word.into(), false, move |s: &mut State| { s.ask.text = word.into(); s.asel = 0 });
+        c = c.child(crate::questions::empty(&d, &crate::icons::ASK, "Search this computer",
+            "Apps, files, things you copied, and Hestia itself. Nothing leaves this computer.",
+            vec![try_it("try-invoice", "invoice"), try_it("try-photos", "photos"), try_it("try-clipboard", "clipboard")]));
     }
     if !s.msg.is_empty() {
         c = c.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink().px(20.0).py(d.gap()));

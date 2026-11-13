@@ -119,6 +119,23 @@ pub fn action<F: Fn(&mut State) + 'static>(d: &Design, key: &str, label: &str, b
     if busy { b } else { b.on_press(press) }
 }
 
+/// An empty screen that says what it is for and what to do: a glyph, one line, one sentence, and up to three actions.
+pub fn empty(d: &Design, glyph: &'static rune::Icon, title: &str, line: &str, actions: Vec<El>) -> El {
+    let t = d.theme();
+    let mut c = col().w_full().grow(1.0).center().gap(d.gap())
+        .child(rune::icon(glyph, d.size(36.0)).color(t.text_secondary))
+        .child(text(title.to_string()).font(style(d, type_::TITLE)).color(t.text))
+        .child(text(line.to_string()).font(style(d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink().max_w(d.size(420.0)));
+    if !actions.is_empty() {
+        let mut r = row().gap(d.gap()).flex_wrap().center();
+        for a in actions {
+            r = r.child(a);
+        }
+        c = c.child(r);
+    }
+    c
+}
+
 pub fn heading(d: &Design, label: &str) -> El {
     text(label.to_string()).font(style(d, type_::SECTION)).color(d.theme().text_secondary)
 }

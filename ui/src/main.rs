@@ -783,6 +783,7 @@ fn main() {
             ("history", |s| scene(s, Pane::History)),
             ("system", |s| scene(s, Pane::System)),
             ("ask", |s| scene(s, Pane::Ask)),
+            ("ask-empty", |s| { scene(s, Pane::Ask); s.ask.text.clear(); }),
             ("machine", |s| { scene(s, Pane::Machine); s.reload_machine() }),
             ("welcome", |s| scene(s, Pane::Welcome)),
             ("welcome-key", |s| { s.wstep = 3; scene(s, Pane::Welcome) }),
