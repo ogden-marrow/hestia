@@ -616,6 +616,24 @@ pub fn move_dir(home: &Path, from: &str, to: &str, excluded: &[PathBuf], stream:
     Ok(())
 }
 
+/// Make every missing folder above `path` (relative to home), each one journaled like `make_dir` (and, like it,
+/// undone one step at a time while still empty).
+pub fn ensure_parents(home: &Path, path: &str, stream: &Path) -> Result<()> {
+    let mut missing = Vec::new();
+    let mut p = Path::new(path).parent();
+    while let Some(d) = p.filter(|d| !d.as_os_str().is_empty()) {
+        if home.join(d).is_dir() {
+            break;
+        }
+        missing.push(d.to_string_lossy().into_owned());
+        p = d.parent();
+    }
+    for d in missing.iter().rev() {
+        make_dir(home, d, stream)?;
+    }
+    Ok(())
+}
+
 /// Create exactly one new folder (path relative to home): its parent must already be a real folder, it must not exist,
 /// and it is journaled so undo can remove it again, but only while it is still empty.
 pub fn make_dir(home: &Path, path: &str, stream: &Path) -> Result<()> {
@@ -632,28 +650,14 @@ pub fn make_dir(home: &Path, path: &str, stream: &Path) -> Result<()> {
     journal_append(stream, &[serde_json::json!({"batch": new_batch(), "kind": "mkdir", "to": format!("~/{path}")})])
 }
 
-/// Rename a real folder (the disk half of a drag and drop) and rewrite every stream path under it.
-/// Never merges into an existing folder, never touches sensitive paths, same disk only.
+/// The disk half of moving a folder that the rules tree names: a folder that only exists in the tree has nothing
+/// to move; otherwise the missing parents are made and the folder moved, all journaled so Undo can reverse it.
 pub fn move_on_disk(home: &Path, from: &str, to: &str, excluded: &[PathBuf], stream: &Path) -> Result<()> {
-    let (src, dst) = (home.join(from), home.join(to));
-    if excluded.iter().any(|e| src.starts_with(e) || dst.starts_with(e)) {
-        bail!("{from} is a sensitive path: not moved");
-    }
-    if !src.exists() {
+    if !home.join(from).exists() {
         return Ok(()); // only structure so far
     }
-    if dst.exists() {
-        bail!("{to} already exists: not merging");
-    }
-    if let Some(d) = dst.parent() {
-        fs::create_dir_all(d)?;
-    }
-    fs::rename(&src, &dst).with_context(|| format!("moving {from} to {to} (same disk only)"))?;
-    let mut recs = load_all(stream)?;
-    if retarget(&mut recs, &format!("~/{from}"), &format!("~/{to}")) {
-        write_all(stream, &recs)?;
-    }
-    Ok(())
+    ensure_parents(home, to, stream)?;
+    move_dir(home, from, to, excluded, stream)
 }
 
 pub fn print_plan(plan: &Plan, home: &Path) {
@@ -927,6 +931,21 @@ mod tests {
         assert_eq!(fs::read(h.join("out/b.bin")).unwrap(), b"data");
         assert!(!h.join("Downloads/a.bin").exists());
         assert!(copy_move(&h.join("out/b.bin"), &h.join("out/a.bin")).is_err());
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn missing_parents_are_made_and_journaled() {
+        let h = std::env::temp_dir().join(format!("lifestream-parents-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&h);
+        let stream = h.join(".stream");
+        fs::create_dir_all(h.join("Documents")).unwrap();
+        ensure_parents(&h, "Documents/New/Deep/Folder", &stream).unwrap();
+        assert!(h.join("Documents/New/Deep").is_dir() && !h.join("Documents/New/Deep/Folder").exists());
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!(r.restored, 1);
+        assert!(h.join("Documents/New").is_dir() && !h.join("Documents/New/Deep").exists());
+        ensure_parents(&h, "Documents/x", &stream).unwrap(); // nothing missing, nothing made
         fs::remove_dir_all(h).unwrap();
     }
 

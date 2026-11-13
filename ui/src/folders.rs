@@ -145,7 +145,7 @@ impl State {
         }
     }
     /// The one way a folder is moved or renamed: the tree and the real folder together.
-    fn apply_move(&mut self, from: &str, to: &str) -> bool {
+    pub(crate) fn apply_move(&mut self, from: &str, to: &str) -> bool {
         if let Err(e) = self.tree.move_folder(from, to) {
             self.msg = format!("not moved: {e:#}");
             return false;
@@ -155,12 +155,14 @@ impl State {
         }
         let Some(stream) = self.stream.clone() else { return true };
         let excluded = tree::excluded(&self.repo_dir).unwrap_or_default();
-        match tree::move_on_disk(&super::files::home(), from, to, &excluded, &stream) {
+        let moved = tree::move_on_disk(&super::files::home(), from, to, &excluded, &stream);
+        match moved {
             Ok(()) => {
                 self.recs = lifestream::load_all(&stream).unwrap_or_default();
                 self.refresh_derived();
                 self.refresh_plan();
-                self.msg = format!("moved ~/{from} → ~/{to}, the folder and the tree together");
+                self.tree_undoable = true;
+                self.msg = format!("Moved ~/{from} to ~/{to}, the folder and the tree together.");
             }
             Err(e) => self.msg = format!("the tree now says ~/{to}, but the real folder was not moved: {e:#}"),
         }
