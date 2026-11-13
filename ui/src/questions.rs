@@ -67,6 +67,17 @@ pub fn choices(s: &State, b: &Bundle) -> Vec<Choice> {
     out
 }
 
+/// Three file names and "and 3 more", not a run-on list.
+pub fn sample_line(samples: &[String], total: usize) -> String {
+    let shown: Vec<&str> = samples.iter().take(3).map(String::as_str).collect();
+    let more = total.saturating_sub(shown.len());
+    match (shown.is_empty(), more) {
+        (true, _) => String::new(),
+        (false, 0) => shown.join(", "),
+        (false, n) => format!("{} and {n} more", shown.join(", ")),
+    }
+}
+
 pub fn chip(d: &Design, label: String, strong: bool) -> El {
     let t = d.theme();
     let acc = d.accent_color();
@@ -175,7 +186,7 @@ pub fn panels(s: &State) -> Vec<El> {
             exts = exts.child(chip(&d, format!("{e} ×{n}"), false));
         }
         body = body.child(col().w_full().gap(d.gap()).child(heading(&d, "What's in it")).child(exts)
-            .child(text(b.samples.iter().take(6).cloned().collect::<Vec<_>>().join(", ")).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
+            .child(text(sample_line(&b.samples, b.ids.len())).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
 
         // suggestions, best first
         let mut sugg = col().w_full().gap(d.gap()).child(heading(&d, "Suggestions"));
@@ -259,5 +270,18 @@ mod tests {
         assert_eq!(siblings(&bs, 0), vec![1]);
         assert!(siblings(&bs, 2).is_empty(), "a project of one has no siblings");
         assert!(siblings(&bs, 3).is_empty(), "a top-level folder has no project around it");
+    }
+}
+
+#[cfg(test)]
+mod sample_tests {
+    use super::sample_line;
+
+    #[test]
+    fn a_short_list_of_names_not_a_run_on() {
+        let s: Vec<String> = ["a.pdf", "b.pdf", "c.pdf", "d.pdf"].iter().map(|x| x.to_string()).collect();
+        assert_eq!(sample_line(&s, 6), "a.pdf, b.pdf, c.pdf and 3 more");
+        assert_eq!(sample_line(&s[..2], 2), "a.pdf, b.pdf");
+        assert_eq!(sample_line(&[], 0), "");
     }
 }

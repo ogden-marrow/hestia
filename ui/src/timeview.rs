@@ -62,7 +62,6 @@ fn month_label(m: &str) -> String {
     NaiveDate::from_ymd_opt(y, mo, 1).map(|d| format!("{} {}", d.format("%b"), d.year())).unwrap_or_else(|| m.to_string())
 }
 
-const STRIP: f32 = 30.0; // how much of each receding window shows above the next
 
 fn kind_icon(kind: &str) -> &'static rune::Icon {
     if kind == "project/git" { &crate::icons::FOLDER } else { &crate::icons::DOC }
@@ -76,13 +75,8 @@ pub fn panel(s: &State) -> El {
         return col().grow(1.0).padding(d.pad()).panel(&d).child(text("Nothing in the stream yet.").font(style(&d, type_::BODY)).color(t.text_secondary));
     };
     // ---- the day: one card that fills the pane and scrolls, so it fits at any window width
-    let title_bar = row().w_full().h(d.size(STRIP)).px(d.pad()).gap(d.gap()).center_y().fill(d.side_fill())
-        .border_sides([0.0, 0.0, 1.0, 0.0], t.card_border)
-        .child(text(long_date(&day.date)).font(style(&d, type_::TITLE)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-        .child(text(format!("{} files", day.idx.len())).font(style(&d, type_::LABEL)).color(t.text_secondary));
     let body = if s.compare { compare_body(s, &d) } else { list_body(s, &d, day) };
     let card = col().w_full().grow(1.0).shrink().min_h(0.0).fill(t.card).border(1.0, t.card_border).radius(d.r(tok::radius::MD))
-        .child(title_bar)
         .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(body));
     let stage = col().w_full().grow(1.0).shrink().min_h(0.0).padding(d.pad()).child(card);
 
@@ -114,7 +108,7 @@ pub fn panel(s: &State) -> El {
         let since = s.days[..s.dsel].iter().map(|x| x.idx.len()).sum::<usize>();
         format!("Since then: {since} new files")
     } else {
-        format!("{} files dated this day · {} existed by then", day.idx.len(), total)
+        format!("{} that day · {} existed by then", crate::today::count(day.idx.len(), "file", "files"), total)
     };
     let bar = row().w_full().px(d.pad()).py(d.gap()).gap(d.gap()).center_y().border_sides([1.0, 0.0, 0.0, 0.0], t.card_border)
         .child(text(summary).font(style(&d, type_::BODY)).color(t.text_secondary).grow(1.0).shrink().min_w(0.0).truncate())
