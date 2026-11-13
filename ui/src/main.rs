@@ -557,7 +557,7 @@ fn system_panel(s: &State) -> El {
     };
     let mut models = card("Models");
     if st.installed.is_empty() {
-        models = models.child(text(if st.ollama_up { "No models installed yet." } else { "Models are off. Start Ollama to get folder suggestions and search by meaning." }).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
+        models = models.child(text(if st.ollama_up { "No models installed yet." } else { "Models are off. Turn them on to get folder suggestions and search by meaning." }).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
     }
     for (name, gb) in &st.installed {
         let live = st.loaded.iter().find(|l| &l.name == name);
@@ -587,7 +587,7 @@ fn system_panel(s: &State) -> El {
         .child(kv(&d, "Files waiting for you", &st.pending.to_string()))
         .child(kv(&d, "Folders with a model suggestion", &if st.folders == 0 { "None yet".to_string() } else { format!("{} of {}", st.suggested, st.folders) }));
 
-    let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(row().w_full().gap(d.pad()).child(pipe.grow(1.0)).child(if st.gpu.is_some() { hw.grow(1.0) } else { col().size(0.0, 0.0) }));
+    let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(if st.gpu.is_some() { row().w_full().gap(d.pad()).child(pipe.grow(1.0)).child(hw.grow(1.0)) } else { row().w_full().child(pipe.grow(1.0)) });
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
         .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(inner))
 }

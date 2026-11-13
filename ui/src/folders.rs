@@ -521,7 +521,7 @@ pub fn panels(s: &State) -> Vec<El> {
                         .child(button(&d, "f-cancel", "Cancel".into(), false, |s: &mut State| s.confirm_move = false))));
             }
         }
-        None => prev = prev.child(text("Preview unavailable: the sensitive-path list could not be read.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()),
+        None => prev = prev.child(text("Can't show what would move yet: set up your home repository first, so Hestia knows which places are private.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()),
     }
     body = body.child(prev);
     if s.last_filed > 0 || s.jobs.running("undo") {
