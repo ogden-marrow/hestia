@@ -32,6 +32,7 @@ pub fn panel(s: &State) -> El {
         .child(nav(&d, "view-ask", Some(&icons::ASK), "Search", String::new(), p == Pane::Ask, |s| { s.pane = Pane::Ask; s.ask.focused = true }))
         .child(heading(&d, "Explore"))
         .child(nav(&d, "view-apps", Some(&icons::APPS), "Applications", String::new(), p == Pane::Apps, |s| s.pane = Pane::Apps))
+        .child(nav(&d, "view-folders", Some(&icons::TREE), "Folders", String::new(), p == Pane::Folders, |s| { s.pane = Pane::Folders; s.reload_tree() }))
         .child(nav(&d, "view-time", Some(&icons::TIME), "Time", String::new(), p == Pane::Time, |s| s.pane = Pane::Time))
         .child(nav(&d, "view-files", Some(&icons::FOLDER), "Files", String::new(), p == Pane::Files, |s| { s.pane = Pane::Files; s.open_files() }))
         .child(nav(&d, "view-hist", Some(&icons::HISTORY), "History", String::new(), p == Pane::History, |s| { s.pane = Pane::History; s.reload_repo() }))
