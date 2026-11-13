@@ -786,6 +786,7 @@ fn main() {
             ("settings-scanning", |s| { s.stab = 2; scene(s, Pane::Settings) }),
             ("settings-general", |s| { s.stab = 1; scene(s, Pane::Settings) }),
             ("settings-account", |s| { s.stab = 7; s.account_user = std::env::var("HESTIA_ACCOUNT_USER").ok(); scene(s, Pane::Settings) }),
+            ("settings-about", |s| { s.stab = 8; scene(s, Pane::Settings) }),
             ("settings-domains", |s| { s.stab = 6; s.select_domain(0); scene(s, Pane::Settings) }),
             ("time-compare", |s| { s.dsel = 40; s.compare = true; scene(s, Pane::Time) }),
         ],

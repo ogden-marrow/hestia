@@ -228,7 +228,7 @@ pub fn panels(s: &State) -> Vec<El> {
         }
         _ => {
             body = body
-                .child(setting(&d, "Hestia", "The hearth of your computer: files, history and time.", text(env!("CARGO_PKG_VERSION")).font(style(&d, type_::LABEL)).color(t.text_secondary)))
+                .child(setting(&d, "Hestia", "The hearth of your computer: files, history and time.", text(format!("{} · build {}", env!("CARGO_PKG_VERSION"), env!("HESTIA_BUILD"))).font(style(&d, type_::LABEL)).color(t.text_secondary)))
                 .child(setting(&d, "Your repository", &s.repo_dir.to_string_lossy(), text("").font(style(&d, type_::LABEL))))
                 .child(setting(&d, "Settings file", "~/.config/hestia/settings. Schedules are applied as small overrides in ~/.config/systemd/user, so removing them restores the defaults.", text("").font(style(&d, type_::LABEL))))
                 .child(setting(&d, "Welcome tour", "The short introduction shown the first time Hestia opens.",
