@@ -223,19 +223,25 @@ pub fn panel(s: &State) -> El {
     let mut list = col().w_full().gap(1.0);
     for r in &s.tree_rows {
         let on = sel.as_deref() == Some(r.path.as_path());
-        let target = r.is_dir && moving.is_some();
+        let hovered = s.tree_hover.as_deref() == Some(r.path.as_path());
+        let target = (r.is_dir && moving.is_some()) || hovered;
         let p = r.path.clone();
         let icon = rune::icon(if r.is_dir { &crate::icons::FOLDER } else { &crate::icons::DOC }, d.size(16.0)).color(if r.is_dir { d.accent_color() } else { t.text_secondary });
-        list = list.child(
-            row().key(format!("tr-{}", r.path.display())).w_full().h(d.row_h()).pl(d.item_px() + r.depth as f32 * d.size(18.0)).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
+        let mut row_el = row().key(format!("tr-{}", r.path.display())).w_full().h(d.row_h()).pl(d.item_px() + r.depth as f32 * d.size(18.0)).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
                 .border(1.0, if target { d.accent_color().alpha(0.45) } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { if s.tree_moving.is_some() { let d = if p.is_dir() { p.clone() } else { p.parent().map(Path::to_path_buf).unwrap_or_default() }; s.tree_drop(&d) } else { s.tree_select(p.clone()) } })
                 .child(chevron(&d, r))
                 .child(icon)
                 .child(text(r.name.clone()).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-                .child(text(if r.is_dir { String::new() } else { lifestream::human(r.size) }).font(style(&d, type_::LABEL)).color(t.text_secondary)),
-        );
+                .child(text(if r.is_dir { String::new() } else { lifestream::human(r.size) }).font(style(&d, type_::LABEL)).color(t.text_secondary));
+        if r.is_dir {
+            let (dir, dir2) = (r.path.clone(), r.path.clone());
+            row_el = row_el
+                .on_drop_files(move |s: &mut State, files: &[PathBuf], _| { s.tree_hover = None; for f in files { let to = dir.join(f.file_name().unwrap_or_default()); s.tree_move(f, &to); } })
+                .on_drop_hover(move |s: &mut State, over, _| s.tree_hover = over.then(|| dir2.clone()));
+        }
+        list = list.child(row_el);
     }
     if s.tree_rows.is_empty() {
         list = list.child(text("Nothing to show in this folder.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).py(d.pad()));
