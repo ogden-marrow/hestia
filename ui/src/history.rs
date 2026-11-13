@@ -97,7 +97,7 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(text(msg).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink());
     match summary {
         None => {
-            diff = diff.child(text("This save has no file changes to show.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary));
+            diff = diff.child(crate::questions::empty(&d, &crate::icons::HISTORY, "No file changes to show", "This save changed settings or the list of installed programs, not files.", vec![]));
         }
         Some(line) => {
             diff = diff
