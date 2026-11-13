@@ -10,7 +10,6 @@ mod backup;
 mod clipboard;
 mod engine;
 mod design;
-mod contents;
 mod domains_ui;
 mod files;
 mod fixture;
@@ -66,7 +65,6 @@ enum Pane {
 struct Fresh {
     status: Option<(Status, (bool, Color))>, // gathered every other tick
     repo: String,
-    dir: u64,
 }
 
 struct State {
@@ -95,6 +93,7 @@ struct State {
     tree_moving: Option<PathBuf>,
     tree_rename: TextEdit,
     tree_new: TextEdit,
+    tree_kind: TextEdit,
     tree_undoable: bool,
     tree_hover: Option<PathBuf>,
     app_q: TextEdit,
@@ -120,12 +119,7 @@ struct State {
     changes: Vec<Change>,
     fsel: usize,
     diff: Vec<DiffLine>,
-    cwd: PathBuf,
-    entries: Vec<files::Entry>,
-    esel: usize,
-    dir_stamp: u64,
     kinds: HashMap<String, String>,
-    watch: Arc<Mutex<PathBuf>>, // the folder the background thread watches
     days: Vec<timeview::Day>,
     cum: Vec<usize>,
     dsel: usize,
@@ -164,7 +158,6 @@ struct State {
     f_inbox: TextEdit,
     f_root: TextEdit,
     f_cap: TextEdit,
-    f_filekind: TextEdit,
     moving: Option<usize>,
     pending_move: Option<(String, String)>,
     mach: Vec<machine::Cat>,
@@ -260,10 +253,10 @@ impl State {
         let suggestions = bundle::load_cache(&dir);
         let mut s = State {
             design: Design::default(), recs, total: 0, auth: None, auth_inbox: Default::default(), auth_pid: Default::default(), flow_return: None, account_user: None, dom_sel: 0, dom_edit: Default::default(), d_name: TextEdit::new(""), d_desc: TextEdit::new(""), d_kinds: TextEdit::new(""), d_folder: TextEdit::new(""), d_new: TextEdit::new(""), domains: lifestream::domains::load(Some(&home_repo().join("domains"))).unwrap_or_else(|_| lifestream::domains::defaults()), stream,
-            ask: TextEdit::new(""), library: vec![], tree_rows: vec![], tree_open: Default::default(), tree_sel: None, tree_moving: None, tree_rename: TextEdit::new(""), tree_new: TextEdit::new(""), tree_undoable: false, tree_hover: None, app_q: TextEdit::new(""), app_show: 0, app_sort: 0, teach: TextEdit::new(""), kinds_open: false, ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
-            pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), backup: backup::Verdict::Unknown, backup_stamp: String::new(), watch_seen: None, commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], cwd: files::home(), entries: vec![], esel: 0, dir_stamp: 0, kinds: HashMap::new(), watch: Arc::new(Mutex::new(files::home())), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
+            ask: TextEdit::new(""), library: vec![], tree_rows: vec![], tree_open: Default::default(), tree_sel: None, tree_moving: None, tree_rename: TextEdit::new(""), tree_new: TextEdit::new(""), tree_kind: TextEdit::new(""), tree_undoable: false, tree_hover: None, app_q: TextEdit::new(""), app_show: 0, app_sort: 0, teach: TextEdit::new(""), kinds_open: false, ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
+            pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), backup: backup::Verdict::Unknown, backup_stamp: String::new(), watch_seen: None, commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], kinds: HashMap::new(), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false, last_filed: 0, undo_lines: vec![], undo_inbox: Default::default(),
-            f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), f_filekind: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
+            f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
         };
         let _ = stream_path;
         s.tree_path = home_repo().join("tree.toml");
@@ -273,7 +266,6 @@ impl State {
         s.commits = repo::log(&s.repo_dir, 1); // just the newest, for the Today tile; History loads the rest
         s.reload_backup();
         s.library = apps::load(&launcher::dirs(), std::path::Path::new(&std::env::var("HOME").unwrap_or_default()));
-        s.reload_dir();
         s
     }
     /// Everything computed from the records. Run when the records change, not on every keystroke.
@@ -309,7 +301,7 @@ impl State {
         f(&mut self.settings);
         self.settings.save();
         self.restyle();
-        self.reload_dir(); // "show hidden files" and the like take effect at once
+        self.reload_tree(); // "show hidden files" and the like take effect at once
     }
     /// A setting that changes the system's schedule: save it, then apply it.
     fn change_schedule(&mut self, f: impl FnOnce(&mut Settings)) {
@@ -406,17 +398,6 @@ impl State {
             _ => vec![],
         };
     }
-    fn reload_dir(&mut self) {
-        self.entries = files::list(&self.cwd, &self.kinds, self.settings.hidden);
-        self.esel = self.esel.min(self.entries.len().saturating_sub(1));
-        self.dir_stamp = files::fingerprint(&self.cwd);
-        *self.watch.lock().unwrap() = self.cwd.clone();
-    }
-    fn go(&mut self, p: PathBuf) {
-        self.cwd = p;
-        self.esel = 0;
-        self.reload_dir();
-    }
     /// Open the Files screen: the plan for tonight, and the folder you were last in.
     /// The engine made or cloned the home repository and wrote the home setting: start using it.
     fn adopted(&mut self) {
@@ -438,25 +419,6 @@ impl State {
     }
     fn open_files(&mut self) {
         self.refresh_plan();
-        self.reload_dir();
-    }
-    /// Go to a real folder; if the tree knows it, select it so its rule shows beside its contents.
-    fn go_folder(&mut self, p: PathBuf) {
-        let rel = p.strip_prefix(files::home()).ok().map(|r| r.to_string_lossy().into_owned());
-        self.go(p);
-        if let Some(i) = rel.and_then(|r| self.tree.folders.iter().position(|f| f.path == r)) {
-            self.select_folder(i);
-        }
-    }
-    fn new_note(&mut self) {
-        match files::new_note(&self.cwd) {
-            Ok(p) => {
-                self.msg = format!("created {}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-                self.reload_dir();
-                open_folder(&p.to_string_lossy());
-            }
-            Err(e) => self.msg = format!("could not create a note: {e}"),
-        }
     }
 }
 
@@ -496,7 +458,7 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
     let info = match s.pane {
         Pane::Today => if s.bundles.is_empty() { format!("{} sorted · nothing waiting for you", today::count(s.total, "file", "files")) } else { format!("{} sorted · {} waiting for you", today::count(s.total, "file", "files"), today::count(s.bundles.len(), "folder", "folders")) },
         Pane::Questions => if s.bundles.is_empty() { "No questions waiting".to_string() } else { format!("{} · {}", today::count(s.bundles.len(), "folder", "folders"), today::count(s.bundles.iter().map(|b| b.ids.len()).sum::<usize>(), "file", "files")) },
-        Pane::Files => format!("{} · {} · {}", today::count(s.tree.folders.len(), "folder", "folders"), today::count(s.tree.inbox.len(), "watched folder", "watched folders"), files::tilde(&s.cwd)),
+        Pane::Files => format!("{} · {}", today::count(s.tree.folders.len(), "folder", "folders"), today::count(s.tree.inbox.len(), "watched folder", "watched folders")),
         Pane::History => format!("{} saved", today::count(s.commits.len(), "change", "changes")),
         Pane::Time => today::count(s.days.len(), "day with files", "days with files"),
         Pane::Machine => format!("{} since your last backup", today::count(s.mach.iter().map(|c| c.drift()).sum::<usize>(), "change", "changes")),
@@ -657,13 +619,12 @@ fn setup(s: &mut State, wake: rune::Waker) {
     if std::env::args().any(|a| matches!(a.as_str(), "--snap" | "--trace" | "--tree" | "--frames" | "--script" | "--list-scenes")) { return; }
     s.icons = rune::ImageCache::new(wake.clone());
     s.jobs.set_waker(wake.clone());
-    let (slot, stream, repo_dir, watch) = (s.fresh.clone(), s.stream.clone().unwrap_or_default(), s.repo_dir.clone(), s.watch.clone());
+    let (slot, stream, repo_dir) = (s.fresh.clone(), s.stream.clone().unwrap_or_default(), s.repo_dir.clone());
     std::thread::spawn(move || {
         let mut tick = 0u64;
         loop {
             let status = tick.is_multiple_of(2).then(|| (system::gather(&load_all(&stream).unwrap_or_default(), &stream), desktop()));
-            let cwd = watch.lock().unwrap().clone();
-            *slot.lock().unwrap() = Some(Fresh { status, repo: repo::stamp(&repo_dir), dir: files::fingerprint(&cwd) });
+            *slot.lock().unwrap() = Some(Fresh { status, repo: repo::stamp(&repo_dir) });
             wake();
             tick += 1;
             std::thread::sleep(std::time::Duration::from_secs(2));
@@ -711,10 +672,6 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
     }
     if f.repo != s.repo_stamp && s.pane == Pane::History {
         s.reload_repo();
-        changed = true;
-    }
-    if f.dir != s.dir_stamp && s.pane == Pane::Files {
-        s.reload_dir();
         changed = true;
     }
     changed || any
@@ -980,9 +937,6 @@ mod perf {
         let t = std::time::Instant::now();
         s.reload_repo();
         eprintln!("reload_repo (git)         {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
-        let t = std::time::Instant::now();
-        s.reload_dir();
-        eprintln!("reload_dir                {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
         let t = std::time::Instant::now();
         let _ = system::gather(&s.recs, s.stream.as_deref().unwrap());
         eprintln!("system::gather            {:>6.1} ms", t.elapsed().as_secs_f64() * 1e3);
