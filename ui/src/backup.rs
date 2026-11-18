@@ -1,23 +1,10 @@
-//! "Is everything backed up?" as one calm answer. Read from the home repository itself: when the
-//! newest commit was made and whether it has reached the private remote. Never writes.
+//! "Is everything backed up?" as one calm answer. The engine owns the verdict (`lifestream::backup`, the same
+//! one the tray and `lifestream backup-state` use); this only turns it into what the screens show. Never writes.
 
+use lifestream::backup::State as Engine;
 use std::path::Path;
-use std::process::Command;
 
-/// What git says, before it is turned into words.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Facts {
-    pub is_home: bool,
-    /// Unix seconds of the newest commit.
-    pub last: Option<i64>,
-    pub has_remote: bool,
-    /// Commits not yet on the remote.
-    pub ahead: usize,
-    /// The watcher's own report when its last run failed (its reason, without the "FAILED: " prefix).
-    pub failed: Option<String>,
-}
-
-/// The answer: safe, or what to do about it. `Unknown` means there is no home repository to ask about.
+/// The answer: safe, or what to do about it. `Unknown` means there is no home repository, or no run yet.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Verdict {
     Unknown,
@@ -32,44 +19,6 @@ pub enum Fix {
     SignIn,
 }
 
-const STALE_DAYS: i64 = 3;
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    Command::new("git").arg("-C").arg(dir).args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
-}
-
-/// `watch.json` is one line, `{\"at\":N,\"result\":\"...\"}`. A result that starts with FAILED is a failure;
-/// \"ok…\" and \"busy…\" are not.
-pub fn watch_failure(json: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
-    let reason = v.get("result")?.as_str()?.strip_prefix("FAILED:")?.trim();
-    Some(if reason.is_empty() { "the last backup did not finish".to_string() } else { reason.to_string() })
-}
-
-/// When the watcher last finished a run that worked (`ok…`). A quiet computer makes no commits, so the newest
-/// commit alone would call a perfectly healthy backup "3 days old".
-pub fn watch_ok_at(json: &str) -> Option<i64> {
-    let v: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
-    v.get("result")?.as_str()?.starts_with("ok").then(|| v.get("at")?.as_i64()).flatten()
-}
-
-pub fn watch_json() -> Option<String> {
-    let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
-    std::fs::read_to_string(base.join("hestia/watch.json")).ok()
-}
-
-pub fn read(dir: &Path) -> Facts {
-    if !lifestream::home::is_home(dir) {
-        return Facts::default();
-    }
-    let watch = watch_json();
-    let commit: Option<i64> = git(dir, &["log", "-1", "--format=%ct"]).trim().parse().ok();
-    let last = commit.max(watch.as_deref().and_then(watch_ok_at));
-    let has_remote = !git(dir, &["remote"]).trim().is_empty();
-    let ahead = git(dir, &["rev-list", "--count", "@{u}..HEAD"]).trim().parse().unwrap_or(0);
-    Facts { is_home: true, last, has_remote, ahead, failed: watch.as_deref().and_then(watch_failure) }
-}
-
 /// "just now", "12 minutes ago", "3 hours ago", "yesterday", "5 days ago".
 pub fn ago(secs: i64) -> String {
     let n = |v: i64, unit: &str| format!("{v} {unit}{} ago", if v == 1 { "" } else { "s" });
@@ -82,84 +31,67 @@ pub fn ago(secs: i64) -> String {
     }
 }
 
-pub fn verdict(f: &Facts, now: i64) -> Verdict {
-    if !f.is_home {
+/// The engine's state as the UI's verdict. A signed-out backup is fixed by signing in; anything else by backing up.
+pub fn from_engine(st: &Engine, now: i64) -> Verdict {
+    if st.needs_you() {
+        let why = st.reason.clone().unwrap_or_else(|| "Your backup needs a look.".into());
+        let fix = if why.contains("signed out") { Fix::SignIn } else { Fix::BackUpNow };
+        return Verdict::NeedsYou { why, fix };
+    }
+    match (st.state, st.last_ok) {
+        ("ok", Some(t)) => Verdict::Safe { when: ago(now - t) },
+        _ => Verdict::Unknown,
+    }
+}
+
+/// Where the watcher's run history lives, as a change marker: it changes whenever a run is recorded.
+pub fn stamp() -> Option<String> {
+    let p = lifestream::feed::history_path()?;
+    let m = std::fs::metadata(p).ok()?;
+    Some(format!("{}-{:?}", m.len(), m.modified().ok()))
+}
+
+pub fn current(repo_dir: &Path) -> Verdict {
+    if !lifestream::home::is_home(repo_dir) {
         return Verdict::Unknown;
     }
-    if let Some(why) = &f.failed {
-        return Verdict::NeedsYou { why: format!("The last backup failed: {why}"), fix: Fix::BackUpNow };
-    }
-    let Some(last) = f.last else {
-        return Verdict::NeedsYou { why: "Nothing has been backed up yet.".into(), fix: Fix::BackUpNow };
-    };
-    if !f.has_remote {
-        return Verdict::NeedsYou { why: "Your backup is only on this computer. Sign in to keep a private copy on GitHub.".into(), fix: Fix::SignIn };
-    }
-    let age = now - last;
-    if age > STALE_DAYS * 86_400 {
-        return Verdict::NeedsYou { why: format!("The last backup was {}.", ago(age)), fix: Fix::BackUpNow };
-    }
-    if f.ahead > 0 && age > 86_400 {
-        return Verdict::NeedsYou { why: "The newest changes have not reached GitHub yet.".into(), fix: Fix::BackUpNow };
-    }
-    Verdict::Safe { when: ago(age) }
+    let Ok(dir) = lifestream::backup::dir_of(None) else { return Verdict::Unknown };
+    let now = chrono::Utc::now().timestamp();
+    from_engine(&lifestream::backup::compute(&dir, now, false), now)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn facts() -> Facts {
-        Facts { is_home: true, last: Some(1_000_000), has_remote: true, ahead: 0, failed: None }
+    fn engine(state: &'static str, reason: Option<&str>, last_ok: Option<i64>) -> Engine {
+        Engine { state, since: None, reason: reason.map(String::from), failing_runs: 0, last_ok, notify: false }
     }
 
     #[test]
-    fn says_nothing_without_a_home_repository() {
-        assert_eq!(verdict(&Facts::default(), 5), Verdict::Unknown);
+    fn ok_is_safe_with_how_long_ago() {
+        assert_eq!(from_engine(&engine("ok", None, Some(1_000_000)), 1_000_720), Verdict::Safe { when: "12 minutes ago".into() });
     }
 
     #[test]
-    fn recent_and_pushed_is_all_safe() {
-        assert_eq!(verdict(&facts(), 1_000_000 + 720), Verdict::Safe { when: "12 minutes ago".into() });
-    }
-
-    #[test]
-    fn a_fresh_unpushed_commit_is_not_alarming() {
-        let f = Facts { ahead: 2, ..facts() };
-        assert!(matches!(verdict(&f, 1_000_000 + 600), Verdict::Safe { .. }));
-    }
-
-    #[test]
-    fn each_problem_names_one_plain_fix() {
-        let day = 86_400;
-        assert!(matches!(verdict(&Facts { last: None, ..facts() }, 0), Verdict::NeedsYou { fix: Fix::BackUpNow, .. }));
-        assert!(matches!(verdict(&Facts { has_remote: false, ..facts() }, 1_000_100), Verdict::NeedsYou { fix: Fix::SignIn, .. }));
-        assert!(matches!(verdict(&Facts { ahead: 1, ..facts() }, 1_000_000 + day + 1), Verdict::NeedsYou { fix: Fix::BackUpNow, .. }));
-        assert!(matches!(verdict(&facts(), 1_000_000 + 4 * day), Verdict::NeedsYou { fix: Fix::BackUpNow, .. }));
-    }
-
-    #[test]
-    fn a_failed_watcher_run_is_never_all_safe() {
-        let f = Facts { failed: Some("git commit: no identity".into()), ..facts() };
-        match verdict(&f, 1_000_100) {
-            Verdict::NeedsYou { why, fix } => { assert!(why.contains("no identity")); assert_eq!(fix, Fix::BackUpNow); }
-            other => panic!("{other:?}"),
+    fn failing_and_stale_need_you_with_the_engines_own_sentence() {
+        for state in ["failing", "stale"] {
+            match from_engine(&engine(state, Some("Your backup can't reach GitHub."), Some(1)), 5) {
+                Verdict::NeedsYou { why, fix } => assert_eq!((why.as_str(), fix), ("Your backup can't reach GitHub.", Fix::BackUpNow)),
+                other => panic!("{other:?}"),
+            }
         }
     }
 
     #[test]
-    fn only_a_failed_result_counts_as_failure() {
-        assert_eq!(watch_failure(r#"{"at":1,"result":"FAILED: capture failed"}"#), Some("capture failed".into()));
-        assert_eq!(watch_failure(r#"{"at":1,"result":"ok: 2 commit(s), up to date"}"#), None);
-        assert_eq!(watch_failure(r#"{"at":1,"result":"busy: another run"}"#), None);
-        assert_eq!(watch_failure("not json"), None);
+    fn signed_out_is_fixed_by_signing_in() {
+        let st = engine("failing", Some("Hestia is signed out of GitHub, so your backup can't be sent."), None);
+        assert!(matches!(from_engine(&st, 5), Verdict::NeedsYou { fix: Fix::SignIn, .. }));
     }
 
     #[test]
-    fn a_quiet_but_healthy_watcher_counts_as_a_recent_backup() {
-        assert_eq!(watch_ok_at(r#"{"at":1700,"result":"ok: 0 commit(s), up to date"}"#), Some(1700));
-        assert_eq!(watch_ok_at(r#"{"at":1700,"result":"FAILED: x"}"#), None);
-        assert_eq!(watch_ok_at(r#"{"at":1700,"result":"busy: y"}"#), None);
+    fn nothing_known_says_nothing() {
+        assert_eq!(from_engine(&engine("unknown", None, None), 5), Verdict::Unknown);
     }
 
     #[test]

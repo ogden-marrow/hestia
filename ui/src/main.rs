@@ -373,7 +373,7 @@ impl State {
     }
     fn reload_backup(&mut self) {
         self.backup_stamp = repo::stamp(&self.repo_dir);
-        self.backup = backup::verdict(&backup::read(&self.repo_dir), chrono::Utc::now().timestamp());
+        self.backup = backup::current(&self.repo_dir);
     }
     fn reload_repo(&mut self) {
         self.repo_status = repo::status_line(&self.repo_dir);
@@ -643,7 +643,7 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
         }
         changed |= s.pane == Pane::System;
     }
-    let watch = backup::watch_json();
+    let watch = backup::stamp();
     if f.repo != s.backup_stamp || watch != s.watch_seen {
         s.watch_seen = watch;
         s.reload_backup();
