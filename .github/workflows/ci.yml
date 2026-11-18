@@ -50,6 +50,8 @@ jobs:
         run: bash tests/watcher-failures.sh
       - name: Backup notification (one gentle notice after 6 hours of failing, never twice, never when healthy)
         run: bash tests/watcher-notify.sh
+      - name: Restore rehearsal (a good repository passes; a broken or poisoned one is caught; nothing outside the scratch folder moves)
+        run: bash tests/rehearse.sh
 
   # Where dependencies come from and whether any has a known vulnerability. 'sources' blocks (a dependency from an
   # unexpected place); 'advisories' reports but does not block, because a new advisory should not stop unrelated work.

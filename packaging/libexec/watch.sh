@@ -65,7 +65,7 @@ tell() {
       ;;
     *'"notify":true'*)
       command -v notify-send >/dev/null 2>&1 || return 0
-      reason="$(printf '%s' "$js" | sed -n 's/.*"reason":"\([^"]*\)".*/\1/p')"
+      reason="$(printf '%s' "$js" | sed -n 's/.*"reason":"\([^"]*\)".*/\1/p' | sed 's/\\n/ /g')"   # a second line (the restore check) joins the first in a one-line notification
       [ -n "$reason" ] || return 0
       notify-send -u normal -a Hestia "Hestia: your backup needs you" "$reason" >/dev/null 2>&1 \
         && "$LS" backup-state --share "${state%/hestia}" --mark-notified >/dev/null 2>&1

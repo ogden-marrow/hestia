@@ -25,11 +25,50 @@ pub struct State {
     pub failing_runs: usize,
     pub last_ok: Option<i64>,
     pub notify: bool,
+    pub rehearsal: Rehearsal,
+}
+
+/// The last restore rehearsal (`<share>/hestia/rehearsal.json`, written by `rehearse.sh`). Only the time and the verdict are
+/// read; the plain sentences in `problems` are never copied.
+#[derive(Debug, PartialEq, Clone)]
+pub struct Rehearsal {
+    pub at: Option<i64>,
+    /// `passed`, `failed` or `never` (no readable result yet)
+    pub result: &'static str,
+    pub age_days: Option<i64>,
+}
+
+/// A rehearsal older than this is worth a second line when the backup already needs you.
+pub const REHEARSAL_OLD_DAYS: i64 = 14;
+
+impl Rehearsal {
+    fn never() -> Self {
+        Rehearsal { at: None, result: "never", age_days: None }
+    }
+    /// A failed or overdue rehearsal: the one thing to add as a second line (only ever to a reason that already exists).
+    fn second_line(&self) -> Option<&'static str> {
+        match (self.result, self.age_days) {
+            ("failed", _) => Some("Your last restore check failed: your backup may not restore. Open Hestia to see what to do."),
+            (_, Some(d)) if d > REHEARSAL_OLD_DAYS => Some("Your backup has not been checked by a restore for more than two weeks."),
+            _ => None,
+        }
+    }
+}
+
+fn rehearsal(dir: &Path, now: i64) -> Rehearsal {
+    let Some(v) = read_tail(&dir.join("rehearsal.json")).and_then(|t| serde_json::from_str::<Value>(t.trim()).ok()) else { return Rehearsal::never() };
+    let (Some(at), Some(result)) = (v["at"].as_i64(), v["result"].as_str()) else { return Rehearsal::never() };
+    let result = match result {
+        "passed" => "passed",
+        "failed" => "failed",
+        _ => return Rehearsal::never(),
+    };
+    Rehearsal { at: Some(at), result, age_days: Some(((now - at).max(0)) / 86400) }
 }
 
 impl State {
     fn quiet(state: &'static str, last_ok: Option<i64>) -> Self {
-        State { state, since: None, reason: None, failing_runs: 0, last_ok, notify: false }
+        State { state, since: None, reason: None, failing_runs: 0, last_ok, notify: false, rehearsal: Rehearsal::never() }
     }
     /// Does this state need a person (and so can it be an "episode")?
     pub fn needs_you(&self) -> bool {
@@ -37,7 +76,8 @@ impl State {
     }
     pub fn to_json(&self) -> String {
         let t = |s: Option<i64>| s.and_then(|s| DateTime::from_timestamp(s, 0)).map(|d| d.to_rfc3339_opts(SecondsFormat::Secs, true));
-        json!({"state": self.state, "since": t(self.since), "reason": self.reason, "failing_runs": self.failing_runs, "last_ok": t(self.last_ok), "notify": self.notify}).to_string()
+        json!({"state": self.state, "since": t(self.since), "reason": self.reason, "failing_runs": self.failing_runs, "last_ok": t(self.last_ok), "notify": self.notify,
+              "rehearsal": {"at": t(self.rehearsal.at), "result": self.rehearsal.result, "age_days": self.rehearsal.age_days}}).to_string()
     }
 }
 
@@ -121,7 +161,19 @@ fn failure_sentence(result: &str) -> &'static str {
 }
 
 /// The policy. `dir` is `<share>/hestia`; `now` is epoch seconds; `notifications` is the setting.
+/// The restore rehearsal rides along: it never changes the state or `notify`; a failed or overdue one only adds a second line
+/// to a reason that already exists (a healthy backup has no reason).
 pub fn compute(dir: &Path, now: i64, notifications: bool) -> State {
+    let mut st = policy(dir, now, notifications);
+    st.rehearsal = rehearsal(dir, now);
+    if let (Some(r), Some(line)) = (st.reason.as_mut(), st.rehearsal.second_line()) {
+        r.push('\n');
+        r.push_str(line);
+    }
+    st
+}
+
+fn policy(dir: &Path, now: i64, notifications: bool) -> State {
     let all = runs(dir);
     let real: Vec<_> = all.iter().filter(|r| r.1 != Kind::Routine).collect();
     let last_ok = real.iter().rev().find(|r| r.1 == Kind::Ok).map(|r| r.0);
@@ -147,7 +199,7 @@ pub fn compute(dir: &Path, now: i64, notifications: bool) -> State {
     let age = (now - since).max(0);
     let reason = if state == "failing" { format!("{} It has not worked for {}.", sentence, hours(age)) } else { format!("{} Nothing has finished for {}.", sentence, hours(now - last_ok.unwrap_or(since))) };
     let notify = notifications && age >= NOTIFY_AFTER && notified != Some(since);
-    State { state, since: Some(since), reason: Some(reason), failing_runs: runs_n, last_ok, notify }
+    State { state, since: Some(since), reason: Some(reason), failing_runs: runs_n, last_ok, notify, rehearsal: Rehearsal::never() }
 }
 
 /// `<share>/hestia`: where the watcher keeps its files.
@@ -268,6 +320,68 @@ mod tests {
         fs::write(d.join("watch.json"), "{{{{").unwrap();
         let s = compute(&d, NOW, true);
         assert_eq!((s.state, s.notify), ("unknown", false));
+    }
+
+    fn with_rehearsal(d: &Path, at: i64, result: &str) {
+        fs::write(d.join("rehearsal.json"), json!({"at": at, "result": result, "checked": 9, "problems": ["/home/me/.ssh/id_rsa ghp_abcdefghijklmnopqrstuvwxyz0123456789"], "repo_commit": "abc1234"}).to_string()).unwrap();
+    }
+
+    #[test]
+    fn no_rehearsal_yet_is_never_and_adds_nothing() {
+        let d = dir_with(&[(NOW - 9 * H, "FAILED: offline: x")]);
+        let s = compute(&d, NOW, true);
+        assert_eq!(s.rehearsal, Rehearsal::never());
+        assert!(!s.reason.clone().unwrap().contains('\n'));
+        assert!(s.to_json().contains(r#""rehearsal":{"age_days":null,"at":null,"result":"never"}"#), "{}", s.to_json());
+    }
+
+    #[test]
+    fn a_passed_rehearsal_is_reported_with_its_age() {
+        let d = dir_with(&[(NOW - H, "ok: 1 commit(s), pushed")]);
+        with_rehearsal(&d, NOW - 3 * 86400 - 5, "passed");
+        let s = compute(&d, NOW, true);
+        assert_eq!((s.state, s.rehearsal.result, s.rehearsal.age_days), ("ok", "passed", Some(3)));
+        assert!(s.reason.is_none());
+        assert!(s.to_json().contains(r#""age_days":3"#));
+    }
+
+    #[test]
+    fn a_failed_or_overdue_rehearsal_is_only_a_second_line_and_never_makes_ok_failing() {
+        let ok = dir_with(&[(NOW - H, "ok: 1 commit(s), pushed")]);
+        with_rehearsal(&ok, NOW - H, "failed");
+        let s = compute(&ok, NOW, true);
+        assert_eq!((s.state, s.notify, s.reason, s.rehearsal.result), ("ok", false, None, "failed"));
+        let old = dir_with(&[(NOW - H, "ok: 1 commit(s), pushed")]);
+        with_rehearsal(&old, NOW - 15 * 86400, "passed");
+        let s = compute(&old, NOW, true);
+        assert_eq!((s.state, s.reason), ("ok", None));
+        assert_eq!(s.rehearsal.age_days, Some(15));
+        // a backup that already needs you gets the second line, after the first
+        let bad = dir_with(&[(NOW - 9 * H, "FAILED: offline: x")]);
+        with_rehearsal(&bad, NOW - H, "failed");
+        let s = compute(&bad, NOW, true);
+        let r = s.reason.clone().unwrap();
+        let lines: Vec<_> = r.lines().collect();
+        assert_eq!(lines.len(), 2, "{r}");
+        assert!(lines[0].contains("internet") && lines[1].contains("restore check failed"), "{r}");
+        assert!(s.notify, "the notification policy is unchanged");
+        // a fresh pass adds nothing; an old pass says it has been a while
+        with_rehearsal(&bad, NOW - H, "passed");
+        assert_eq!(compute(&bad, NOW, true).reason.unwrap().lines().count(), 1);
+        with_rehearsal(&bad, NOW - 20 * 86400, "passed");
+        assert!(compute(&bad, NOW, true).reason.unwrap().contains("two weeks"));
+    }
+
+    #[test]
+    fn a_garbage_rehearsal_file_is_never_and_its_words_are_never_copied() {
+        let d = dir_with(&[(NOW - 9 * H, "FAILED: offline: x")]);
+        for junk in ["{{{{", r#"{"at":"x","result":"passed"}"#, r#"{"at":1,"result":"bogus"}"#] {
+            fs::write(d.join("rehearsal.json"), junk).unwrap();
+            assert_eq!(compute(&d, NOW, true).rehearsal, Rehearsal::never(), "{junk}");
+        }
+        with_rehearsal(&d, NOW - H, "failed");
+        let j = compute(&d, NOW, true).to_json();
+        assert!(!j.contains("ghp_") && !j.contains(".ssh") && !j.contains("abc1234"), "{j}");
     }
 
     #[test]

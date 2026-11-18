@@ -40,7 +40,7 @@ Goal: the owner opens Hestia and it feels like a native app that does the job: l
 ### Next: M5 Everything backed up, provably
 Goal: the owner never has to wonder whether the backup works.
 - Desktop notification and tray state when a backup keeps failing (#225): done in the engine, watcher and tray; the app should show `lifestream backup-state` too.
-- Weekly restore rehearsal in a scratch folder (#226).
+- Weekly restore rehearsal in a scratch folder (#226): done in the engine, restore script and a weekly timer; shown through `lifestream backup-state` (`rehearsal`), the app shows it next.
 - "Left out and why": skipped, withheld and denied files shown (#227).
 - Coverage check: warn when important config is not captured (#228).
 - Repository size guard (#229).

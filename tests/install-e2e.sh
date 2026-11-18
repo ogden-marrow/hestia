@@ -23,15 +23,19 @@ git config --global user.email t@t.t; git config --global user.name t; git confi
 bash "$here/install.sh" >"$T/install.log" 2>&1 || { cat "$T/install.log" >&2; fail "install.sh failed"; }
 for b in hestia hestia-tray lifestream; do [ -x "$PREFIX/bin/$b" ] || fail "$b was not installed"; done
 "$PREFIX/bin/lifestream" --version >/dev/null || fail "lifestream does not run"
-for f in watch.sh capture.sh bootstrap.sh dconf-filter.sh capture-paths.default; do [ -e "$PREFIX/libexec/hestia/$f" ] || fail "libexec/$f missing"; done
-for f in watch.sh capture.sh bootstrap.sh dconf-filter.sh; do [ -x "$PREFIX/libexec/hestia/$f" ] || fail "$f is not executable"; done
+for f in watch.sh capture.sh bootstrap.sh rehearse.sh restore-rules.sh dconf-filter.sh capture-paths.default; do [ -e "$PREFIX/libexec/hestia/$f" ] || fail "libexec/$f missing"; done
+for f in watch.sh capture.sh bootstrap.sh rehearse.sh dconf-filter.sh; do [ -x "$PREFIX/libexec/hestia/$f" ] || fail "$f is not executable"; done
 grep -qx "home=$HESTIA_HOME" "$HOME/.config/hestia/settings" || fail "the home repository setting was not seeded in the app's settings"
 [ ! -e "$HOME/.config/environment.d/hestia.conf" ] || fail "a second place for the home repository was written (one setting only)"
 unit="$HOME/.config/systemd/user"
-for u in hestia-watch.service hestia-watch.timer lifestream-nightly.service lifestream-morning.service hestia-tray.service; do [ -f "$unit/$u" ] || fail "$u missing"; done
+for u in hestia-watch.service hestia-watch.timer hestia-rehearse.service hestia-rehearse.timer lifestream-nightly.service lifestream-morning.service hestia-tray.service; do [ -f "$unit/$u" ] || fail "$u missing"; done
 grep -l '@[A-Z_]*@' "$unit"/* 2>/dev/null && fail "a systemd unit still has an unfilled placeholder"
 grep -qx "ExecStart=$PREFIX/libexec/hestia/watch.sh" "$unit/hestia-watch.service" || fail "the watch unit must run the installed script and take the home repository from the setting, not carry its own copy"
 grep -q '^OnActiveSec=' "$unit/hestia-watch.timer" || fail "the watch timer would not fire after install"
+grep -qx "ExecStart=$PREFIX/libexec/hestia/rehearse.sh" "$unit/hestia-rehearse.service" || fail "the rehearsal unit must run the installed script"
+grep -q '^OnCalendar=weekly' "$unit/hestia-rehearse.timer" && grep -q '^Persistent=true' "$unit/hestia-rehearse.timer" && grep -q '^RandomizedDelaySec=' "$unit/hestia-rehearse.timer" || fail "the rehearsal timer is not weekly, persistent and randomized"
+grep -q '^IOSchedulingClass=idle' "$unit/hestia-rehearse.service" && grep -q '^Nice=' "$unit/hestia-rehearse.service" && grep -q '^ConditionACPower=true' "$unit/hestia-rehearse.service" || fail "the rehearsal runs at full priority or on battery"
+grep -q "systemctl --user enable hestia-rehearse.timer" "$T/calls.log" || fail "the rehearsal timer was not enabled"
 grep -q "Exec=" "$HOME/.local/share/applications/app.hestia.Hestia.desktop" || fail "no desktop entry"
 [ -d "$HOME/.local/share/gnome-shell/extensions/hestia-clipboard@hestia.app" ] || fail "the shell extension was not installed"
 grep -q "systemctl --user enable hestia-watch.timer" "$T/calls.log" || fail "the watch timer was not enabled"
@@ -77,7 +81,7 @@ echo "$out" | grep -q "dry run" || fail "bootstrap did not say it was a dry run"
 # 6. uninstall leaves the person's own things alone
 bash "$here/uninstall.sh" >/dev/null || fail "uninstall failed"
 for b in hestia hestia-tray lifestream; do [ ! -e "$PREFIX/bin/$b" ] || fail "$b survived uninstall"; done
-[ ! -e "$PREFIX/libexec/hestia" ] && [ ! -e "$unit/hestia-watch.timer" ] || fail "libexec or units survived uninstall"
+[ ! -e "$PREFIX/libexec/hestia" ] && [ ! -e "$unit/hestia-watch.timer" ] && [ ! -e "$unit/hestia-rehearse.timer" ] && [ ! -e "$unit/hestia-rehearse.service" ] || fail "libexec or units survived uninstall"
 [ "$(cat "$HESTIA_HOME/notes.txt")" = "mine" ] && [ -d "$HESTIA_HOME/.git" ] || fail "uninstall touched the home repository"
 [ "$(cat "$HOME/.bashrc")" = "my own bashrc" ] || fail "uninstall touched the person's files"
 echo "install end to end ok"

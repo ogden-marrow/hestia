@@ -1,0 +1,15 @@
+[Unit]
+Description=Hestia: prove the backup can be restored (a scratch folder, never your home folder)
+# not on battery: a rehearsal can wait for the charger (the timer is Persistent, so it runs when the computer is next plugged in)
+ConditionACPower=true
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+# a stalled restore is stopped, so it can never hold the one-at-a-time lock for ever
+TimeoutStartSec=15min
+# 75: another rehearsal still holds the lock; that is not a failure of this unit. (A failed rehearsal exits 1: the unit fails and says so.)
+SuccessExitStatus=75
+ExecStart=@LIBEXEC@/rehearse.sh

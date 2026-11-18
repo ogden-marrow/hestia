@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # setup-user.sh (also installed as `hestia-setup`) — the per-person part of installing Hestia: seed the home repository
-# setting, write the systemd user units that run the nightly scan, the morning note, the tray and the machine watcher, and
+# setting, write the systemd user units that run the nightly scan, the morning note, the tray, the machine watcher and the weekly restore rehearsal, and
 # enable them. install.sh calls this; a .deb install (which can only put files under /usr) tells you to run `hestia-setup` once.
 # It is safe to run again. It lives next to the units' templates (./systemd) and the programs (../../bin).
 #   HESTIA_HOME=~/Home hestia-setup     # the first value of the home repository setting; never overwrites one that is set
@@ -32,5 +32,8 @@ systemctl --user enable --now hestia-tray.service lifestream-nightly.timer lifes
 systemctl --user enable hestia-watch.timer
 # restart, not just start: a timer that is already running keeps its old schedule until restarted
 systemctl --user restart hestia-watch.timer
+# the weekly restore rehearsal (Persistent=true: a week missed while the computer was off runs at the next start)
+systemctl --user enable hestia-rehearse.timer
+systemctl --user restart hestia-rehearse.timer
 echo "Hestia is set up for $(id -un): the home repository setting, the schedules and the tray."
 systemctl --user list-timers 'lifestream-*' 'hestia-*' || true
