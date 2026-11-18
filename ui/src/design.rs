@@ -239,6 +239,17 @@ impl Design {
     }
 }
 
+/// The widest a page of reading content should be (rules, helpers, today): wider windows centre it.
+pub const READING: f32 = 760.0;
+
+/// A page's content column: as wide as the window up to `max`, centred when the window is wider, and
+/// filling the height so its own scroll works. One place decides how pages adapt to width.
+pub fn page(d: &Design, max: f32, child: rune::El) -> rune::El {
+    use rune::{col, row};
+    row().w_full().grow(1.0).shrink().min_h(0.0).center()
+        .child(col().w_full().h_full().max_w(d.size(max)).shrink().min_h(0.0).child(child))
+}
+
 /// Surfaces: crisp, flat, meeting edge to edge.
 pub trait Surface {
     /// The whole-window backdrop.
