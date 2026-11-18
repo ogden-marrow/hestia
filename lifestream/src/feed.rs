@@ -375,8 +375,7 @@ pub fn render(items: &[Item]) -> String {
 
 /// Where the watcher keeps its run history.
 pub fn history_path() -> Option<PathBuf> {
-    let share = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| crate::home().ok().map(|h| h.join(".local/share")))?;
-    Some(share.join("hestia/watch-history.jsonl"))
+    Some(crate::share_dir()?.join("hestia/watch-history.jsonl"))
 }
 
 pub fn cmd_feed(since: Option<String>, limit: usize, stream: &Path) -> Result<()> {

@@ -127,6 +127,16 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Is the backup working? One JSON line: state ok|stale|failing|unknown, since, a plain reason, failing_runs, last_ok and notify
+    /// (true when a problem has lasted 6 hours and nobody was told yet). Reads the watcher's files only; prints no paths or secrets.
+    BackupState {
+        /// the data folder that holds hestia/watch.json (default $XDG_DATA_HOME or ~/.local/share)
+        #[arg(long)]
+        share: Option<PathBuf>,
+        /// remember that this problem was told (or forget it when the backup works again)
+        #[arg(long)]
+        mark_notified: bool,
+    },
     /// Rename or create one folder, journaled so `file --undo` can take it back. One JSON line; exit 1 with a "failed" event if refused.
     Folder {
         #[command(subcommand)]
@@ -277,6 +287,7 @@ fn main() -> Result<()> {
     match cmd {
         Cmd::Tree { tree, apply, r#move } => lifestream::tree::cmd_tree(tree, apply, r#move),
         Cmd::File { tree, out, manifest, apply, undo, batch } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply, undo, batch),
+        Cmd::BackupState { share, mark_notified } => lifestream::backup::cmd(share, mark_notified),
         Cmd::Feed { since, limit, out } => lifestream::feed::cmd_feed(since, limit, &stream_dir(out)?),
         Cmd::Folder { cmd, out, manifest } => {
             let stream = stream_dir(out)?;
