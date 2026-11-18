@@ -269,6 +269,7 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(row().w_full().gap(d.gap()).center_y().px(d.item_px())
             .child(super::questions::button(&d, "m-refresh", "Refresh".into(), false, |s: &mut State| s.reload_machine()))
             .child(super::questions::action(&d, "m-capture", "Back up now", "Backing up…", s.mach.iter().any(|c| c.drift() > 0), s.jobs.running("capture"), |s: &mut State| s.capture_now())))
+        .children(s.restore_check.as_ref().map(|(line, bad)| text(line.clone()).font(style(&d, type_::LABEL)).color(if *bad { d.danger() } else { t.text_secondary }).px(d.item_px()).wrap_anywhere().shrink()))
         .child(text(if s.msg.is_empty() { "How this computer differs from your last backup. Back up now to save the current state; Saves shows what changed.".to_string() } else { s.msg.clone() })
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
     ;
