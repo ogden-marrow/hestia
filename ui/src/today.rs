@@ -115,10 +115,12 @@ pub fn panel(s: &State) -> El {
         let mut list = col().w_full().tile(&d);
         for (i, b) in s.bundles.iter().take(3).enumerate() {
             list = list.child(
-                row().w_full().h(d.row_h() + d.gap()).px(d.item_px()).gap(d.pad()).center_y()
+                row().key(format!("today-folder-{i}")).w_full().h(d.row_h() + d.gap()).px(d.item_px()).gap(d.pad()).center_y()
+                    .on_press(move |s: &mut State| { s.qsel = i; s.go_pane(Pane::Questions) })
                     .border_sides([if i == 0 { 0.0 } else { 1.0 }, 0.0, 0.0, 0.0], t.card_border)
                     .child(text(b.root.rsplit('/').next().unwrap_or(&b.root).to_string()).font(d.text(Role::Body)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
-                    .child(text(count(b.ids.len(), "file", "files")).font(d.text(Role::Label)).color(t.text_secondary)),
+                    .child(text(count(b.ids.len(), "file", "files")).font(d.text(Role::Label)).color(t.text_secondary))
+                    .child(text("›".to_string()).font(d.text(Role::Body)).color(t.text_secondary)),
             );
         }
         col().w_full().gap(d.pad())
