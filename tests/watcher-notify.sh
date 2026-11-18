@@ -52,7 +52,7 @@ mended() { git -C "$r" config commit.gpgsign false; }
 run() { echo "export N=$RANDOM" >> "$HOME/.bashrc"; rc=0; bash "$w" "$r" || rc=$?; }
 sent() { grep -c . "$calls" || true; }
 is() { local j; j="$(state)"; case "$j" in *"$1"*) ;; *) return 1 ;; esac; case "$j" in *"$2"*) ;; *) return 1 ;; esac; }
-state() { "$ls_bin" backup-state --share "${1:-$HOME/.local/share}"; }
+state() { "$ls_bin" backup-state --share "$HOME/.local/share"; }
 
 # ---- the engine's contract: one JSON line with exactly these fields
 fresh; ago 1 "ok: 0 commit(s), up to date"
