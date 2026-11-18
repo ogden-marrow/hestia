@@ -521,10 +521,9 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", n_moves > 0, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
 
     let rules = col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
-        .child(row().w_full().grow(1.0).shrink().min_h(0.0).center()
-            .child(col().w_full().h_full().max_w(d.size(760.0)).gap(d.pad()).shrink().min_h(0.0)
-                .child(head)
-                .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body))));
+        .child(crate::design::page(&d, crate::design::READING, col().w_full().h_full().gap(d.pad()).shrink().min_h(0.0)
+            .child(head)
+            .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body))));
     vec![rules]
 }
 

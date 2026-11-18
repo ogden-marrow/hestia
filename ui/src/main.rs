@@ -569,7 +569,7 @@ fn system_panel(s: &State) -> El {
 
     let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(if st.gpu.is_some() { row().w_full().gap(d.pad()).child(pipe.grow(1.0)).child(hw.grow(1.0)) } else { row().w_full().child(pipe.grow(1.0)) });
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
-        .child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(inner))
+        .child(design::page(&d, design::READING, col().w_full().h_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).child(inner)))
 }
 
 /// Ctrl+, opens Settings and Ctrl+F opens Search, from anywhere; arrow keys move through time on the time view.
