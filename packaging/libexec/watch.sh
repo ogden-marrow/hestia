@@ -33,14 +33,21 @@ state="${XDG_DATA_HOME:-$HOME/.local/share}/hestia"; mkdir -p "$state"
 withheld_note=""
 note() { # one line of JSON; quotes, backslashes and control characters in the text are made safe
   local t="${1//\\/\\\\}"; t="${t//\"/\\\"}"; t="$(printf '%s' "$t" | tr -d '\000-\037')"
-  printf '{"at":%s,"result":"%s%s"}\n' "$(date +%s)" "$t" "$withheld_note" > "$state/watch.json"
+  local now; now="$(date +%s)"
+  printf '{"at":%s,"result":"%s%s"}\n' "$now" "$t" "$withheld_note" > "$state/watch.json"
+  # the last 200 runs, one line each, for the Stream's feed (lifestream feed). A run that did not get the lock writes none.
+  [ "${keep_history:-1}" = 1 ] || return 0
+  printf '{"at":%s,"result":"%s","commits":%s}\n' "$now" "$t" "${made:-0}" >> "$state/watch-history.jsonl"
+  if [ "$(wc -l < "$state/watch-history.jsonl")" -gt 200 ]; then
+    tail -n 200 "$state/watch-history.jsonl" > "$state/watch-history.tmp" && mv -f "$state/watch-history.tmp" "$state/watch-history.jsonl"
+  fi
 }
 die() { note "FAILED: $1"; exit 1; }
 first() { local l; l="$(printf '%s\n' "$1" | sed -n '/[^[:space:]]/{p;q}')"; printf '%s' "${l:-no details}"; }   # first non-blank line
 
 # one at a time. A second run says so (the app must not report "captured" when nothing ran).
 exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hestia-watch.lock"
-flock -n 9 || { note "busy: another capture is still running, so nothing new was captured"; exit 75; }
+flock -n 9 || { keep_history=0 note "busy: another capture is still running, so nothing new was captured"; exit 75; }
 
 # ---- is the computer quiet enough? (pressure stall info: the share of the last 10 s anything waited)
 # Waiting is never for ever: after HESTIA_MAX_WAIT seconds (6 h) since the last capture it runs anyway.

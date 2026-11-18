@@ -367,7 +367,7 @@ pub fn apply(plan: &Plan, stream: &Path, home: &Path) -> Result<(usize, Vec<Stri
         }
     }
     write_all(stream, &recs)?;
-    journal_batch(stream, home, &done)?;
+    journal_batch(stream, home, &done, &recs)?;
     Ok((done.len(), failed))
 }
 
@@ -379,9 +379,10 @@ fn journal_path(stream: &Path) -> PathBuf {
 
 /// The journal is `<stream>/moves.jsonl`, one JSON object per line; lines that share a `batch` (the time) are undone together.
 /// Three kinds, told apart by `kind` (a line without one is a file move):
-///   file   {"batch","id","from","to"}               `apply` moved a file from `from` to `to` (paths as `~/...`)
-///   dir    {"batch","kind":"dir","from","to"}       `move_dir` renamed a folder
-///   mkdir  {"batch","kind":"mkdir","to"}            `make_dir` created an empty folder
+///   file   {"batch","id","from","to","actor","reason"}        `apply` moved a file from `from` to `to` (paths as `~/...`)
+///   dir    {"batch","kind":"dir","from","to","actor","reason"}  `move_dir` renamed a folder
+///   mkdir  {"batch","kind":"mkdir","to","actor","reason"}       `make_dir` created an empty folder
+/// `actor` (hestia_rule | model | you) and `reason` (one plain sentence) say who decided; the feed reads them.
 /// A journal is a file on disk, so undo treats every line as untrusted.
 fn journal_append(stream: &Path, lines: &[serde_json::Value]) -> Result<()> {
     if lines.is_empty() {
@@ -403,9 +404,16 @@ fn new_batch() -> String {
 }
 
 /// One line per file `apply` moved, all sharing one batch id.
-fn journal_batch(stream: &Path, home: &Path, done: &[&Move]) -> Result<()> {
+/// Each line says who decided it, from the record that was filed (a rule, or the person's own answer).
+fn journal_batch(stream: &Path, home: &Path, done: &[&Move], recs: &[Record]) -> Result<()> {
     let batch = new_batch();
-    let lines: Vec<_> = done.iter().map(|m| serde_json::json!({"batch": batch, "id": m.id, "from": tilde(&m.from, home), "to": tilde(&m.to, home)})).collect();
+    let lines: Vec<_> = done
+        .iter()
+        .map(|m| {
+            let (actor, reason) = recs.iter().find(|r| r.id == m.id).map_or(("unknown", String::new()), |r| crate::feed::actor_reason(&r.by, &r.kind));
+            serde_json::json!({"batch": batch, "id": m.id, "from": tilde(&m.from, home), "to": tilde(&m.to, home), "actor": actor, "reason": reason})
+        })
+        .collect();
     journal_append(stream, &lines)
 }
 
@@ -418,7 +426,7 @@ pub struct UndoReport {
 
 /// `~/a/b` -> /home/x/a/b, only if it is a plain, non-hidden path under the home folder (a journal is a file on disk:
 /// treat it as untrusted, like everything else the mover reads).
-fn under_home(home: &Path, t: &str) -> Option<PathBuf> {
+pub(crate) fn under_home(home: &Path, t: &str) -> Option<PathBuf> {
     let rel = t.strip_prefix("~/")?;
     rel_ok(rel).then(|| home.join(rel))
 }
@@ -427,9 +435,22 @@ fn under_home(home: &Path, t: &str) -> Option<PathBuf> {
 /// already at the old path stops that one), never leaves the home folder, and leaves anything it could not restore in
 /// the journal so asking again retries it. The stream is updated to match what happened on disk.
 pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
+    undo_batch(stream, home, None)
+}
+
+/// Like `undo_last`, for the batch with this id (the `batch` the feed shows); `None` is the last one. An id the journal
+/// does not hold undoes nothing. The id is only compared with what the journal says, never used as a path.
+pub fn undo_batch(stream: &Path, home: &Path, which: Option<&str>) -> Result<UndoReport> {
     let text = fs::read_to_string(journal_path(stream)).unwrap_or_default();
     let lines: Vec<serde_json::Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
-    let Some(batch) = lines.last().and_then(|v| v["batch"].as_str()).map(String::from) else { return Ok(UndoReport::default()) };
+    let Some(batch) = (match which {
+        Some(w) => lines.iter().find(|v| v["batch"].as_str() == Some(w)).and_then(|v| v["batch"].as_str()),
+        None => lines.last().and_then(|v| v["batch"].as_str()),
+    })
+    .map(String::from) else {
+        return Ok(UndoReport::default());
+    };
+    let mut back = UndoLog::default();
     let mut recs = load_all(stream)?;
     let mut report = UndoReport::default();
     let mut stream_changed = false;
@@ -457,7 +478,7 @@ pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
             }
             // rmdir, never recursive: a folder that gained anything since is the person's now
             match fs::remove_dir(&to) {
-                Ok(()) => report.restored += 1,
+                Ok(()) => { report.restored += 1; back.removed += 1; back.paths.push(to_s.to_string()) }
                 Err(e) if e.kind() == ErrorKind::DirectoryNotEmpty => skip("kept: no longer empty", &mut report),
                 Err(e) => { skip(&e.to_string(), &mut report); continue }
             }
@@ -477,6 +498,8 @@ pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
             match rename_dir(home, &to, &from) {
                 Ok(()) => {
                     report.restored += 1;
+                    back.folders += 1;
+                    back.paths.push(from_s.to_string());
                     settled.push(i);
                     stream_changed |= retarget(&mut recs, to_s, from_s);
                 }
@@ -497,6 +520,8 @@ pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
         match move_file(&to, &from) {
             Ok(()) => {
                 report.restored += 1;
+                back.files += 1;
+                back.paths.push(from_s.to_string());
                 settled.push(i);
                 stream_changed = true;
                 if let Some(r) = recs.iter_mut().find(|r| r.id == id) {
@@ -518,7 +543,29 @@ pub fn undo_last(stream: &Path, home: &Path) -> Result<UndoReport> {
         fs::write(&tmp, keep)?;
         fs::rename(&tmp, journal_path(stream))?;
     }
+    back.write(stream);
     Ok(report)
+}
+
+/// What one undo put back, kept in `<stream>/undone.jsonl` so the feed can say "Put back 3 files": the journal lines
+/// themselves are removed once they are undone. A failed write is not an error: the files are back either way.
+#[derive(Default)]
+struct UndoLog {
+    files: usize,
+    folders: usize,
+    removed: usize,
+    paths: Vec<String>,
+}
+
+impl UndoLog {
+    fn write(&self, stream: &Path) {
+        if self.files + self.folders + self.removed == 0 {
+            return;
+        }
+        let line = serde_json::json!({"at": new_batch(), "files": self.files, "folders": self.folders, "removed": self.removed, "paths": self.paths.iter().take(10).collect::<Vec<_>>()});
+        use std::io::Write;
+        let _ = fs::OpenOptions::new().create(true).append(true).open(stream.join("undone.jsonl")).and_then(|mut f| writeln!(f, "{line}"));
+    }
 }
 
 /// Every part of `p` below the home folder must be a real folder: a symlink anywhere on the way down could point the
@@ -608,7 +655,7 @@ pub fn move_dir(home: &Path, from: &str, to: &str, excluded: &[PathBuf], stream:
     }
     rename_dir(home, &src, &dst)?;
     let (old, new) = (format!("~/{from}"), format!("~/{to}"));
-    journal_append(stream, &[serde_json::json!({"batch": new_batch(), "kind": "dir", "from": old, "to": new})])?;
+    journal_append(stream, &[serde_json::json!({"batch": new_batch(), "kind": "dir", "from": old, "to": new, "actor": "you", "reason": "you changed your folders"})])?;
     let mut recs = load_all(stream)?;
     if retarget(&mut recs, &old, &new) {
         write_all(stream, &recs)?;
@@ -647,7 +694,7 @@ pub fn make_dir(home: &Path, path: &str, stream: &Path) -> Result<()> {
         Err(e) if e.kind() == ErrorKind::AlreadyExists => bail!("{path} already exists"),
         Err(e) => return Err(e).with_context(|| format!("creating {path}")),
     }
-    journal_append(stream, &[serde_json::json!({"batch": new_batch(), "kind": "mkdir", "to": format!("~/{path}")})])
+    journal_append(stream, &[serde_json::json!({"batch": new_batch(), "kind": "mkdir", "to": format!("~/{path}"), "actor": "you", "reason": "you made a new folder"})])
 }
 
 /// The disk half of moving a folder that the rules tree names: a folder that only exists in the tree has nothing
@@ -686,11 +733,11 @@ pub fn print_plan(plan: &Plan, home: &Path) {
 }
 
 /// `lifestream file`: dry run unless `apply`.
-pub fn cmd_file(tree_path: Option<PathBuf>, stream: &Path, manifest: Option<PathBuf>, apply_it: bool, undo: bool) -> Result<()> {
+pub fn cmd_file(tree_path: Option<PathBuf>, stream: &Path, manifest: Option<PathBuf>, apply_it: bool, undo: bool, batch: Option<String>) -> Result<()> {
     let home = crate::home()?;
     if undo {
         // One JSON line, like the other engine commands: {"event":"undone","restored":N,"skipped":[{"path","why"}]}
-        let r = undo_last(stream, &home)?;
+        let r = undo_batch(stream, &home, batch.as_deref())?;
         println!("{}", serde_json::json!({"event": "undone", "restored": r.restored, "skipped": r.skipped.iter().map(|(p, w)| serde_json::json!({"path": p, "why": w})).collect::<Vec<_>>()}));
         return Ok(());
     }
@@ -1269,5 +1316,50 @@ mod tests {
         assert!(h.join(".ssh/keys").is_dir() && h.join("Real/Empty").is_dir() && outside.is_dir() && !h.join(".ssh/new").exists() && !h.join("Moved").exists());
         fs::remove_dir_all(h).unwrap();
         fs::remove_dir_all(outside).unwrap();
+    }
+
+    // ---- who decided, and the undo log the feed reads ----
+
+    fn journal(stream: &Path) -> Vec<serde_json::Value> {
+        fs::read_to_string(journal_path(stream)).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    }
+
+    #[test]
+    fn the_journal_says_who_decided() {
+        let (h, stream) = applied("actor1", &["a.png", "b.png"]);
+        let mut recs = load_all(&stream).unwrap();
+        let b = recs.iter_mut().find(|r| r.sources[0].ends_with("b.png")).unwrap();
+        b.by = By { tier: "human".into(), name: "me".into(), confidence: 1.0 };
+        b.kind = "image/holiday".into();
+        write_all(&stream, &recs).unwrap();
+        let p = plan(&load_all(&stream).unwrap(), &tree(), &h, &[], &HashSet::new());
+        assert_eq!(apply(&p, &stream, &h).unwrap().0, 2);
+        let lines = journal(&stream);
+        let of = |n: &str| lines.iter().find(|v| v["to"].as_str().unwrap().ends_with(n)).unwrap().clone();
+        assert_eq!((of("a.png")["actor"].as_str(), of("a.png")["reason"].as_str()), (Some("hestia_rule"), Some("rule: t")));
+        assert_eq!((of("b.png")["actor"].as_str(), of("b.png")["reason"].as_str()), (Some("you"), Some("you answered: holiday")));
+        make_dir(&h, "Pictures/New", &stream).unwrap();
+        move_dir(&h, "Pictures/New", "Pictures/Newer", &[], &stream).unwrap();
+        let lines = journal(&stream);
+        assert!(lines[lines.len() - 2..].iter().all(|v| v["actor"] == "you" && !v["reason"].as_str().unwrap().is_empty()), "{lines:?}");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_can_take_back_a_named_batch_and_leaves_a_log_for_the_feed() {
+        let (h, stream) = applied("actor2", &["a.png", "b.png"]);
+        move_one(&h, &stream, "a.png");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        move_one(&h, &stream, "b.png");
+        let first = journal(&stream)[0]["batch"].as_str().unwrap().to_string();
+        assert_eq!(undo_batch(&stream, &h, Some("no such batch")).unwrap(), UndoReport::default());
+        assert!(!stream.join("undone.jsonl").exists(), "nothing undone, nothing logged");
+        let r = undo_batch(&stream, &h, Some(&first)).unwrap();
+        assert_eq!(r.restored, 1);
+        assert!(h.join("Downloads/a.png").exists() && h.join("Pictures/Saved/b.png").exists(), "only the named batch came back");
+        let log = fs::read_to_string(stream.join("undone.jsonl")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+        assert_eq!((v["files"].as_u64(), v["paths"][0].as_str()), (Some(1), Some("~/Downloads/a.png")), "{log}");
+        fs::remove_dir_all(h).unwrap();
     }
 }

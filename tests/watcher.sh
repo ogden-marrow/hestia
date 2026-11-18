@@ -26,6 +26,15 @@ run
 grep -q "first capture of this computer" <<<"$(git log --format=%s)" || fail "no first capture commit"
 [ -z "$(git status --short)" ] || fail "tree not clean after the first capture"
 grep -q '"result":"ok' "$T/home/.local/share/hestia/watch.json" || fail "no status written"
+# every run adds one line to the history the Stream's feed reads: when, the result and how many commits it made
+hist="$T/home/.local/share/hestia/watch-history.jsonl"
+[ "$(wc -l < "$hist")" = 1 ] || fail "the first run did not write exactly one history line"
+grep -Eq '^\{"at":[0-9]+,"result":"ok[^"]*","commits":[1-9][0-9]*\}$' "$hist" || fail "the history line has no result and commit count: $(cat "$hist")"
+# only the last 200 runs are kept
+for i in $(seq 1 205); do echo "{\"at\":$i,\"result\":\"ok: filler\",\"commits\":0}" >> "$hist"; done
+run
+[ "$(wc -l < "$hist")" = 200 ] || fail "the history is not trimmed to 200 runs: $(wc -l < "$hist")"
+tail -1 "$hist" | grep -q '"commits":0' || fail "the newest run is not last in the history"
 
 echo 'export FOO=1' >> "$T/home/.bashrc"; run
 grep -q "config, 1 files changed" <<<"$(git log -1 --format=%s)" || fail "a changed dotfile is not its own commit"
@@ -54,6 +63,7 @@ git remote add origin https://github.com/someone/private-home.git
 git config "url.file://$T/elsewhere.pushInsteadOf" https://github.com/someone/private-home.git
 echo 'export BAR=2' >> "$T/home/.bashrc"; runf
 grep -q 'FAILED: not pushed' "$T/home/.local/share/hestia/watch.json" || fail "a rewritten push target was not refused"
+tail -1 "$hist" | grep -q '"result":"FAILED: not pushed' || fail "a failed run is not in the history"
 # a live file that is a symlink into the repository is never deleted by capture (bootstrap layout)
 git remote remove origin 2>/dev/null || true
 echo 'export PATH=$PATH' > "$T/home/.bashrc"; run

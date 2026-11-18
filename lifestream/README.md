@@ -84,3 +84,41 @@ shell: `lifestream tree --move FROM TO [--apply]`. `move_dir` / `make_dir` (`lif
 versions (`lifestream file --undo` takes the last one back). The classifier's label set is the built-in
 kinds plus every kind in `tree.toml` (`bundle::kinds_for`), and a changed tree makes cached
 folder suggestions stale, so `lifestream suggest` always works from the latest tree.
+
+## The feed: what happened and who decided (`lifestream feed`)
+
+```
+lifestream feed [--since DUR|TIMESTAMP] [--limit N] [--out STREAM]
+```
+
+The one reader behind the Stream screen. Read-only; prints **one JSON object per line, newest first**, and nothing else on stdout.
+
+- `--since`: `90s`, `30m`, `2h`, `7d`, `1w`, or an RFC3339 timestamp (`2026-11-18T09:00:00Z`). An unreadable value exits 1 with a message on stderr.
+- `--limit`: default 100, clamped to 1..=1000. The whole output never exceeds 512 KB (it stops at a whole line).
+- `--out`: the stream folder (default `~/.local/share/lifestream/stream`); the journal is `<stream>/moves.jsonl`, the undo log `<stream>/undone.jsonl`, the watcher history `$XDG_DATA_HOME/hestia/watch-history.jsonl` (default `~/.local/share/hestia/`).
+- Exit 0 even when a source is missing or has damaged lines (those are skipped); an empty feed prints nothing.
+
+Each item:
+
+| field | meaning |
+|---|---|
+| `id` | stable string for this event (a key for the UI; not a hash) |
+| `at` | RFC3339 UTC, whole seconds |
+| `kind` | `filed`, `moved`, `renamed`, `folder_created`, `undone`, `backup_saved`, `backup_failed`. Reserved, not emitted yet because nothing records them: `question_asked`, `question_answered`, `scan` |
+| `actor` | `hestia_rule`, `model`, `you`, `watcher`, or `unknown` (a journal line from before actors were recorded whose record is gone) |
+| `reason` | one plain sentence: `rule: pdf downloads`, `both models agreed: invoice`, `you answered: Taxes`, `you pressed Undo` |
+| `summary` | plain words, no jargon or hashes: `Filed 3 files into Documents/Finance`, `Renamed the folder Old to Older`, `Backup saved 12 changes` |
+| `count` | files or folders in the item (for `backup_saved` the commits; for a repeating `backup_failed` how many runs) |
+| `paths` | up to 5, relative to the home folder, never hidden or outside it |
+| `undoable` | `true` for `filed`, `moved`, `renamed`, `folder_created` while the journal still holds the batch |
+| `batch` | for those items the id to give `lifestream file --undo --batch ID` (one JSON line back: `{"event":"undone","restored":N,"skipped":[...]}`); `null` otherwise |
+
+One journal batch can give several items when it holds different deciders; each keeps the same `batch`, and undoing the batch undoes them all. `file --undo` with no `--batch` still takes back the newest batch. An undone batch leaves the journal and appears as an `undone` item instead. A backup that fails again and again with the same words is one `backup_failed` item at its first run; runs that changed nothing and routine "waiting for a quieter moment" runs are not items.
+
+Example:
+
+```json
+{"id":"2026-11-18T09:12:01.123456789Z:0","at":"2026-11-18T09:12:01Z","kind":"filed","actor":"hestia_rule","reason":"rule: pdf downloads","summary":"Filed 3 files into Documents/Finance","count":3,"paths":["Documents/Finance/a.pdf","Documents/Finance/b.pdf","Documents/Finance/c.pdf"],"undoable":true,"batch":"2026-11-18T09:12:01.123456789Z"}
+```
+
+The journal format (`moves.jsonl`) gained `actor` and `reason` on every line; older lines without them are read as the person's own (`you`) for folder changes, and for files from the record that was filed, otherwise `unknown`.

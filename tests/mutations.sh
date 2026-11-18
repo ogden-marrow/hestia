@@ -44,7 +44,9 @@ mutate "direction-changing characters are not removed from names" lifestream/src
 mutate "undo accepts a journal that leaves the home folder" lifestream/src/tree.rs 'rel_ok(rel).then(|| home.join(rel))' 'Some(home.join(rel))' rs undo_treats_the_journal
 mutate "the folder mover replaces an existing destination" lifestream/src/tree.rs 'if fs::symlink_metadata(dst).is_ok() {' 'if false {' rs move_dir_refusals
 mutate "undoing a new folder deletes what was put in it"  lifestream/src/tree.rs 'fs::remove_dir(&to) {' 'fs::remove_dir_all(&to) {' rs undo_of_mkdir
-mutate "watcher pushes to a repo Hestia cannot vouch for"  packaging/libexec/watch.sh 'out=$("$LS" home check-private "$slug" 2>&1) ||' 'out=$(true) ||' bash tests/watcher.sh
+mutate "the feed lists a path outside the home folder"      lifestream/src/feed.rs 'if tree::under_home(home, to_s).is_none() {' 'if false {' rs a_line_pointing_outside_home
+mutate "the feed has no cap on its output"                 lifestream/src/feed.rs 'if out.len() + line.len() + 1 > OUTPUT_CAP {' 'if false {' rs output_is_capped
+mutate "watcher pushes to a repo Hestia cannot vouch for" packaging/libexec/watch.sh 'out=$("$LS" home check-private "$slug" 2>&1) ||' 'out=$(true) ||' bash tests/watcher.sh
 mutate "capture no longer refuses a mass deletion"         packaging/libexec/capture.sh '[ "$before" -ge 4 ]' '[ "$before" -ge 4000000 ]' bash tests/watcher.sh
 mutate "deny-list is not applied inside captured folders"  packaging/libexec/capture.sh 'if [ "${#inside[@]}" -gt 0 ]; then' 'if [ 1 -eq 0 ]; then' bash tests/watcher.sh
 mutate "a secret line is left in a shell file"             packaging/libexec/watch.sh 'sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f"' 'true' bash tests/watcher.sh
