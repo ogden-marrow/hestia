@@ -155,11 +155,10 @@ struct State {
     f_name: TextEdit,
     f_year: bool,
     f_new: TextEdit,
+    r_kind: TextEdit,
     f_inbox: TextEdit,
     f_root: TextEdit,
     f_cap: TextEdit,
-    moving: Option<usize>,
-    pending_move: Option<(String, String)>,
     mach: Vec<machine::Cat>,
     mcat: usize,
     mit: usize,
@@ -256,7 +255,7 @@ impl State {
             ask: TextEdit::new(""), library: vec![], tree_rows: vec![], tree_open: Default::default(), tree_sel: None, tree_moving: None, tree_rename: TextEdit::new(""), tree_new: TextEdit::new(""), tree_kind: TextEdit::new(""), tree_undoable: false, tree_hover: None, app_q: TextEdit::new(""), app_show: 0, app_sort: 0, teach: TextEdit::new(""), kinds_open: false, ask_hits: vec![], asel: 0, msg: String::new(), jobs: jobs::Jobs::default(),
             pane: Pane::Today, status: Status::default(), fresh: Arc::new(Mutex::new(None)), asked: String::new(), apps: launcher::load_apps(), icons: rune::ImageCache::new(Arc::new(|| {})), clips: clipboard::load(), launches: launcher::load_launches(), copy_text: None, wstep: 0, headless: false, repo_dir: home_repo(), repo_status: String::new(), repo_stamp: String::new(), backup: backup::Verdict::Unknown, backup_stamp: String::new(), watch_seen: None, commits: vec![], csel: 0, changes: vec![], fsel: 0, diff: vec![], kinds: HashMap::new(), days: vec![], cum: vec![], dsel: 0, compare: false, overnight: (0, 0, 0), bundles: vec![], suggestions, qsel: 0, settings: Settings::default(), desktop: (true, oklch(0.7, 0.19, 5.0)), stab: 0, ext_kinds: HashMap::new(), skipped: vec![],
             tree: lifestream::tree::Tree::default(), tree_path: PathBuf::new(), tsel: 0, tplan: None, confirm_move: false, last_filed: 0, undo_lines: vec![], undo_inbox: Default::default(),
-            f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), moving: None, pending_move: None, mach: vec![], mcat: 0, mit: 0,
+            f_path: TextEdit::new(""), f_kind: TextEdit::new(""), f_tag: TextEdit::new(""), f_name: TextEdit::new(""), f_year: false, f_new: TextEdit::new(""), r_kind: TextEdit::new(""), f_inbox: TextEdit::new(""), f_root: TextEdit::new(""), f_cap: TextEdit::new(""), mach: vec![], mcat: 0, mit: 0,
         };
         let _ = stream_path;
         s.tree_path = home_repo().join("tree.toml");

@@ -172,13 +172,15 @@ impl State {
         if path.is_empty() {
             return;
         }
-        match self.tree.add_folder(Folder { path, ..Default::default() }) {
+        let kind = split(&self.r_kind.text);
+        match self.tree.add_folder(Folder { path, kind, ..Default::default() }) {
             Ok(()) if self.save_tree() => {
                 let _ = std::fs::create_dir_all(super::files::home().join(self.tree.folders.last().map(|f| f.path.as_str()).unwrap_or("")));
                 self.f_new.clear();
+                self.r_kind.clear();
                 let last = self.tree.folders.len() - 1;
                 self.select_folder(last);
-                self.msg = "folder added".into();
+                self.msg = "Rule added.".into();
             }
             Ok(()) => {
                 self.tree.folders.pop();
@@ -243,20 +245,6 @@ impl State {
         self.change_settings(|st| st.dismissed.push(kind));
     }
     /// Click-to-move: choose where the folder goes, then confirm once. The tree and the real folder move together.
-    fn finish_move(&mut self, dest: &str) {
-        let Some(i) = self.moving.take() else { return };
-        let Some(from) = self.tree.folders.get(i).map(|f| f.path.clone()) else { return };
-        let name = from.rsplit('/').next().unwrap_or(&from).to_string();
-        let to = if dest.is_empty() { name } else { format!("{dest}/{name}") };
-        if to != from {
-            self.pending_move = Some((from, to));
-        }
-    }
-    fn confirm_move_folder(&mut self) {
-        if let Some((from, to)) = self.pending_move.take() {
-            self.apply_move(&from, &to);
-        }
-    }
     fn create_dirs(&mut self) {
         let home = super::files::home();
         for d in self.tree.dirs() {
@@ -344,6 +332,26 @@ pub fn panels(s: &State) -> Vec<El> {
         }
     }
 
+    // ---- the selected rule's editor, shown in place under its row
+    let make_editor = || -> El {
+        let mut e = col().w_full().padding(d.pad()).gap(d.gap()).tile(&d);
+        if let Some(f) = s.tree.folders.get(s.tsel) {
+            let here = tonight.get(&f.path).copied().unwrap_or(0);
+            e = e
+                .child(text(if here > 0 { format!("{here} files will be moved to ~/{} tonight", f.path) } else { format!("Nothing will be moved to ~/{} tonight.", f.path) }).font(style(&d, type_::LABEL)).color(if here > 0 { acc } else { t.text_secondary }).wrap_anywhere().shrink())
+                .child(field(&d, "f-path", &s.f_path, "Folder name (renaming moves its contents too)", |s: &mut State| &mut s.f_path))
+                .child(field(&d, "f-kind", &s.f_kind, "Kinds of file it takes, like image, video/camera", |s: &mut State| &mut s.f_kind))
+                .child(field(&d, "f-tag", &s.f_tag, "Only files with these labels (optional)", |s: &mut State| &mut s.f_tag))
+                .child(field(&d, "f-name", &s.f_name, "Only files whose names match (optional)", |s: &mut State| &mut s.f_name))
+                .child(row().key("f-year").w_full().px(d.item_px()).py(d.gap()).radius(d.r(tok::radius::SM)).fill(t.control_track)
+                    .on_press(|s: &mut State| s.f_year = !s.f_year).child(toggle(&d, s.f_year)))
+                .child(row().w_full().gap(d.gap()).flex_wrap()
+                    .child(button(&d, "f-save", "Save".into(), true, |s: &mut State| s.save_folder()))
+                    .child(button(&d, "f-delete", "Stop using this folder".into(), false, |s: &mut State| s.delete_folder())));
+        }
+        e
+    };
+
     // ---- the tree
     let mut inbox = row().w_full().shrink().min_w(0.0).gaps(d.gap(), d.gap() * 0.5).flex_wrap();
     for (i, p) in s.tree.inbox.iter().enumerate() {
@@ -384,14 +392,11 @@ pub fn panels(s: &State) -> Vec<El> {
             let depth = dir.matches('/').count() as f32;
             let name = dir.rsplit('/').next().unwrap_or(&dir).to_string();
             let count = tonight.get(&dir).copied().unwrap_or(0);
-            let moving_here = s.moving.is_some();
-            let target = dir.clone();
             tree_col = tree_col.child(
                 row().key(format!("dir-{n}")).w_full().min_h(d.row_h()).py(d.gap() * 0.5).pl(d.item_px() + depth * 16.0).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
                     .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
-                    .border(1.0, if moving_here { acc.alpha(0.45) } else { rune::Color::TRANSPARENT })
                     .on_press(move |s: &mut State| {
-                        if s.moving.is_some() { s.finish_move(&target) } else if let Some(i) = idx { s.select_folder(i) }
+                        if let Some(i) = idx { s.select_folder(i) }
                     })
                     .child(rune::icon(&icons::FOLDER, d.size(16.0)).color(if idx.is_some() { acc } else { t.text_secondary }))
                     .child(col().grow(1.0).shrink().min_w(0.0).gap(1.0)
@@ -399,6 +404,9 @@ pub fn panels(s: &State) -> Vec<El> {
                         .child(if let Some(i) = idx { text(summary(&s.tree.folders[i])).font(style(&d, type_::LABEL)).color(t.text_secondary).truncate() } else { text(String::new()).font(style(&d, type_::LABEL)) }))
                     .child(text(if count > 0 { format!("{count} tonight") } else { String::new() }).font(style(&d, type_::LABEL)).color(acc)),
             );
+            if on {
+                tree_col = tree_col.child(make_editor());
+            }
         }
     }
     // suggested folders: dashed, one click to accept
@@ -425,63 +433,23 @@ pub fn panels(s: &State) -> Vec<El> {
         );
     }
 
-    // the bottom bar: what "file now" will do
-    let n_moves = s.tplan.as_ref().map(|p| p.moves.len()).unwrap_or(0);
-    let bar = row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y()
-        .child(text(if n_moves == 0 { "Nothing to file".to_string() } else { format!("{} would move tonight", crate::today::count(n_moves, "file", "files")) }).font(style(&d, type_::LABEL)).color(t.text_secondary).grow(1.0).shrink().min_w(0.0).truncate())
-        .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", n_moves > 0, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
-
-    let banner = s.moving.and_then(|i| s.tree.folders.get(i)).map(|f| row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
-            .child(text(format!("Click the folder to put “{}” inside, or the top level:", f.path)).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0).wrap_anywhere())
-            .child(button(&d, "mv-top", "Top level".into(), false, |s: &mut State| s.finish_move("")))
-            .child(button(&d, "mv-cancel", "Cancel".into(), false, |s: &mut State| s.moving = None)));
-
-    let mut center = col().grow(1.0).shrink().min_w(0.0).padding(d.gap()).gap(d.gap()).panel(&d)
-        .child(col().w_full().px(d.item_px()).py(d.gap() * 0.5).gap(d.gap())
-            .child(text("Rules").font(style(&d, type_::TITLE)).color(t.text))
-            .child(text("Choose a folder to see what goes in it. Projects and special folders are left alone.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
-            .child(heading(&d, "Watched folders"))
-            .child(text("New files that land here get sorted. Click one to stop watching it; nothing is moved.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
-            .child(inbox)
-            .child(field(&d, "inbox-add", &s.f_inbox, "Add a folder to watch, like Downloads", |s: &mut State| &mut s.f_inbox).on_submit(|s: &mut State, _: &mut Tx| s.add_inbox())));
-    if let Some(b) = banner {
-        center = center.child(b);
-    }
-    let center = center
-        .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(col().w_full().gap(d.pad()).child(tree_col).child(sugg_col)))
-        .child(bar);
-
-    // ---- the folder, and what would land in it
+    // ---- one column: the rules, adding one, the watched folders, and what would move
     let mut body = col().w_full().shrink().min_w(0.0).gap(d.pad());
-    if let Some(f) = s.tree.folders.get(s.tsel) {
-        let here = tonight.get(&f.path).copied().unwrap_or(0);
-        body = body.child(col().w_full().gap(d.gap())
-            .child(text(f.path.clone()).font(TextStyle { size: d.size(16.0), ..style(&d, type_::TITLE) }).color(t.text).wrap_anywhere().shrink())
-            .child(text(if here > 0 { format!("{here} files will be moved here tonight") } else { "Nothing will be moved here tonight.".to_string() }).font(style(&d, type_::LABEL)).color(if here > 0 { acc } else { t.text_secondary }))
-            .child(heading(&d, "What goes in this folder"))
-            .child(text(format!("~/{}", f.path)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).wrap_anywhere().shrink())
-            .child(field(&d, "f-path", &s.f_path, "rename this folder (its contents come along)", |s: &mut State| &mut s.f_path))
-            .child(field(&d, "f-kind", &s.f_kind, "kinds, like image, video/camera", |s: &mut State| &mut s.f_kind))
-            .child(field(&d, "f-tag", &s.f_tag, "Only files with these labels (optional)", |s: &mut State| &mut s.f_tag))
-            .child(field(&d, "f-name", &s.f_name, "Only files whose names match (optional)", |s: &mut State| &mut s.f_name))
-            .child(row().key("f-year").w_full().px(d.item_px()).py(d.gap()).radius(d.r(tok::radius::SM)).fill(t.control_track)
-                .on_press(|s: &mut State| s.f_year = !s.f_year).child(toggle(&d, s.f_year)))
-            .child(row().w_full().gap(d.gap()).flex_wrap()
-                .child(button(&d, "f-save", "Save".into(), true, |s: &mut State| s.save_folder()))
-                .child(button(&d, "f-move", "Move to another folder…".into(), false, |s: &mut State| s.moving = Some(s.tsel)))
-                .child(button(&d, "f-delete", "Stop using this folder".into(), false, |s: &mut State| s.delete_folder()))));
-    }
-    body = body.child(col().w_full().gap(d.gap())
-        .child(heading(&d, "Add a folder"))
-        .child(field(&d, "f-new", &s.f_new, "Documents/Taxes ↵", |s: &mut State| &mut s.f_new).on_submit(|s: &mut State, _: &mut Tx| s.add_folder())));
 
-    if let Some((from, to)) = &s.pending_move {
-        body = body.child(col().w_full().padding(d.item_px()).gap(d.gap()).tile(&d)
-            .child(text(format!("Move ~/{from} to ~/{to}? The folder and everything in it move on disk and in the tree. There is no undo.")).font(style(&d, type_::LABEL)).color(t.text).wrap_anywhere().shrink())
-            .child(row().w_full().gap(d.gap())
-                .child(button(&d, "mv-yes", "Move it".into(), true, |s: &mut State| s.confirm_move_folder()))
-                .child(button(&d, "mv-no", "Cancel".into(), false, |s: &mut State| s.pending_move = None))));
-    }
+    let add_rule = col().w_full().padding(d.pad()).gap(d.gap()).tile(&d)
+        .child(text("Add a rule").font(style(&d, type_::TITLE)).color(t.text))
+        .child(text("Say which kinds of file go to which folder, like “document/pdf” into Documents/Finance. You will see what would move before anything does.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
+        .child(field(&d, "r-kind", &s.r_kind, "Kinds of file, like document/pdf", |s: &mut State| &mut s.r_kind))
+        .child(field(&d, "f-new", &s.f_new, "Goes in the folder, like Documents/Finance", |s: &mut State| &mut s.f_new).on_submit(|s: &mut State, _: &mut Tx| s.add_folder()))
+        .child(row().child(button(&d, "r-add", "Add rule".into(), true, |s: &mut State| s.add_folder())));
+
+    let watched = col().w_full().gap(d.gap())
+        .child(heading(&d, "Watched folders"))
+        .child(text("New files that land here get sorted. Click one to stop watching it; nothing is moved.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
+        .child(inbox)
+        .child(field(&d, "inbox-add", &s.f_inbox, "Add a folder to watch, like Downloads", |s: &mut State| &mut s.f_inbox).on_submit(|s: &mut State, _: &mut Tx| s.add_inbox()));
+
+    body = body.child(heading(&d, "Your rules")).child(tree_col).child(add_rule).child(sugg_col).child(watched);
 
     // what would move, and the confirmation
     let mut prev = col().w_full().gap(d.gap()).child(heading(&d, "What would move"));
@@ -543,9 +511,21 @@ pub fn panels(s: &State) -> Vec<El> {
     if !s.msg.is_empty() {
         body = body.child(text(s.msg.clone()).font(style(&d, type_::LABEL)).color(acc).wrap_anywhere().shrink());
     }
-    let detail = col().w(460.0).padding(d.pad()).gap(d.pad()).panel(&d)
-        .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body));
-    vec![center, detail]
+
+    // the action sits next to what it acts on: the header of the page
+    let n_moves = s.tplan.as_ref().map(|p| p.moves.len()).unwrap_or(0);
+    let head = row().w_full().gap(d.pad()).center_y()
+        .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
+            .child(text("Rules").font(style(&d, type_::TITLE)).color(t.text))
+            .child(text(if n_moves == 0 { "Nothing is waiting to be filed.".to_string() } else { format!("{} would move tonight.", crate::today::count(n_moves, "file", "files")) }).font(style(&d, type_::LABEL)).color(t.text_secondary)))
+        .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", n_moves > 0, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
+
+    let rules = col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
+        .child(row().w_full().grow(1.0).shrink().min_h(0.0).center()
+            .child(col().w_full().h_full().max_w(d.size(760.0)).gap(d.pad()).shrink().min_h(0.0)
+                .child(head)
+                .child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).child(body))));
+    vec![rules]
 }
 
 #[cfg(test)]
