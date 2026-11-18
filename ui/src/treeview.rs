@@ -86,6 +86,7 @@ pub fn valid_name(name: &str) -> Result<String, String> {
 
 impl State {
     pub(crate) fn reload_tree(&mut self) {
+        self.reload_feed(); // a move or new folder is an event; the Stream shows it
         self.tree_rows = rows(&home(), &self.tree_open, &self.kinds, self.settings.hidden);
     }
 

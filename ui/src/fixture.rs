@@ -59,6 +59,23 @@ pub fn records(pending_folders: bool) -> Vec<Record> {
     v
 }
 
+/// Synthetic events for snapshots: no real paths or names.
+pub fn feed() -> Vec<crate::feedview::Row> {
+    use crate::feedview::Row;
+    use chrono::{Duration, Local};
+    let now = Local::now();
+    let row = |ago: i64, kind: &str, actor: &str, summary: &str, reason: &str, count: usize, undo: bool| Row {
+        id: format!("e{ago}"), at: now - Duration::minutes(ago), kind: kind.into(), actor: actor.into(), summary: summary.into(), reason: reason.into(), count, undoable: undo, batch: undo.then(|| format!("b{ago}")),
+    };
+    vec![
+        row(12, "backup_saved", "watcher", "Saved 2 changes from this computer", "Settings of Terminal and Desktop changed.", 2, false),
+        row(95, "filed", "hestia_rule", "Filed 3 screenshots to Pictures/Screenshots", "Matched your rule: kind is screenshot.", 3, true),
+        row(160, "filed", "model", "Filed lease-renewal.pdf to Documents/Housing", "Both on-device models agreed it is a housing document.", 1, true),
+        row(60 * 26, "moved", "you", "You moved notes.txt to Documents", "Moved from the Folders screen.", 1, true),
+        row(60 * 27, "backup_failed", "watcher", "The last backup failed: git commit: no identity", "Set your name and email for git, then back up again.", 0, false),
+    ]
+}
+
 /// Synthetic applications for snapshots: no icons from this machine, no real names.
 pub fn apps() -> Vec<crate::apps::Item> {
     use crate::apps::{Item, Open, Source};
@@ -85,6 +102,7 @@ pub fn apply(s: &mut State, pending_folders: bool) {
     s.skipped.clear();
     s.repo_dir = std::path::PathBuf::from("/nonexistent/fixture-home"); // never show this machine's repository
     s.account_user = None;
+    s.feed = feed();
     s.refresh_derived();
 }
 

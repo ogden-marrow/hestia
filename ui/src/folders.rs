@@ -281,6 +281,7 @@ impl State {
 
 /// After a filing job: the engine moved the files and wrote the stream; load it and show Undo.
 fn reload_after_filing(s: &mut State) {
+    s.reload_feed();
     if let Some(stream) = s.stream.clone() {
         s.recs = lifestream::load_all(&stream).unwrap_or_default();
     }
