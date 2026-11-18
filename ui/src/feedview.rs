@@ -59,6 +59,19 @@ pub fn day_label(day: NaiveDate, today: NaiveDate) -> String {
     }
 }
 
+/// The filter chips: everything, files (filed, moved, renamed, new folders, undone), backup, and what you did yourself.
+pub const FILTERS: [&str; 4] = ["Everything", "Files", "Backup", "Yours"];
+const PAGE: usize = 20;
+
+pub fn matches(filter: usize, r: &Row) -> bool {
+    match filter {
+        1 => matches!(r.kind.as_str(), "filed" | "moved" | "renamed" | "folder_created" | "undone"),
+        2 => r.kind.starts_with("backup_"),
+        3 => r.actor == "you",
+        _ => true,
+    }
+}
+
 impl State {
     pub(crate) fn reload_feed(&mut self) {
         self.feed = match &self.stream {
@@ -114,19 +127,30 @@ pub fn section(s: &State) -> El {
     let d = s.design;
     let t = d.theme();
     let mut c = col().w_full().gap(0.0).child(text("What happened".to_string()).font(style(&d, type_::TITLE)).color(t.text).pb(d.gap()));
+    if !s.feed.is_empty() {
+        c = c.child(row().child(super::prefs::segmented(&d, "feed-filter", &FILTERS, s.feed_filter, |s, i| { s.feed_filter = i; s.feed_shown = PAGE })).pb(d.gap()));
+    }
+    let shown: Vec<&Row> = s.feed.iter().filter(|r| matches(s.feed_filter, r)).collect();
+    if shown.is_empty() && !s.feed.is_empty() {
+        return c.child(text("Nothing of that kind yet.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary));
+    }
     if s.feed.is_empty() {
         return c.child(text("Nothing yet. When Hestia files a file, saves your computer, or you move something, it shows up here with a way to undo it.".to_string())
             .font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
     }
     let today = Local::now().date_naive();
     let mut last: Option<NaiveDate> = None;
-    for r in s.feed.iter().take(60) {
+    let total = shown.len();
+    for r in shown.into_iter().take(s.feed_shown.max(PAGE)) {
         let day = r.at.date_naive();
         if last != Some(day) {
             c = c.child(text(day_label(day, today)).font(style(&d, type_::SECTION)).color(t.text_secondary).pt(d.pad()).pb(d.gap() * 0.5));
             last = Some(day);
         }
         c = c.child(one(s, r));
+    }
+    if total > s.feed_shown.max(PAGE) {
+        c = c.child(row().pt(d.pad()).child(crate::questions::button(&d, "feed-more", format!("Show {} more", total - s.feed_shown.max(PAGE)), false, |s: &mut State| s.feed_shown += 40)));
     }
     c
 }
@@ -141,6 +165,16 @@ mod tests {
         assert_eq!(day_label(today, today), "Today");
         assert_eq!(day_label(today.pred_opt().unwrap(), today), "Yesterday");
         assert_eq!(day_label(NaiveDate::from_ymd_opt(2026, 11, 9).unwrap(), today), "Mon, Nov 9");
+    }
+
+    #[test]
+    fn filters_pick_files_backup_and_what_you_did() {
+        let row = |kind: &str, actor: &str| Row { id: "x".into(), at: Local::now(), kind: kind.into(), actor: actor.into(), reason: String::new(), summary: String::new(), count: 1, undoable: false, batch: None };
+        let (filed, saved, moved) = (row("filed", "hestia_rule"), row("backup_saved", "watcher"), row("moved", "you"));
+        assert!([&filed, &saved, &moved].iter().all(|r| matches(0, r)));
+        assert!(matches(1, &filed) && matches(1, &moved) && !matches(1, &saved));
+        assert!(matches(2, &saved) && !matches(2, &filed));
+        assert!(matches(3, &moved) && !matches(3, &filed));
     }
 
     #[test]
