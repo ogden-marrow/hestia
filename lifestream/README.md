@@ -103,6 +103,21 @@ The one policy behind the desktop notification and the tray icon; the app can sh
 - `notify`: true only when the state is `failing` or `stale`, has lasted 6 hours, this episode (its `since`) was not already told, and `notifications=off` is not set in `~/.config/hestia/settings`.
 - `--mark-notified`: record the current episode as told (so `notify` turns false for it), or, when the state is `ok`, forget the told episode. It exits **10** (after printing) when it just forgot an episode that had been told and notifications are on, the one moment to say "working again"; otherwise 0.
 - Read-only without `--mark-notified`; never prints file contents or paths.
+- `rehearsal`: the last restore rehearsal, from `<share>/hestia/rehearsal.json` (written weekly by `rehearse.sh`, see below): `{"age_days":3,"at":"2026-11-15T03:12:00Z","result":"passed"}`. `result` is `passed`, `failed`, or `never` (no readable result yet: then `at` and `age_days` are `null`). `age_days` is whole days since `at` (never negative). Only the time and the verdict are read; the file's sentences are never copied. It never changes `state` or `notify`. When `reason` is not `null` and the last check failed or is older than 14 days, `reason` gets a **second line** (separated by `\n`): `Your last restore check failed: ...` or `Your backup has not been checked by a restore for more than two weeks.` A healthy backup keeps `reason: null` whatever the rehearsal says; the app should show `rehearsal` itself ("Last restore check: passed 3 days ago", or "failed", or nothing for `never`).
+
+### The restore rehearsal (`rehearse.sh`, weekly)
+
+```
+rehearse.sh [--repo DIR] [--share DIR]      # installed beside watch.sh; exit 0 passed, 1 failed, 75 already running
+```
+
+Copies the home repository's HEAD into a private scratch folder, runs `bootstrap.sh` against a fake home there (dry run, then `--apply --only dotfiles,config`; never packages or desktop settings), verifies the result and deletes the scratch folder. Never writes the real home. Writes `<share>/hestia/rehearsal.json` (`--share` defaults to `$XDG_DATA_HOME` or `~/.local/share`):
+
+```
+{"at":1795022888,"result":"passed","checked":14,"problems":[],"repo_commit":"7aefb6a"}
+```
+
+`at` is epoch seconds (like `watch.json`); `problems` are fixed plain sentences (at most 20; no paths, contents or secrets); `repo_commit` is the short commit rehearsed, or `null`. With no home repository yet it exits 0 and writes nothing.
 
 ## The feed: what happened and who decided (`lifestream feed`)
 

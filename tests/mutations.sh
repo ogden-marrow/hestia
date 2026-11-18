@@ -55,6 +55,8 @@ mutate "a backup failing for minutes already raises a notification" lifestream/s
 mutate "the same failing backup is announced on every run" lifestream/src/backup.rs 'notified != Some(since)' 'true' bash tests/watcher-notify.sh
 mutate "uninstall keeps the clipboard history"             uninstall.sh 'rm -f "$share/hestia/clipboard.jsonl"' 'true' bash tests/uninstall.sh
 mutate "bootstrap restores code that runs by itself"       packaging/libexec/bootstrap.sh 'if is_executable_config "$rel" && [ "$EXEC" != 1 ]; then review+=("$kind/$rel"); continue; fi' 'true' bash tests/bootstrap.sh
+mutate "the rehearsal no longer notices restored code that runs by itself" packaging/libexec/rehearse.sh 'if is_executable_config "$name" || is_executable_config "$rel"; then' 'if false; then' bash tests/rehearse.sh
+mutate "the rehearsal accepts restored content that differs from the repository" packaging/libexec/rehearse.sh 'if [ "$(sha256sum < "$src")" != "$(sha256sum < "$dest")" ]; then' 'if false; then' bash tests/rehearse.sh
 
 echo; echo "killed $killed, survived $survived"
 [ "$survived" = 0 ]

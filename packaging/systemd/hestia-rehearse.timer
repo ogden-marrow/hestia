@@ -1,0 +1,12 @@
+[Unit]
+Description=Hestia: rehearse a restore once a week
+
+[Timer]
+OnCalendar=weekly
+# a week missed while the computer was off runs soon after it is next on
+Persistent=true
+RandomizedDelaySec=6h
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

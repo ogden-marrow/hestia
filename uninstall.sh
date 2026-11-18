@@ -9,9 +9,9 @@ prefix="${PREFIX:-$HOME/.local}"
 share="${XDG_DATA_HOME:-$HOME/.local/share}"
 unit="$HOME/.config/systemd/user"
 
-systemctl --user disable --now hestia-tray.service lifestream-nightly.timer lifestream-morning.timer hestia-watch.timer 2>/dev/null
-systemctl --user stop lifestream-nightly.service lifestream-morning.service hestia-watch.service 2>/dev/null
-for u in hestia-tray.service hestia-watch.service hestia-watch.timer lifestream-nightly.service lifestream-nightly.timer lifestream-morning.service lifestream-morning.timer; do
+systemctl --user disable --now hestia-tray.service lifestream-nightly.timer lifestream-morning.timer hestia-watch.timer hestia-rehearse.timer 2>/dev/null
+systemctl --user stop lifestream-nightly.service lifestream-morning.service hestia-watch.service hestia-rehearse.service 2>/dev/null
+for u in hestia-tray.service hestia-watch.service hestia-watch.timer lifestream-nightly.service lifestream-nightly.timer lifestream-morning.service lifestream-morning.timer hestia-rehearse.service hestia-rehearse.timer; do
   rm -rf "${unit:?}/$u" "${unit:?}/$u.d"
 done
 systemctl --user daemon-reload

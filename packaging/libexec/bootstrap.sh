@@ -5,6 +5,8 @@
 #   (default)   DRY RUN: prints every step and changes nothing.
 #   --apply     do it.
 #   --only a,b  run only these steps. Steps: packages dotfiles config settings sources
+#   --record FILE
+#               also write each file placed as SOURCE NUL DEST NUL to FILE (rehearse.sh reads it to check the restore)
 #   --allow-executable
 #               also restore things that run by themselves or change what runs (shell startup files, .gitconfig,
 #               environment.d, autostart entries, systemd user units, custom keyboard-shortcut
@@ -18,18 +20,22 @@
 #    systemd user units, fish/zsh/bash config) is not restored unless you say so with --allow-executable.
 #  * Third-party apt sources (they add software you did not review) only run when named with --only sources.
 set -uo pipefail
-repo=""; APPLY=0; ONLY=""; EXEC=0
+umask 022   # folders it creates are never group-writable, whatever the person's umask (files get their captured mode explicitly)
+repo=""; APPLY=0; ONLY=""; EXEC=0; RECORD=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1 ;;
     --only) ONLY="${2:-}"; shift ;;
     --allow-executable) EXEC=1 ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    --record) RECORD="${2:-}"; shift ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *) repo="$1" ;;
   esac; shift
 done
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home-repo.sh"
+libexec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$libexec/home-repo.sh"
+. "$libexec/restore-rules.sh"
 repo="${repo:-$(hestia_home_repo)}"
 [ -f "$repo/tree.toml" ] || { echo "not a Hestia home repository: $repo" >&2; exit 2; }
 . /etc/os-release
@@ -42,25 +48,6 @@ want() { if [ -n "$ONLY" ]; then [[ ",$ONLY," == *",$1,"* ]]; else [ "$1" != sou
 fail=(); review=()
 stamp="$(date +%Y%m%d%H%M%S)"
 
-# Runs code by itself, or changes what runs: held back unless --allow-executable. PATH is relative to ~ (dotfiles) or ~/.config.
-# A poisoned repository can use any of these to run its code (LD_PRELOAD in environment.d, core.sshCommand in .gitconfig).
-is_executable_config() {
-  case "$1" in
-    .bashrc|.bash_profile|.bash_login|.bash_logout|.profile|.zshrc|.zshenv|.zprofile|.zlogin|.zlogout|.gitconfig) return 0 ;;
-    autostart|autostart/*|systemd|systemd/*|environment.d|environment.d/*|fish|fish/*|zsh|zsh/*|bash|bash/*|git|git/*) return 0 ;;
-    */autostart/*|*/systemd/*|*/environment.d/*) return 0 ;;
-  esac
-  return 1
-}
-# Never restored, with or without --allow-executable: keys and the keyring.
-is_denied() { case "$1" in .ssh|.ssh/*|.gnupg|.gnupg/*|gnupg|gnupg/*|*keyring*|gh|gh/*) return 0 ;; esac; return 1; }
-# The only top-level names restore will write. Everything else in the repository is ignored and counted as skipped.
-is_allowed() {
-  case "$1" in
-    .nvidia-settings-rc|mimeapps.list|user-dirs.dirs|monitors.xml|gtk-3.0|gtk-4.0|mpv|htop|nautilus|powerlimit|johncast|hestia) return 0 ;;
-  esac
-  is_executable_config "$1"
-}
 n_new=0; n_same=0; n_bak=0; n_skip=0
 mode_of() { printf '%o' $(( 8#$(stat -c %a -- "$1") & 8#755 )); } # keeps owner bits and private modes, drops setuid/setgid and group/other write
 
@@ -82,6 +69,7 @@ place_file() { # src dest srcroot
   ensure_dir "$(dirname "$src")" "$(dirname "$dest")" "$3"
   run cp -- "$src" "$dest"; run chmod "$(mode_of "$src")" -- "$dest"
   n_new=$((n_new+1))
+  [ -z "$RECORD" ] || printf '%s\0%s\0' "$src" "$dest" >> "$RECORD"
 }
 
 # restore everything captured under SRC-ROOT/NAME into DEST-ROOT/NAME, file by file

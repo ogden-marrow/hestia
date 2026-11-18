@@ -25,13 +25,15 @@ lay() { # put down what an install leaves, plus things that are the person's own
   touch "$HOME/.local/bin/hestia" "$HOME/.local/bin/hestia-tray" "$HOME/.local/bin/lifestream" "$HOME/.local/libexec/hestia/watch.sh"
   echo '{"text":"copied"}' > "$HOME/.local/share/hestia/clipboard.jsonl"; echo x > "$HOME/.local/share/hestia/launches.tsv"
   echo "scheme=dark" > "$HOME/.config/hestia/settings"; echo "mine" > "$HOME/Home/notes.txt"
-  touch "$HOME/.config/systemd/user/hestia-watch.timer" "$HOME/.config/systemd/user/hestia-watch.timer.d/hestia.conf"
+  touch "$HOME/.config/systemd/user/hestia-watch.timer" "$HOME/.config/systemd/user/hestia-watch.timer.d/hestia.conf" "$HOME/.config/systemd/user/hestia-rehearse.timer" "$HOME/.config/systemd/user/hestia-rehearse.service"
 }
 
 lay; : > "$T/calls.log"
 bash "$here/uninstall.sh" >/dev/null
 [ ! -e "$HOME/.local/bin/hestia" ] && [ ! -e "$HOME/.local/bin/lifestream" ] && [ ! -d "$HOME/.local/libexec/hestia" ] || fail "programs were not removed"
 [ ! -e "$HOME/.config/systemd/user/hestia-watch.timer" ] && [ ! -e "$HOME/.config/systemd/user/hestia-watch.timer.d" ] || fail "units and overrides were not removed"
+[ ! -e "$HOME/.config/systemd/user/hestia-rehearse.timer" ] && [ ! -e "$HOME/.config/systemd/user/hestia-rehearse.service" ] || fail "the restore rehearsal timer was not removed"
+grep -q "disable --now .*hestia-rehearse.timer" "$T/calls.log" || fail "the restore rehearsal timer was not stopped"
 [ ! -e "$HOME/.local/share/hestia/clipboard.jsonl" ] || fail "the clipboard history survived an uninstall"
 [ -f "$HOME/.config/hestia/settings" ] && [ -f "$HOME/.local/share/hestia/launches.tsv" ] || fail "settings and data must survive without --purge"
 [ "$(cat "$HOME/Home/notes.txt")" = "mine" ] || fail "the person's own files were touched"

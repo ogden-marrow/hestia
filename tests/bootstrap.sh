@@ -96,4 +96,7 @@ bash "$b" "$P" --apply --only dotfiles,config --allow-executable >/dev/null
 [ "$(cat "$HOME/.ssh/authorized_keys")" = "ssh-ed25519 VICTIM" ] || fail "--allow-executable let the repository overwrite the ssh folder"
 [ ! -e "$HOME/.gnupg" ] && [ ! -e "$HOME/.config/keyrings" ] || fail "--allow-executable restored keys or keyring"
 [ -f "$HOME/.gitconfig" ] || fail "--allow-executable did not restore .gitconfig"
+# 7. a person whose umask is 002 (Ubuntu's default) still gets no group-writable folder from a restore
+rm -rf "$HOME/.config/gtk-3.0"; ( umask 002; bash "$b" "$P" --apply --only config >/dev/null )
+[ "$(stat -c %a "$HOME/.config")" = 755 ] && [ "$(stat -c %a "$HOME/.config/gtk-3.0")" = 755 ] || fail "a restore made a group-writable folder under umask 002"
 echo "bootstrap ok"
