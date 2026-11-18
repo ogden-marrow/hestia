@@ -145,7 +145,7 @@ pub fn panel(s: &State) -> El {
     if let Some(g) = get_started(s) {
         body = body.child(g);
     }
-    let body = body.child(facts);
+    let body = body.child(facts).child(crate::feedview::section(s));
     col().grow(1.0).shrink().min_w(0.0).padding(d.pad() * 2.0).panel(&d)
         .child(row().w_full().grow(1.0).shrink().min_h(0.0).center().child(col().w_full().h_full().max_w(d.size(720.0)).scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).child(body)))
 }
