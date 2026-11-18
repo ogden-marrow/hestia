@@ -81,7 +81,7 @@ mod tests {
     use super::*;
 
     fn engine(state: &'static str, reason: Option<&str>, last_ok: Option<i64>) -> Engine {
-        Engine { state, since: None, reason: reason.map(String::from), failing_runs: 0, last_ok, notify: false }
+        Engine { state, since: None, reason: reason.map(String::from), failing_runs: 0, last_ok, notify: false, rehearsal: lifestream::backup::Rehearsal { at: None, result: "never", age_days: None } }
     }
 
     #[test]
