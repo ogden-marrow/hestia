@@ -9,6 +9,7 @@ pub mod auth;
 pub mod bundle;
 pub mod deny;
 pub mod domains;
+pub mod feed;
 pub mod ghrepo;
 pub mod home;
 pub mod machine;

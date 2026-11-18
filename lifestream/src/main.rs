@@ -112,6 +112,20 @@ enum Cmd {
         /// put the last batch of moves back where it came from (never overwrites); prints one JSON line
         #[arg(long, conflicts_with = "apply")]
         undo: bool,
+        /// with --undo: put back the batch with this id (the `batch` of a feed item) instead of the last one
+        #[arg(long, requires = "undo")]
+        batch: Option<String>,
+    },
+    /// What happened and who decided it, newest first, one JSON object per line (the Stream's feed). Read-only.
+    Feed {
+        /// only items newer than this: 30m, 2h, 7d, or a timestamp like 2026-11-18T09:00:00Z
+        #[arg(long)]
+        since: Option<String>,
+        /// at most this many items (default 100, never more than 1000)
+        #[arg(long, default_value_t = lifestream::feed::DEFAULT_LIMIT)]
+        limit: usize,
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     /// Rename or create one folder, journaled so `file --undo` can take it back. One JSON line; exit 1 with a "failed" event if refused.
     Folder {
@@ -262,7 +276,8 @@ fn main() -> Result<()> {
     let cmd = Cli::parse().cmd;
     match cmd {
         Cmd::Tree { tree, apply, r#move } => lifestream::tree::cmd_tree(tree, apply, r#move),
-        Cmd::File { tree, out, manifest, apply, undo } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply, undo),
+        Cmd::File { tree, out, manifest, apply, undo, batch } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply, undo, batch),
+        Cmd::Feed { since, limit, out } => lifestream::feed::cmd_feed(since, limit, &stream_dir(out)?),
         Cmd::Folder { cmd, out, manifest } => {
             let stream = stream_dir(out)?;
             match cmd {
