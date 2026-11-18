@@ -273,7 +273,7 @@ pub fn panels(s: &State) -> Vec<El> {
             .font(style(&d, type_::LABEL)).color(t.text_secondary).px(d.item_px()).wrap_anywhere().shrink())
     ;
 
-    let mut body = col().w_full().shrink().min_w(0.0).gap(d.pad());
+    let mut body = col().w_full().shrink().min_w(0.0).gap(d.pad()).px(d.item_px());
     if let Some(it) = cat.and_then(|c| c.items.get(s.mit)) {
         body = body.child(col().w_full().gap(4.0)
             .child(text(it.name.clone()).font(style(&d, type_::TITLE)).color(t.text).wrap_anywhere().shrink())
