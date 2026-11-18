@@ -51,6 +51,8 @@ mutate "capture no longer refuses a mass deletion"         packaging/libexec/cap
 mutate "deny-list is not applied inside captured folders"  packaging/libexec/capture.sh 'if [ "${#inside[@]}" -gt 0 ]; then' 'if [ 1 -eq 0 ]; then' bash tests/watcher.sh
 mutate "a secret line is left in a shell file"             packaging/libexec/watch.sh 'sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f"' 'true' bash tests/watcher.sh
 mutate "capture keeps secret-named files whole"            packaging/libexec/watch.sh 'for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)); done' 'true' bash tests/watcher.sh
+mutate "a backup failing for minutes already raises a notification" lifestream/src/backup.rs 'age >= NOTIFY_AFTER && notified' 'notified' bash tests/watcher-notify.sh
+mutate "the same failing backup is announced on every run" lifestream/src/backup.rs 'notified != Some(since)' 'true' bash tests/watcher-notify.sh
 mutate "uninstall keeps the clipboard history"             uninstall.sh 'rm -f "$share/hestia/clipboard.jsonl"' 'true' bash tests/uninstall.sh
 mutate "bootstrap restores code that runs by itself"       packaging/libexec/bootstrap.sh 'if is_executable_config "$rel" && [ "$EXEC" != 1 ]; then review+=("$kind/$rel"); continue; fi' 'true' bash tests/bootstrap.sh
 

@@ -85,6 +85,25 @@ versions (`lifestream file --undo` takes the last one back). The classifier's la
 kinds plus every kind in `tree.toml` (`bundle::kinds_for`), and a changed tree makes cached
 folder suggestions stale, so `lifestream suggest` always works from the latest tree.
 
+## Is the backup working? (`lifestream backup-state`)
+
+```
+lifestream backup-state [--share DIR] [--mark-notified]
+```
+
+The one policy behind the desktop notification and the tray icon; the app can show the same state. Reads `<share>/hestia/watch.json`, `watch-history.jsonl` and `notified.json` (`--share` defaults to `$XDG_DATA_HOME` or `~/.local/share`) and prints **one JSON line** (keys in this alphabetical order):
+
+```
+{"failing_runs":3,"last_ok":"2026-11-18T01:00:00Z","notify":true,"reason":"Your backup can't reach GitHub. Check your internet connection. It has not worked for about 7 hours.","since":"2026-11-18T02:00:00Z","state":"failing"}
+```
+
+- `state`: `ok`; `failing` (the latest runs, ignoring routine "waiting for a quieter moment" skips, are `FAILED`); `stale` (no successful run for more than 36 hours); `unknown` (missing, empty or unreadable files, or no run yet).
+- `since`: RFC3339 start of the problem (first failing run, or 36 hours after the last success for `stale`); `null` when ok or unknown. `failing_runs`: how many failed runs in a row (0 unless failing). `last_ok`: RFC3339 or `null`.
+- `reason`: one plain sentence for a person, or `null` when ok or unknown. It is chosen from a fixed list by the kind of failure (offline, signed out, repository gone or public, SSO, a possible secret, anything else) plus how long, never copied from the watcher's text: no paths, no tokens.
+- `notify`: true only when the state is `failing` or `stale`, has lasted 6 hours, this episode (its `since`) was not already told, and `notifications=off` is not set in `~/.config/hestia/settings`.
+- `--mark-notified`: record the current episode as told (so `notify` turns false for it), or, when the state is `ok`, forget the told episode. It exits **10** (after printing) when it just forgot an episode that had been told and notifications are on, the one moment to say "working again"; otherwise 0.
+- Read-only without `--mark-notified`; never prints file contents or paths.
+
 ## The feed: what happened and who decided (`lifestream feed`)
 
 ```

@@ -48,11 +48,12 @@ Five pieces run on your computer.
 5. **Capture the machine.** The watcher writes a fingerprint and a snapshot of how the machine is set up, one commit per kind of change.
 6. **Back up.** The watcher scans everything it captures with the shared secret scanner (a secret line is left out of the copy, a private key drops the file) and the one never-capture list, commits, and pushes automatically, only to a private GitHub repository of yours checked on the address git will really use, and only if the new commits scan clean. `HESTIA_AUTOPUSH=0` turns pushing off.
 7. **Find.** Search by name, by meaning (local embeddings of metadata, never contents), by time.
+7a. **Tell the person who never looks.** `lifestream backup-state` is the one policy for "is the backup working and does anyone need to be told": from `watch.json` and `watch-history.jsonl` it says `ok`, `failing`, `stale` (no success for 36 hours) or `unknown`, a plain sentence, and `notify` (a problem has lasted 6 hours and was not told yet). After every run the watcher asks it and sends at most one `notify-send`, then records the episode (`notified.json`); it clears when the backup works again. The tray turns the flame warm and puts the sentence in its tooltip from the same code. `notifications=off` in the settings file turns the notice off.
 8. **Tell the story.** `lifestream feed` is the one reader of what happened and who decided it, newest first: the move journal (every line now says `actor`, one of Hestia's rules, the models or you, and a one-sentence `reason`), a small log of undos, and the watcher's run history (`watch-history.jsonl`, the last 200 runs). It is read-only, skips any line it cannot trust, and is what the Stream screen shows; each item that moved files carries the `batch` that `lifestream file --undo --batch ID` takes back. Questions and scans leave no log yet, so they are not in the feed.
 
 ## Trust boundaries
 
-`docs/THREAT_MODEL.md` is the authority (25 threats, each with its mitigation, status and evidence, plus the release gate). In short:
+`docs/THREAT_MODEL.md` is the authority (26 threats, each with its mitigation, status and evidence, plus the release gate). In short:
 
 - Nothing leaves the machine except commits to the person's own private GitHub repository, after a scan, over https, with a token that lives only in the system keyring. Hestia has no account system and no server.
 - The model is local only (loopback host, no redirects), and file names reach it only as cleaned data it is told to treat as data.

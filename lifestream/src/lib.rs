@@ -6,6 +6,7 @@
 //! scanned folders and skips every path the sensitive list covers.
 
 pub mod auth;
+pub mod backup;
 pub mod bundle;
 pub mod deny;
 pub mod domains;
@@ -207,8 +208,26 @@ pub fn settings_home() -> Option<PathBuf> {
     parse_settings_home(&fs::read_to_string(home.join(".config/hestia/settings")).ok()?, &home)
 }
 
+/// The value of `key=` in the settings text (the first such line), trimmed. The one parser of that file.
+pub(crate) fn setting_in(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    text.lines().find_map(|l| l.strip_prefix(prefix.as_str())).map(|v| v.trim().to_string())
+}
+
+/// One setting from ~/.config/hestia/settings, if it is set.
+pub fn setting(key: &str) -> Option<String> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    setting_in(&fs::read_to_string(home.join(".config/hestia/settings")).ok()?, key)
+}
+
+/// Where the watcher's data lives: `$XDG_DATA_HOME` (if absolute) or `~/.local/share`.
+pub fn share_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).or_else(|| home().ok().map(|h| h.join(".local/share")))
+}
+
 pub(crate) fn parse_settings_home(text: &str, home: &Path) -> Option<PathBuf> {
-    let v = text.lines().find_map(|l| l.strip_prefix("home="))?.trim();
+    let v = setting_in(text, "home")?;
+    let v = v.as_str();
     if v.is_empty() {
         return None;
     }
