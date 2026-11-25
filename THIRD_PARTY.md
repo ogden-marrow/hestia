@@ -300,10 +300,10 @@ Where a crate offers a choice (`OR`), Hestia uses the permissive alternative. Th
 | tinystr | 0.8.5 | Unicode-3.0 |
 | tokio | 1.54.1 | MIT |
 | tokio-macros | 2.7.2 | MIT |
-| toml | 1.2.1+spec-1.1.0 | MIT OR Apache-2.0 |
+| toml | 1.2.2+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_datetime | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_edit | 0.25.19+spec-1.1.0 | MIT OR Apache-2.0 |
-| toml_parser | 1.1.5+spec-1.1.0 | MIT OR Apache-2.0 |
+| toml_parser | 1.1.7+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_writer | 1.2.0+spec-1.1.0 | MIT OR Apache-2.0 |
 | tracing | 0.1.44 | MIT |
 | tracing-attributes | 0.1.31 | MIT |
