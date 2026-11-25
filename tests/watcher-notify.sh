@@ -14,6 +14,8 @@ mkdir -p "$HOME"
 case "$HOME" in "$T"/*) ;; *) echo "FAIL: HOME is not in the sandbox: $HOME" >&2; exit 1 ;; esac
 ls_bin="$here/target/release/lifestream"; [ -x "$ls_bin" ] || ls_bin="$here/target/debug/lifestream"
 [ -x "$ls_bin" ] || { echo "build lifestream first (cargo build)" >&2; exit 2; }
+tray_bin="$(dirname "$ls_bin")/hestia-tray"
+[ -x "$tray_bin" ] || { echo "build hestia-tray first (cargo build)" >&2; exit 2; }
 export LIFESTREAM="$ls_bin"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 git config --global user.email t@t.t; git config --global user.name t
@@ -105,7 +107,8 @@ fresh; ago 43 "ok: 0 commit(s), up to date"
 is '"state":"stale"' '"notify":true' || fail "43 hours without a run should be stale and news: $(state)"
 case "$(state)" in *'"last_ok":"'*) ;; *) fail "stale must say when it last worked: $(state)" ;; esac
 state | grep -q '"reason":"[^"/]*"' || fail "the stale sentence is not plain"
-"$ls_bin" backup-state --share "$HOME/.local/share" --mark-notified >/dev/null
+"$ls_bin" backup-state --share "$HOME/.local/share" --notify >/dev/null
+[ "$(sent)" = 1 ] || fail "--notify should send the stale notice once (sent $(sent))"
 is '"state":"stale"' '"notify":false' || fail "stale told once must stay quiet: $(state)"
 
 # ---- the setting: notifications=off means no notification at all
@@ -145,8 +148,8 @@ git -C "$r" remote add origin https://github.com/ada/home.git
 printf '{"at":%s,"slug":"ada/home","private":true}\n' "$(now)" > "$share/private-check.json"
 git -C "$r" update-ref refs/remotes/origin/main HEAD
 is '"state":"ok"' '"notify":false' || fail "signed in and pushed should be ok: $(state)"
-rc=0; "$ls_bin" backup-state --share "$HOME/.local/share" --mark-notified >/dev/null || rc=$?
-[ "$rc" = 10 ] || fail "closing a told local_only episode should exit 10 (got $rc)"
+"$ls_bin" backup-state --share "$HOME/.local/share" --notify >/dev/null
+[ "$(sent)" = 2 ] && [ "$(tail -1 "$calls")" = "low | Hestia | Your backup is working again." ] || fail "closing a told local_only episode should say 'working again' once: $(cat "$calls")"
 # notifications=off: still local_only, never a notification
 fresh 30; printf 'home=%s\nnotifications=off\n' "$r" > "$HOME/.config/hestia/settings"; run
 is '"state":"local_only"' '"notify":false' || fail "off: local_only, never notify: $(state)"
@@ -154,5 +157,41 @@ is '"state":"local_only"' '"notify":false' || fail "off: local_only, never notif
 # a repository git cannot read: unknown, never a notification
 fresh 30; printf 'garbage' > "$r/.git/HEAD"; ago 1 "ok: 0 commit(s), up to date"
 is '"state":"unknown"' '"notify":false' || fail "a broken repository must read unknown: $(state)"
+
+# ---- #252: a stopped or dead watcher timer still raises its one notification. The tray is the always-on check: it asks
+# the engine's one notifier at start (before it looks for a tray host) and every minute. Here there is no session bus, so
+# each tray start does exactly that one check and then stops, which is a tray check every time it is run.
+tray() { DBUS_SESSION_BUS_ADDRESS="unix:path=$S/no-bus" timeout 30 "$tray_bin" >/dev/null 2>&1 || true; }
+# the watcher never ran for 2 days: stale, and the tray (not the watcher) tells it, once
+fresh; ago 48 "ok: 0 commit(s), up to date"
+is '"state":"stale"' '"notify":true' || fail "2 days without a run: stale and news: $(state)"
+tray
+[ "$(sent)" = 1 ] || fail "a watcher timer stopped for 2 days must raise ONE notification from the tray (sent $(sent))"
+case "$(head -1 "$calls")" in "normal | Hestia: your backup needs you | "*timer*) ;; *) fail "the tray's notice must use the watcher's words: $(cat "$calls")" ;; esac
+case "$(cat "$calls")" in */*|*"$HOME"*) fail "the notice holds a path: $(cat "$calls")" ;; esac
+tray; tray; "$ls_bin" backup-state --share "$HOME/.local/share" --notify >/dev/null
+[ "$(sent)" = 1 ] || fail "the tray told the same stopped timer again (sent $(sent))"
+# the timer comes back: the watcher's good run says 'working again' once; the tray after it stays quiet
+run; [ "$rc" = 0 ] || fail "the watcher's run after the stop should be ok (rc $rc)"
+[ "$(sent)" = 2 ] && [ "$(tail -1 "$calls")" = "low | Hestia | Your backup is working again." ] || fail "recovery after a stopped timer: $(cat "$calls")"
+[ ! -e "$share/notified.json" ] || fail "the stopped-timer episode was not cleared"
+tray; [ "$(sent)" = 2 ] || fail "the tray repeated a notice after recovery: $(cat "$calls")"
+# tray first, then the watcher, on the same failing episode: told once in all
+fresh; broken; ago 10 "ok: 0 commit(s), up to date"; ago 7 "FAILED: offline"
+tray; [ "$(sent)" = 1 ] || fail "the tray did not tell a 7-hour failure (sent $(sent))"
+run; run; [ "$(sent)" = 1 ] || fail "the watcher told an episode the tray had told (sent $(sent))"
+# the watcher first, then the tray
+fresh; broken; ago 10 "ok: 0 commit(s), up to date"; ago 7 "FAILED: offline"
+run; [ "$(sent)" = 1 ] || fail "the watcher did not tell a 7-hour failure (sent $(sent))"
+tray; tray; [ "$(sent)" = 1 ] || fail "the tray told an episode the watcher had told (sent $(sent))"
+# both at the same moment, several times over: still one
+fresh; ago 48 "ok: 0 commit(s), up to date"
+for _ in 1 2 3; do tray & "$ls_bin" backup-state --share "$HOME/.local/share" --notify >/dev/null & done; wait
+[ "$(sent)" = 1 ] || fail "tray and watcher checking at once told one episode $(sent) times"
+# notifications=off: the tray says nothing either
+fresh; ago 48 "ok: 0 commit(s), up to date"; mkdir -p "$HOME/.config/hestia"; printf 'notifications=off\n' > "$HOME/.config/hestia/settings"
+tray; tray
+[ "$(sent)" = 0 ] || fail "notifications=off: the tray still sent one"
+[ ! -e "$share/notified.json" ] || fail "notifications=off: nothing was told, so nothing may be remembered"
 
 echo "watcher notification checks passed"

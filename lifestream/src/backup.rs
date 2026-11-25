@@ -334,9 +334,69 @@ pub fn dir_of(share: Option<PathBuf>) -> Result<PathBuf> {
     Ok(share.or_else(crate::share_dir).context("no data folder (is HOME set?)")?.join("hestia"))
 }
 
-/// For the tray: the plain sentence when the backup needs a person (failing, stale, or local_only after its grace), else None.
-pub fn needs_you() -> Option<String> {
-    let st = compute(&dir_of(None).ok()?, Utc::now().timestamp(), true);
+/// The words of the one desktop notification, for everyone who sends it (the watcher after each run and the tray every
+/// minute, both through `tell_in`). The body of "needs you" is the state's own plain sentence.
+pub const TITLE: &str = "Hestia: your backup needs you";
+/// The one quiet line when a told problem is over.
+pub const RECOVERED_TITLE: &str = "Hestia";
+pub const RECOVERED_BODY: &str = "Your backup is working again.";
+
+/// What `tell_in` sent.
+#[derive(Debug, PartialEq)]
+pub enum Told {
+    Nothing,
+    NeedsYou,
+    Recovered,
+}
+
+/// Decide, send at most one notification, and remember it: the one place that does (#225, #252). The watcher calls it after
+/// every run (`backup-state --notify`) and the tray every minute, so a stopped timer or a dead watcher is still told. An
+/// exclusive lock on `notified.lock` makes decide-send-remember one at a time, so the tray and the watcher never both tell
+/// the same episode. `send(urgency, title, body)` is true when the notification went out; only then is the episode recorded.
+pub fn tell_in(dir: &Path, repo: Option<&Path>, now: i64, on: bool, send: &mut dyn FnMut(&str, &str, &str) -> bool) -> Result<(State, Told)> {
+    fs::create_dir_all(dir)?;
+    let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("notified.lock"))?;
+    lock.lock()?;
+    let mut st = compute_in(dir, repo, now, on);
+    let told = if st.state == "ok" {
+        if mark(dir, &st)? && on && send("low", RECOVERED_TITLE, RECOVERED_BODY) { Told::Recovered } else { Told::Nothing }
+    } else if st.notify {
+        // a second line (the restore check) joins the first in a one-line notification
+        let body = st.reason.as_deref().unwrap_or_default().replace('\n', " ");
+        if !body.is_empty() && send("normal", TITLE, &body) {
+            mark(dir, &st)?;
+            st.notify = false;
+            Told::NeedsYou
+        } else {
+            Told::Nothing
+        }
+    } else {
+        Told::Nothing
+    };
+    Ok((st, told))
+}
+
+/// One desktop notification through `notify-send`; false when it could not be sent (no notify-send, no session).
+pub fn desktop(urgency: &str, title: &str, body: &str) -> bool {
+    Command::new("notify-send")
+        .args(["-u", urgency, "-a", "Hestia", title, body])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+fn notifications_on() -> bool {
+    crate::setting("notifications").as_deref() != Some("off")
+}
+
+/// For the tray, every minute: tell if it is due (the same `tell_in` as the watcher, so a stopped timer is still told, #252),
+/// then the plain sentence when the backup needs a person (failing, stale, or local_only after its grace), else None.
+pub fn check() -> Option<String> {
+    let dir = dir_of(None).ok()?;
+    let now = Utc::now().timestamp();
+    let st = tell_in(&dir, repo_dir().as_deref(), now, notifications_on(), &mut desktop).map_or_else(|_| compute(&dir, now, true), |(st, _)| st);
     if st.needs_you() { st.reason } else { None }
 }
 
@@ -357,19 +417,13 @@ pub fn mark(dir: &Path, st: &State) -> Result<bool> {
     Ok(false)
 }
 
-/// `--mark-notified` exits with this when it just closed an episode that had been told and notifications are on:
-/// the one moment to say "working again".
-pub const EXIT_RECOVERED: i32 = 10;
-
-pub fn cmd(share: Option<PathBuf>, mark_notified: bool) -> Result<()> {
+/// `backup-state`: print the state; with `notify`, first tell if it is due (`tell_in`).
+pub fn cmd(share: Option<PathBuf>, notify: bool) -> Result<()> {
     let dir = dir_of(share)?;
-    let on = crate::setting("notifications").as_deref() != Some("off");
-    let st = compute(&dir, Utc::now().timestamp(), on);
-    let recovered = mark_notified && mark(&dir, &st)?;
+    let on = notifications_on();
+    let now = Utc::now().timestamp();
+    let st = if notify { tell_in(&dir, repo_dir().as_deref(), now, on, &mut desktop)?.0 } else { compute(&dir, now, on) };
     println!("{}", report(&st, &dir));
-    if recovered && on {
-        std::process::exit(EXIT_RECOVERED);
-    }
     Ok(())
 }
 
@@ -545,6 +599,75 @@ mod tests {
         let d = dir_with(&[(NOW - 9 * H, "FAILED: git commit failed: /home/me/secret ghp_abcdefghijklmnopqrstuvwxyz0123456789")]);
         let r = compute(&d, NOW, true).reason.unwrap();
         assert!(!r.contains('/') && !r.contains("ghp_") && !r.contains("secret ghp"), "{r}");
+    }
+
+    // ---- #252: the one notifier (`tell_in`), run by the watcher after each run and by the tray every minute.
+
+    /// `tell_in` with a recording sender (never the real notify-send)
+    fn told(d: &Path, now: i64, on: bool, sent: &mut Vec<(String, String, String)>) -> Told {
+        assert!(d.starts_with(std::env::temp_dir()));
+        tell_in(d, None, now, on, &mut |u, t, b| {
+            sent.push((u.into(), t.into(), b.into()));
+            true
+        })
+        .unwrap()
+        .1
+    }
+
+    #[test]
+    fn a_watcher_that_never_runs_for_two_days_is_told_once_and_recovery_once() {
+        let d = dir_with(&[(NOW - 48 * H, "ok: 0 commit(s), up to date")]);
+        let mut sent = vec![];
+        assert_eq!(told(&d, NOW, true, &mut sent), Told::NeedsYou);
+        assert_eq!(sent.len(), 1);
+        assert_eq!((sent[0].0.as_str(), sent[0].1.as_str()), ("normal", TITLE));
+        assert!(sent[0].2.contains("timer") && !sent[0].2.contains('/'), "{}", sent[0].2);
+        // the tray every minute and the watcher after its runs: the same episode, never told again
+        for m in 1..5 {
+            assert_eq!(told(&d, NOW + m * 60, true, &mut sent), Told::Nothing);
+        }
+        assert_eq!(sent.len(), 1);
+        // it works again: one quiet line, the episode forgotten, then quiet
+        fs::write(d.join("watch-history.jsonl"), format!("{}\n", json!({"at": NOW + H, "result": OK_RUN, "commits": 1}))).unwrap();
+        assert_eq!(told(&d, NOW + H, true, &mut sent), Told::Recovered);
+        assert_eq!(sent[1], ("low".into(), RECOVERED_TITLE.into(), RECOVERED_BODY.into()));
+        assert!(notified_episode(&d).is_none());
+        assert_eq!(told(&d, NOW + 2 * H, true, &mut sent), Told::Nothing);
+        assert_eq!(sent.len(), 2);
+    }
+
+    #[test]
+    fn tell_respects_off_and_only_remembers_what_was_sent() {
+        let d = dir_with(&[(NOW - 48 * H, OK_RUN)]);
+        let mut sent = vec![];
+        assert_eq!(told(&d, NOW, false, &mut sent), Told::Nothing);
+        assert!(sent.is_empty() && notified_episode(&d).is_none(), "notifications=off: nothing sent, nothing remembered");
+        // a notification that could not be sent is not remembered: the next check tries again
+        let (st, t) = tell_in(&d, None, NOW, true, &mut |_, _, _| false).unwrap();
+        assert_eq!((st.notify, t), (true, Told::Nothing));
+        assert!(notified_episode(&d).is_none());
+        assert_eq!(told(&d, NOW, true, &mut sent), Told::NeedsYou);
+    }
+
+    #[test]
+    fn tray_and_watcher_at_the_same_moment_tell_once() {
+        let d = dir_with(&[(NOW - 10 * H, OK_RUN), (NOW - 7 * H, "FAILED: offline: x")]);
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let (d, count) = (d.clone(), count.clone());
+                std::thread::spawn(move || {
+                    tell_in(&d, None, NOW, true, &mut |_, _, _| {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        true
+                    })
+                    .unwrap();
+                })
+            })
+            .collect();
+        threads.into_iter().for_each(|t| t.join().unwrap());
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1, "one episode, one notification");
     }
 
     // ---- #256: a backup only on this disk is not a backup. Every repository below lives in a temp folder; git is
