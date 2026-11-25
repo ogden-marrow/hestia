@@ -451,7 +451,7 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(inbox)
         .child(field(&d, "inbox-add", &s.f_inbox, "Add a folder to watch, like Downloads", |s: &mut State| &mut s.f_inbox).on_submit(|s: &mut State, _: &mut Tx| s.add_inbox()));
 
-    body = body.child(heading(&d, "Your rules")).child(tree_col).child(add_rule).child(sugg_col).child(watched);
+    body = body.child(heading(&d, "Your rules")).child(if s.tree.folders.is_empty() { text("No rules yet. Add one below: say which kinds of file go to which folder.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink() } else { tree_col }).child(add_rule).child(sugg_col).child(watched);
 
     // what would move, and the confirmation
     let mut prev = col().w_full().gap(d.gap()).child(heading(&d, "What would move"));
@@ -520,7 +520,7 @@ pub fn panels(s: &State) -> Vec<El> {
         .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0)
             .child(text("Rules").font(style(&d, type_::TITLE)).color(t.text))
             .child(text(if n_moves == 0 { "Nothing is waiting to be filed.".to_string() } else { format!("{} would move tonight.", crate::today::count(n_moves, "file", "files")) }).font(style(&d, type_::LABEL)).color(t.text_secondary)))
-        .child(crate::questions::action(&d, "f-now", "File them now…", "Moving files…", n_moves > 0, s.jobs.running("file"), |s: &mut State| s.confirm_move = true));
+        .children((n_moves > 0 || s.jobs.running("file")).then(|| crate::questions::action(&d, "f-now", "File them now…", "Moving files…", true, s.jobs.running("file"), |s: &mut State| s.confirm_move = true)));
 
     let rules = col().grow(1.0).shrink().min_w(0.0).padding(d.pad()).gap(d.pad()).panel(&d)
         .child(crate::design::page(&d, crate::design::READING, col().w_full().h_full().gap(d.pad()).shrink().min_h(0.0)
