@@ -20,6 +20,7 @@ pub mod secrets;
 pub mod semantic;
 pub mod system;
 pub mod tree;
+pub mod update;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, SecondsFormat, Utc};

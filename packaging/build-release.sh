@@ -16,6 +16,8 @@ mkdir -p "$work/$name/bin"
 cp "$here"/target/release/{hestia,hestia-tray,lifestream} "$work/$name/bin/"
 cp -r "$here/packaging" "$here/install.sh" "$here/uninstall.sh" "$here/LICENSE" "$here/README.md" "$work/$name/"
 for f in CHANGELOG.md THIRD_PARTY.md; do [ -f "$here/$f" ] && cp "$here/$f" "$work/$name/"; done
+# the build id the app shows (ui/build.rs), so install.sh records which build a tarball installed
+git -C "$here" rev-parse --short=8 HEAD > "$work/$name/BUILD" 2>/dev/null || echo unknown > "$work/$name/BUILD"
 tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$out/$name.tar.gz" -C "$work" "$name"
 ( cd "$out" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
 

@@ -22,11 +22,23 @@ find "$pkg" -type f \( -name '*.rs' -o -name Cargo.toml \) | grep -q . && fail "
 # install from the tarball on a computer with NO compiler: PATH holds only stand-ins and the system's own tools
 export HOME="$T/home" XDG_DATA_HOME="$T/home/.local/share" PREFIX="$T/home/.local" HESTIA_HOME="$T/home/Home"; mkdir -p "$HOME" "$T/bin"
 for c in systemctl pkill gsettings gtk-update-icon-cache update-desktop-database; do printf '#!/bin/sh\necho "%s $*" >> "%s/calls.log"\n' "$c" "$T" > "$T/bin/$c"; chmod +x "$T/bin/$c"; done
-for c in bash sh env sed grep cp mv rm mkdir cat printf install chmod find sort tr cut head tail dirname basename readlink id ln date python3 glib-compile-schemas tar mktemp ls; do p="$(command -v "$c" 2>/dev/null || true)"; [ -n "$p" ] && ln -sf "$p" "$T/bin/$c"; done
+for c in bash sh env sed grep cp mv rm mkdir cat printf install chmod find sort tr cut head tail dirname basename readlink id ln date python3 glib-compile-schemas tar mktemp ls timeout cmp sleep; do p="$(command -v "$c" 2>/dev/null || true)"; [ -n "$p" ] && ln -sf "$p" "$T/bin/$c"; done
 PATH="$T/bin" command -v cargo >/dev/null 2>&1 && fail "the rehearsal machine has a compiler, so it proves nothing"
 ( cd "$pkg" && PATH="$T/bin" bash ./install.sh >"$T/install.log" 2>&1 ) || { cat "$T/install.log" >&2; fail "install.sh from the tarball failed without a compiler"; }
 for b in hestia hestia-tray lifestream; do [ -x "$PREFIX/bin/$b" ] || fail "$b was not installed from the tarball"; done
 "$PREFIX/bin/lifestream" --version >/dev/null || fail "the installed lifestream does not run"
+# a tarball install records its build and that it is a release: updates for it wait for signed releases (#244), and say so
+grep -q "\"build_id\":\"$(tr -d '\n' < "$pkg/BUILD")\",\"source\":\"release\"" "$HOME/.local/share/hestia/install.json" || fail "install.json does not record the release build: $(cat "$HOME/.local/share/hestia/install.json" 2>&1)"
+chk="$(PATH="$T/bin" "$PREFIX/bin/lifestream" update check)"
+for w in '"available":null' '"newer":false' '"source":"release"' '"error":"'; do case "$chk" in *"$w"*) ;; *) fail "update check on a release install lacks $w: $chk" ;; esac; done
+# rollback with nothing to go back to says so and changes nothing; a second install keeps the first build for rollback
+rb="$(PATH="$T/bin" "$PREFIX/bin/lifestream" update rollback)" && fail "a rollback with no earlier build succeeded"
+case "$rb" in *'"event":"failed"'*'no earlier version'*) ;; *) fail "rollback with nothing to go back to: $rb" ;; esac
+first="$(readlink -f "$PREFIX/lib/hestia/current")"
+( cd "$pkg" && PATH="$T/bin" bash ./install.sh >"$T/install2.log" 2>&1 ) || { cat "$T/install2.log" >&2; fail "a second install from the tarball failed"; }
+[ "$(readlink -f "$PREFIX/lib/hestia/previous")" = "$first" ] && [ "$(readlink -f "$PREFIX/lib/hestia/current")" != "$first" ] || fail "a second install did not keep the first build for rollback"
+PATH="$T/bin" "$PREFIX/bin/lifestream" update rollback >"$T/rb.log" || fail "rollback to the first build failed: $(cat "$T/rb.log")"
+[ "$(readlink -f "$PREFIX/lib/hestia/current")" = "$first" ] && "$PREFIX/bin/lifestream" --version >/dev/null || fail "rollback did not bring back a working first build"
 grep -q "ExecStart=$PREFIX/libexec/hestia/watch.sh" "$HOME/.config/systemd/user/hestia-watch.service" || fail "the installed watch unit is wrong"
 ( cd "$pkg" && PATH="$T/bin" bash ./uninstall.sh >/dev/null ) || fail "uninstall from the tarball failed"
 [ ! -e "$PREFIX/bin/lifestream" ] || fail "uninstall left a program behind"
