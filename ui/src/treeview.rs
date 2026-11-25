@@ -206,9 +206,38 @@ impl State {
 
     /// The folder was clicked while a file is waiting to be moved: put it inside.
     pub(crate) fn tree_drop(&mut self, dir: &Path) {
+        let many = self.tree_moving_many.take();
+        if let Some(list) = many {
+            let n = list.len();
+            for from in list {
+                let to = dir.join(from.file_name().unwrap_or_default());
+                self.tree_move(&from, &to);
+            }
+            self.tree_multi = None;
+            if self.msg.starts_with("Moved") {
+                self.msg = format!("Moved {} to {}.", crate::today::count(n, "item", "items"), tilde(dir));
+            }
+            return;
+        }
         let Some(from) = self.tree_moving.take() else { return };
         let to = dir.join(from.file_name().unwrap_or_default());
         self.tree_move(&from, &to);
+    }
+
+    /// A press on a row: drop what is waiting to be moved, add it to the selection in Select mode, or select it.
+    pub(crate) fn tree_press(&mut self, p: PathBuf) {
+        if self.tree_moving.is_some() || self.tree_moving_many.is_some() {
+            let d = if p.is_dir() { p.clone() } else { p.parent().map(Path::to_path_buf).unwrap_or_default() };
+            return self.tree_drop(&d);
+        }
+        if let Some(list) = self.tree_multi.as_mut() {
+            match list.iter().position(|x| *x == p) {
+                Some(i) => { list.remove(i); }
+                None => list.push(p),
+            }
+            return;
+        }
+        self.tree_select(p);
     }
 }
 
@@ -239,25 +268,45 @@ pub fn panel(s: &State) -> El {
             .on_press(move |s: &mut State| { s.tree_open.insert(p.clone()); s.reload_tree(); }));
     }
 
-    let moving = s.tree_moving.clone();
+    let moving = s.tree_moving.clone().or_else(|| s.tree_moving_many.as_ref().and_then(|l| (l.len() == 1).then(|| l[0].clone())));
+    let many_moving = s.tree_moving_many.as_ref().map(|l| l.len()).filter(|n| *n > 1);
     let banner = moving.as_ref().map(|m| row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
         .child(text(format!("Click the folder to put “{}” in.", m.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0).wrap_anywhere())
-        .child(crate::questions::button(&d, "tv-cancel", "Cancel".into(), false, |s: &mut State| s.tree_moving = None)));
+        .child(crate::questions::button(&d, "tv-cancel", "Cancel".into(), false, |s: &mut State| s.tree_moving = None)))
+        .or_else(|| many_moving.map(|n| row().w_full().px(d.item_px()).py(d.gap()).gap(d.gap()).center_y().tile(&d)
+            .child(text(format!("Click the folder to put the {n} selected items in.")).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0).wrap_anywhere())
+            .child(crate::questions::button(&d, "tv-cancel", "Cancel".into(), false, |s: &mut State| s.tree_moving_many = None))));
 
+    let picking = match &s.tree_multi {
+        Some(list) => row().w_full().gap(d.gap()).center_y()
+            .child(text(if list.is_empty() { "Click files and folders to select them.".to_string() } else { format!("{} selected", crate::today::count(list.len(), "item", "items")) }).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0))
+            .children((!list.is_empty()).then(|| crate::questions::button(&d, "tv-move-many", "Move to…".into(), true, |s: &mut State| { s.tree_moving_many = s.tree_multi.clone(); s.msg.clear() })))
+            .child(crate::questions::button(&d, "tv-done", "Done".into(), false, |s: &mut State| { s.tree_multi = None; s.tree_moving_many = None })),
+        None => row().w_full().child(crate::questions::button(&d, "tv-select", "Select several".into(), false, |s: &mut State| { s.tree_multi = Some(vec![]); s.tree_inline = None })),
+    };
     let mut list = col().w_full().gap(1.0);
     for r in &s.tree_rows {
-        let on = sel.as_deref() == Some(r.path.as_path());
+        let on = match &s.tree_multi { Some(list) => list.contains(&r.path), None => sel.as_deref() == Some(r.path.as_path()) };
         let hovered = s.tree_hover.as_deref() == Some(r.path.as_path());
-        let target = (r.is_dir && moving.is_some()) || hovered;
+        let target = (r.is_dir && (moving.is_some() || many_moving.is_some())) || hovered;
         let p = r.path.clone();
         let icon = rune::icon(if r.is_dir { &crate::icons::FOLDER } else { &crate::icons::DOC }, d.size(16.0)).color(if r.is_dir { d.accent_color() } else { t.text_secondary });
         let mut row_el = row().key(format!("tr-{}", r.path.display())).w_full().h(d.row_h()).pl(d.item_px() + r.depth as f32 * d.size(18.0)).pr(d.item_px()).gap(d.gap()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { d.select() } else { rune::Color::TRANSPARENT })
                 .border(1.0, if target { d.accent_color().alpha(0.45) } else { rune::Color::TRANSPARENT })
-                .on_press(move |s: &mut State| { if s.tree_moving.is_some() { let d = if p.is_dir() { p.clone() } else { p.parent().map(Path::to_path_buf).unwrap_or_default() }; s.tree_drop(&d) } else { s.tree_select(p.clone()) } })
+                .on_press({ let p = p.clone(); move |s: &mut State| s.tree_press(p.clone()) })
+                .on_double_press_tx({ let p = p.clone(); move |s: &mut State, tx: &mut rune::Tx| { if s.tree_multi.is_none() { s.tree_select(p.clone()); s.tree_inline = Some(p.clone()); tx.focus("tv-inline", false); } } })
                 .child(chevron(&d, r))
                 .child(icon)
-                .child(text(r.name.clone()).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate())
+                .child(if s.tree_inline.as_deref() == Some(r.path.as_path()) {
+                    rune::text_input(&s.tree_rename, style(&d, type_::BODY)).key("tv-inline").single_line().grow(1.0).shrink().min_w(0.0).h(d.row_h() - 6.0).px(d.gap()).radius(d.r(tok::radius::SM))
+                        .fill(t.card).border(1.0, d.accent_color()).color(t.text)
+                        .on_edit(|s: &mut State| &mut s.tree_rename)
+                        .on_submit(|s: &mut State, _: &mut rune::Tx| { s.tree_inline = None; s.tree_rename() })
+                        .on_input_key(|s: &mut State, ev: &rune::KeyEvent, _: &mut rune::Tx| { if ev.key == rune::Key::Escape { s.tree_inline = None; true } else { false } })
+                } else {
+                    text(r.name.clone()).font(style(&d, type_::BODY)).color(t.text).grow(1.0).shrink().min_w(0.0).truncate()
+                })
                 .child(text(if r.is_dir { String::new() } else { lifestream::human(r.size) }).font(style(&d, type_::LABEL)).color(t.text_secondary));
         if r.is_dir {
             let (dir, dir2) = (r.path.clone(), r.path.clone());
@@ -275,7 +324,8 @@ pub fn panel(s: &State) -> El {
         .child(col().w_full().gap(2.0)
             .child(text("Folders").font(style(&d, type_::TITLE)).color(t.text))
             .child(text("Your home folder. Rename, move or add; Undo puts the last change back. Nothing is ever deleted.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()))
-        .child(crumb_row);
+        .child(crumb_row)
+        .child(picking);
     if let Some(b) = banner {
         center = center.child(b);
     }
@@ -349,6 +399,19 @@ mod tests {
         let r = rows(&root, &open, &none, false);
         assert_eq!(r.iter().map(|x| (x.name.as_str(), x.depth)).collect::<Vec<_>>(), [("a", 0), ("b", 1), ("one.txt", 1), ("top.txt", 0)]);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn in_select_mode_a_press_toggles_and_outside_it_selects() {
+        let mut s = State::default();
+        let (a, b) = (PathBuf::from("/h/a.txt"), PathBuf::from("/h/b.txt"));
+        s.tree_press(a.clone());
+        assert_eq!(s.tree_sel.as_ref(), Some(&a));
+        s.tree_multi = Some(vec![]);
+        s.tree_press(a.clone());
+        s.tree_press(b.clone());
+        s.tree_press(a.clone());
+        assert_eq!(s.tree_multi.as_deref(), Some(&[b][..]));
     }
 
     #[test]
