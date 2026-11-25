@@ -64,9 +64,9 @@ Where a crate offers a choice (`OR`), Hestia uses the permissive alternative. Th
 | cfg_aliases | 0.2.2 | MIT |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
 | cipher | 0.4.4 | MIT OR Apache-2.0 |
-| clap | 4.6.7 | MIT OR Apache-2.0 |
+| clap | 4.6.9 | MIT OR Apache-2.0 |
 | clap_builder | 4.6.7 | MIT OR Apache-2.0 |
-| clap_derive | 4.6.7 | MIT OR Apache-2.0 |
+| clap_derive | 4.6.9 | MIT OR Apache-2.0 |
 | clap_lex | 1.1.1 | MIT OR Apache-2.0 |
 | codespan-reporting | 0.13.1 | Apache-2.0 |
 | color_quant | 1.1.0 | MIT |
