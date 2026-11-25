@@ -161,6 +161,8 @@ struct Line {
     reason: String,
     from: String,
     to: String,
+    /// a folder moved (a `dir` line), not a file
+    folder: bool,
 }
 
 fn journal_items(home: &Path, stream: &Path, out: &mut Vec<Item>) {
@@ -187,7 +189,7 @@ fn journal_items(home: &Path, stream: &Path, out: &mut Vec<Item>) {
             "file" => "filed",
             "mkdir" => "folder_created",
             "dir" if parent_of(&from) == parent_of(&to) => "renamed",
-            "dir" => "moved",
+            "dir" | "move" => "moved",
             _ => continue,
         };
         let (actor, reason) = match v["actor"].as_str() {
@@ -200,7 +202,7 @@ fn journal_items(home: &Path, stream: &Path, out: &mut Vec<Item>) {
             },
         };
         let reason = if actor == "unknown" && reason.is_empty() { "recorded before Hestia kept track of who decided".to_string() } else { reason };
-        lines.push(Line { batch: batch.to_string(), when, kind, actor, reason, from, to });
+        lines.push(Line { batch: batch.to_string(), when, kind, actor, reason, from, to, folder: jkind == "dir" });
     }
     // one item per batch, kind, actor and reason: a batch can hold several decisions
     let mut groups: BTreeMap<(String, &str, &str, String), Vec<&Line>> = BTreeMap::new();
@@ -220,7 +222,11 @@ fn journal_items(home: &Path, stream: &Path, out: &mut Vec<Item>) {
             "filed" if parents.len() == 1 => format!("Filed {} into {}", plural(count, "file", "files"), nice(parent_of(&first.to))),
             "filed" => format!("Filed {} into {}", plural(count, "file", "files"), plural(parents.len(), "folder", "folders")),
             "renamed" => format!("Renamed the folder {} to {}", name_of(&first.from), name_of(&first.to)),
-            "moved" => format!("Moved the folder {} into {}", name_of(&first.from), nice(parent_of(&first.to))),
+            "moved" if count == 1 && first.folder => format!("Moved the folder {} into {}", name_of(&first.from), nice(parent_of(&first.to))),
+            "moved" if count == 1 => format!("Moved {} into {}", name_of(&first.from), nice(parent_of(&first.to))),
+            // a group move (`move_many`): files and folders the person chose, one batch
+            "moved" if parents.len() == 1 => format!("Moved {} into {}", plural(count, "item", "items"), nice(parent_of(&first.to))),
+            "moved" => format!("Moved {} into {}", plural(count, "item", "items"), plural(parents.len(), "folder", "folders")),
             _ => format!("Made a new folder {}", nice(&first.to)),
         };
         out.push(Item {
