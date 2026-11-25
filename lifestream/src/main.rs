@@ -186,6 +186,12 @@ enum Cmd {
         /// or check these files (a folder means every file inside it, except .git)
         paths: Vec<PathBuf>,
     },
+    /// Update Hestia from where it was installed: check (one JSON line), apply and rollback (one JSON event per line).
+    /// Contract in lifestream/README.md.
+    Update {
+        #[command(subcommand)]
+        what: UpdateCmd,
+    },
     /// The morning briefing: what happened overnight and what needs me
     Brief {
         #[arg(long, default_value_t = 24)]
@@ -201,6 +207,27 @@ enum FolderCmd {
     Move { from: String, to: String },
     /// Create one new empty folder PATH (relative to your home folder); its parent must exist
     New { path: String },
+}
+
+#[derive(Subcommand)]
+enum UpdateCmd {
+    /// Is there a newer Hestia? One JSON line: installed, available, newer, changes, source, checked_at, error
+    Check {
+        /// the checkout to look in (default: the one Hestia was installed from, in install.json)
+        #[arg(long)]
+        source: Option<PathBuf>,
+    },
+    /// Update to the newest Hestia, keeping this build for rollback. Refuses while a backup or restore check runs.
+    Apply,
+    /// Go back to the build that was installed before the last update
+    Rollback,
+    /// Make DIR (a folder under PREFIX/lib/hestia/builds) the installed build. Run by install.sh --activate.
+    #[command(hide = true)]
+    Switch {
+        #[arg(long)]
+        prefix: PathBuf,
+        dir: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -295,6 +322,25 @@ fn main() -> Result<()> {
                 FolderCmd::Move { from, to } => lifestream::tree::cmd_folder_move(&from, &to, &stream, manifest),
                 FolderCmd::New { path } => lifestream::tree::cmd_folder_new(&path, &stream),
             }
+        }
+        Cmd::Update { what } => {
+            let mut out = std::io::stdout();
+            let ok = match what {
+                UpdateCmd::Check { source } => {
+                    println!("{}", lifestream::update::check(source));
+                    true
+                }
+                UpdateCmd::Apply => lifestream::update::apply(&mut out),
+                UpdateCmd::Rollback => lifestream::update::rollback(&mut out),
+                UpdateCmd::Switch { prefix, dir } => {
+                    lifestream::update::switch(&prefix, &dir)?;
+                    true
+                }
+            };
+            if !ok {
+                std::process::exit(1);
+            }
+            Ok(())
         }
         Cmd::Machine { repo, write } => {
             let m = lifestream::machine::probe(&chrono_today());

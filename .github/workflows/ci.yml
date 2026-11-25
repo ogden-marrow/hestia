@@ -34,6 +34,8 @@ jobs:
         run: python3 packaging/third-party.py --check
       - name: A release, rehearsed (the release script, checksums, tarball install without a compiler, the .deb)
         run: bash tests/release-rehearsal.sh
+      - name: Updating from the checkout (check, apply, rollback; refuses during a backup or over local changes; a build that does not start is never switched on)
+        run: bash tests/update.sh
       - name: A clean computer, end to end (install, capture, restore dry-run, uninstall)
         run: bash tests/install-e2e.sh
       - name: Uninstall and install-path safety

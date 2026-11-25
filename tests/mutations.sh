@@ -61,6 +61,9 @@ mutate "uninstall keeps the clipboard history"            uninstall.sh 'rm -f "$
 mutate "bootstrap restores code that runs by itself"       packaging/libexec/bootstrap.sh 'if is_executable_config "$rel" && [ "$EXEC" != 1 ]; then review+=("$kind/$rel"); continue; fi' 'true' bash tests/bootstrap.sh
 mutate "the rehearsal no longer notices restored code that runs by itself" packaging/libexec/rehearse.sh 'if is_executable_config "$name" || is_executable_config "$rel"; then' 'if false; then' bash tests/rehearse.sh
 mutate "the rehearsal accepts restored content that differs from the repository" packaging/libexec/rehearse.sh 'if [ "$(sha256sum < "$src")" != "$(sha256sum < "$dest")" ]; then' 'if false; then' bash tests/rehearse.sh
+mutate "an update runs while a backup holds its lock"     lifestream/src/update.rs 'Err(TryLockError::WouldBlock) => return Err(busy),' 'Err(TryLockError::WouldBlock) => continue,' bash tests/update.sh
+mutate "an update switches to a build that does not start" lifestream/src/update.rs 'if install_sh(out, &src, &prefix, &["--smoke", &d], None).is_none() {' 'if false {' bash tests/update.sh
+mutate "updates keep every old build"                      lifestream/src/update.rs 'if !kept.contains(' 'if false && !kept.contains(' bash tests/update.sh
 
 echo; echo "killed $killed, survived $survived"
 [ "$survived" = 0 ]

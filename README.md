@@ -130,6 +130,11 @@ HESTIA_HOME=~/Home ./install.sh
 
 Log out and in once so the launcher and the setting take effect.
 
+To update an install from a checkout, use Settings > About in the app, or `lifestream update check` and
+`lifestream update apply` (it fetches the public repository, fast-forwards the checkout, builds a new copy beside the one
+you have and switches only when it starts); `lifestream update rollback` goes back to the build before. Running
+`git pull && ./install.sh` yourself does the same.
+
 ## First run
 
 Open Hestia from the app grid. The welcome tour signs you in to GitHub and finds or creates your private home

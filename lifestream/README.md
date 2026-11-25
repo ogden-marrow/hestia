@@ -157,3 +157,78 @@ Example:
 ```
 
 The journal format (`moves.jsonl`) gained `actor` and `reason` on every line; older lines without them are read as the person's own (`you`) for folder changes, and for files from the record that was filed, otherwise `unknown`.
+
+## Updating Hestia (`lifestream update`)
+
+```
+lifestream update check [--source DIR]
+lifestream update apply
+lifestream update rollback
+```
+
+What Settings > About calls (#265). Nothing here runs by itself and nothing is sent anywhere: the only network use is a
+`git fetch` of the public repository.
+
+**Where things are.** `install.sh` puts every build in its own folder, `<prefix>/lib/hestia/builds/<date>-<build id>/`
+(`bin/`, `libexec/`, `build-info.json`). `<prefix>/lib/hestia/current` and `previous` are links to two of them; the
+installed programs (`<prefix>/bin/{hestia,hestia-tray,lifestream}`) and scripts (`<prefix>/libexec/hestia`) are links
+through `current`, so the systemd units never name a build and switching is one atomic rename. Exactly one older build is
+kept. `$XDG_DATA_HOME/hestia/install.json` (default `~/.local/share/hestia/`) records the installed build:
+
+```json
+{"build_id":"9641b2ee","source":"checkout","source_dir":"/home/you/hestia","installed_at":"2026-11-25T19:55:01Z","prefix":"/home/you/.local"}
+```
+
+`build_id` is the same id the app shows (`ui/build.rs`: the short commit, `+local` when tracked files had changes of their
+own). `source` is `checkout` (built from a git checkout) or `release` (a downloaded tarball, which carries a `BUILD` file).
+
+### `check`: one JSON line, always exit 0
+
+```json
+{"installed":"9641b2ee","available":"ac5f019a","newer":true,"changes":["A weekly restore rehearsal: a backup nobody has restored is a hope."],"source":"checkout","checked_at":"2026-11-25T19:56:29Z","error":null}
+```
+
+- `installed`: the build id in install.json, or `null` if Hestia was not installed with install.sh.
+- `available`: origin/main's build id after the fetch, or `null` (offline, refused, a release install).
+- `newer`: origin/main has commits the installed build does not (false when they are the same or the installed build is ahead).
+- `changes`: up to 10 plain one-line entries added to `CHANGELOG.md` between the two (markdown, issue numbers and commit
+  hashes removed, first sentence, at most 160 characters); `[]` when not newer.
+- `source`: `checkout` or `release`. For `release`, `available` is `null` and `error` says updates come with signed
+  releases (the hook for #244 is `release_available` in `src/update.rs`).
+- `checked_at`: RFC 3339, UTC.
+- `error`: `null`, or one plain sentence for a person (offline; the folder is gone; its origin is not the public repository;
+  not installed with install.sh; a release install). Never a path, a URL or git's own words.
+
+For a checkout: the folder Hestia was installed from (or `--source DIR`) must be a git work tree whose `origin`, as git will
+really fetch it (after `insteadOf`), is `https://github.com/ogden-marrow/hestia(.git)`. The fetch is
+`git fetch --no-tags origin main` with no credential helper, no prompt (`GIT_TERMINAL_PROMPT=0`), no redirects, only the
+https protocol (and local paths, for tests), killed after 20 seconds. It updates `origin/main` inside `.git` and never
+touches the working tree.
+
+### `apply` and `rollback`: one JSON event per line, exit 0 on success and 1 on failure
+
+```json
+{"event":"step","step":"fetch","pct":5}
+{"event":"step","step":"build","pct":15}        (then more build events, up to 75, as cargo compiles)
+{"event":"step","step":"test","pct":80}
+{"event":"step","step":"switch","pct":90}
+{"event":"updated","from":"9641b2ee","to":"ac5f019a"}
+```
+
+or, at any point, a last line `{"event":"failed","message":"<one plain sentence>"}`. Before any step it refuses (and
+changes nothing) when: a backup (`watch.sh`) or a restore check (`rehearse.sh`) holds its lock (the same `flock` files in
+`$XDG_RUNTIME_DIR`, held until the update ends, so neither starts during it), another update is running, Hestia was not
+installed from a checkout, the folder's origin is not the public repository, it is not on `main`, or tracked files have
+changes of their own. Then: fetch; fast-forward the checkout to `origin/main` (`git merge --ff-only`: never a reset, a merge
+commit or a force; a checkout with commits of its own is refused); `install.sh --stage` builds into a new build folder
+(cargo's output goes to `update.log` next to install.json); `install.sh --smoke` checks that `lifestream --version` and
+`hestia --list-scenes` (headless) work, and a build that fails is deleted; `install.sh --activate` installs the desktop
+entry, icons and extension and runs the new build's `lifestream update switch`, which moves the links, removes every build
+except `current` and `previous`, writes install.json and refreshes the user units (`setup-user.sh` restarts a timer only when
+its unit file changed; the tray is restarted onto the new build if it was running). Until the switch, the old build stays
+installed and running. The app itself keeps running the old program until it is restarted.
+
+`rollback` takes the same locks, emits `{"event":"step","step":"switch","pct":50}` and then
+`{"event":"rolled_back","from":"ac5f019a","to":"9641b2ee"}`, or `failed` ("There is no earlier version to go back to."). It
+swaps `current` and `previous`, so the build it leaves is kept and a later update or rollback can return to it. The desktop
+entry, icons and extension stay as the newer build installed them. `uninstall.sh` removes every build folder and install.json.
