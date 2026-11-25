@@ -280,13 +280,14 @@ impl State {
 }
 
 /// After a filing job: the engine moved the files and wrote the stream; load it and show Undo.
-fn reload_after_filing(s: &mut State) {
+pub(crate) fn reload_after_filing(s: &mut State) {
     s.reload_feed();
     if let Some(stream) = s.stream.clone() {
         s.recs = lifestream::load_all(&stream).unwrap_or_default();
     }
     s.refresh_derived();
     s.refresh_plan();
+    s.reload_tree();
     let (n, failed) = s.msg.split_once('\u{1f}').map(|(a, b)| (a.parse().unwrap_or(0), b.parse().unwrap_or(0))).unwrap_or((0usize, 0usize));
     s.last_filed = n;
     s.msg = format!("Moved {}{}. You can put them back.", crate::today::count(n, "file", "files"), if failed > 0 { format!(", {failed} could not be moved") } else { String::new() });

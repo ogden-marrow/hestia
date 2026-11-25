@@ -769,6 +769,7 @@ fn main() {
             ("today", |s| scene(s, Pane::Today)),
             ("folders", |s| { let h = files::home(); s.tree_open.insert(h.join("Documents")); s.tree_open.insert(h.join("Documents/Taxes")); s.reload_tree(); s.tree_select(h.join("Documents/notes.txt")); scene(s, Pane::Folders) }),
             ("folders-dir", |s| { let h = files::home(); s.tree_open.insert(h.join("Documents")); s.tree_open.insert(h.join("Documents/Taxes")); s.reload_tree(); s.tree_select(h.join("Documents/Taxes")); s.tree_undoable = true; s.msg = "Moved ~/Documents/receipts to ~/Documents/Taxes.".into(); scene(s, Pane::Folders) }),
+            ("folders-file", |s| { let h = files::home(); s.refresh_plan(); s.reload_tree(); s.tree_select(h.join("Downloads")); scene(s, Pane::Folders) }),
             ("folders-select", |s| { let h = files::home(); s.tree_open.insert(h.join("Documents")); s.tree_open.insert(h.join("Documents/Taxes")); s.reload_tree(); s.tree_multi = Some(vec![h.join("Documents/notes.txt"), h.join("Documents/lease-renewal.pdf")]); scene(s, Pane::Folders) }),
             ("apps", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } wait_icons(s); scene(s, Pane::Apps) }),
             ("apps-games", |s| { if std::env::var("HESTIA_FIXTURE").is_ok() { s.library = fixture::apps(); } s.app_show = 1; wait_icons(s); scene(s, Pane::Apps) }),
