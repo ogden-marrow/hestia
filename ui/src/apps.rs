@@ -168,9 +168,75 @@ fn steam_libraries(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// One entry of Steam's `shortcuts.vdf` (non-Steam games added to Steam, often run through Proton).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Shortcut {
+    pub appid: u32,
+    pub name: String,
+    pub icon: String,
+    pub hidden: bool,
+}
+
+/// Read Steam's binary key-value format just far enough for the shortcuts list: a map of maps whose fields are
+/// strings (type 1) and 32-bit ints (type 2). Anything unexpected ends the read with what was found so far.
+pub fn parse_shortcuts(b: &[u8]) -> Vec<Shortcut> {
+    fn cstr(b: &[u8], i: &mut usize) -> Option<String> {
+        let end = b[*i..].iter().position(|&c| c == 0)? + *i;
+        let s = String::from_utf8_lossy(&b[*i..end]).into_owned();
+        *i = end + 1;
+        Some(s)
+    }
+    let (mut out, mut cur, mut depth, mut i) = (Vec::new(), Shortcut::default(), 0usize, 0usize);
+    while i < b.len() {
+        let t = b[i];
+        i += 1;
+        match t {
+            0x00 => { let Some(_) = cstr(b, &mut i) else { break }; depth += 1; if depth == 2 { cur = Shortcut::default(); } }
+            0x01 => {
+                let (Some(k), Some(v)) = (cstr(b, &mut i), cstr(b, &mut i)) else { break };
+                match k.to_ascii_lowercase().as_str() { "appname" => cur.name = v, "icon" => cur.icon = v, _ => {} }
+            }
+            0x02 => {
+                let Some(k) = cstr(b, &mut i) else { break };
+                let Some(raw) = b.get(i..i + 4) else { break };
+                let v = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
+                i += 4;
+                match k.to_ascii_lowercase().as_str() { "appid" => cur.appid = v, "ishidden" => cur.hidden = v != 0, _ => {} }
+            }
+            0x08 => {
+                if depth == 2 && !cur.name.is_empty() { out.push(std::mem::take(&mut cur)); }
+                depth = depth.saturating_sub(1);
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
+/// The id `steam://rungameid/ID` takes for a non-Steam shortcut.
+pub fn shortcut_game_id(appid: u32) -> u64 {
+    ((appid as u64) << 32) | 0x0200_0000
+}
+
+fn steam_shortcuts(root: &Path) -> Vec<Item> {
+    let mut out = Vec::new();
+    for user in std::fs::read_dir(root.join("userdata")).into_iter().flatten().flatten() {
+        let Ok(bytes) = std::fs::read(user.path().join("config/shortcuts.vdf")) else { continue };
+        for sc in parse_shortcuts(&bytes).into_iter().filter(|x| !x.hidden && x.appid != 0) {
+            let icon = Some(PathBuf::from(sc.icon.trim_matches('"'))).filter(|p| p.is_absolute() && p.exists());
+            out.push(Item {
+                id: format!("steam-shortcut:{}", sc.appid), name: sc.name, about: "Added to Steam".into(), group: "Games", game: true,
+                source: Source::Steam, open: Open::Steam(shortcut_game_id(sc.appid)), icon, keywords: String::new(), last_played: None,
+            });
+        }
+    }
+    out
+}
+
 pub fn steam_games(home: &Path) -> Vec<Item> {
     let mut out = Vec::new();
     for root in steam_roots(home) {
+        out.extend(steam_shortcuts(&root));
         let cache = root.join("appcache/librarycache");
         for lib in steam_libraries(&root) {
             for e in std::fs::read_dir(&lib).into_iter().flatten().flatten() {
@@ -264,6 +330,28 @@ mod tests {
 
     fn manifest(id: u64, name: &str, flags: u32) -> String {
         format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{id}\"\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"{flags}\"\n\t\"LastPlayed\"\t\t\"1792303666\"\n}}\n")
+    }
+
+    /// A `shortcuts.vdf` as Steam writes it: one shortcut, then a hidden one.
+    fn vdf() -> Vec<u8> {
+        let mut b = Vec::new();
+        let s = |b: &mut Vec<u8>, k: &str, v: &str| { b.push(1); b.extend(k.as_bytes()); b.push(0); b.extend(v.as_bytes()); b.push(0); };
+        let n = |b: &mut Vec<u8>, k: &str, v: u32| { b.push(2); b.extend(k.as_bytes()); b.push(0); b.extend(v.to_le_bytes()); };
+        b.push(0); b.extend(b"shortcuts\0");
+        b.push(0); b.extend(b"0\0"); n(&mut b, "appid", 3_000_000_000); s(&mut b, "AppName", "Board Game"); s(&mut b, "Exe", "\"/x/game.exe\""); s(&mut b, "icon", ""); n(&mut b, "IsHidden", 0);
+        b.push(0); b.extend(b"tags\0"); b.push(8); b.push(8);
+        b.push(0); b.extend(b"1\0"); n(&mut b, "appid", 7); s(&mut b, "AppName", "Hidden"); n(&mut b, "IsHidden", 1); b.push(8);
+        b.push(8); b.push(8);
+        b
+    }
+
+    #[test]
+    fn non_steam_shortcuts_are_read_and_launch_by_their_game_id() {
+        let all = parse_shortcuts(&vdf());
+        assert_eq!(all.iter().map(|x| (x.name.as_str(), x.hidden)).collect::<Vec<_>>(), [("Board Game", false), ("Hidden", true)]);
+        assert_eq!(all[0].appid, 3_000_000_000);
+        assert_eq!(shortcut_game_id(3_000_000_000), (3_000_000_000u64 << 32) | 0x0200_0000);
+        assert!(parse_shortcuts(b"garbage").is_empty());
     }
 
     #[test]
