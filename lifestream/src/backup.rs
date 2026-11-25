@@ -4,7 +4,7 @@
 //! state, a plain sentence and a yes/no for "send a desktop notification now". No file contents and no paths are ever
 //! printed: the sentence is chosen from a fixed list by the kind of failure, never copied from the watcher's text.
 //! Also read, offline and cheap: the home repository's git config and commit times (found through the settings file's
-//! `home=`, like the rest of the engine) and `<share>/hestia/private-check.json`, the watcher's last answer to "is the push
+//! `home=`, like the rest of the engine) and `<share>/hestia/private-check.json`, the last definite answer (sign-in's or the watcher's) to "is the push
 //! target a private repository of yours". A backup only on the same disk is not a backup: no verified private remote is
 //! `local_only`, and commits that have waited over a day to be pushed are `failing`.
 
@@ -236,7 +236,22 @@ fn slug_of(url: &str) -> Option<String> {
     ok.then(|| rest.to_string())
 }
 
-/// Did the watcher last find `slug` to be a private repository of the person's? (`private-check.json`)
+/// The ONE writer of `private-check.json` (#269): the last definite answer to "is `slug` a private repository of the person's".
+/// Called by sign-in (adopting or creating the home repository, `ghrepo`) and by the watcher (`lifestream home record-private`).
+/// Only a definite answer is ever recorded: callers never call it for an offline or signed-out check. Repository name and
+/// yes/no only; written whole (a temporary file, then rename) so a reader never sees half of it.
+pub fn record_private(dir: &Path, slug: &str, private: bool) -> Result<()> {
+    if !crate::ghrepo::valid_full_name(slug) {
+        anyhow::bail!("that is not a repository name (use owner/name)");
+    }
+    fs::create_dir_all(dir)?;
+    let tmp = dir.join("private-check.json.tmp");
+    fs::write(&tmp, json!({"at": Utc::now().timestamp(), "slug": slug, "private": private}).to_string() + "\n")?;
+    fs::rename(&tmp, dir.join("private-check.json"))?;
+    Ok(())
+}
+
+/// Did sign-in or the watcher last find `slug` to be a private repository of the person's? (`private-check.json`)
 fn verified_private(dir: &Path, slug: &str) -> bool {
     let Some(v) = read_tail(&dir.join("private-check.json")).and_then(|t| serde_json::from_str::<Value>(t.trim()).ok()) else { return false };
     v["private"].as_bool() == Some(true) && v["slug"].as_str().is_some_and(|s| s.eq_ignore_ascii_case(slug))
@@ -774,5 +789,20 @@ mod tests {
         let home = fresh();
         let text = "home=~/Documents/MyHome\nnotifications=off\n";
         assert_eq!(crate::parse_settings_home(text, &home), Some(home.join("Documents/MyHome")));
+    }
+
+    #[test]
+    fn the_one_writer_records_what_backup_state_reads_and_refuses_a_non_name() {
+        let d = fresh().join("hestia"); // not there yet: the writer makes it
+        record_private(&d, "Ada/Home", true).unwrap();
+        assert!(verified_private(&d, "ada/home") && !d.join("private-check.json.tmp").exists());
+        record_private(&d, "ada/home", false).unwrap();
+        assert!(!verified_private(&d, "ada/home"), "the newest definite answer wins");
+        for bad in ["", "ada", "ada/home/x", "ada/\"home", "ada/ho me", "../x"] {
+            assert!(record_private(&d, bad, true).is_err(), "{bad}");
+        }
+        let v: Value = serde_json::from_str(&fs::read_to_string(d.join("private-check.json")).unwrap()).unwrap();
+        assert_eq!((v["slug"].as_str(), v["private"].as_bool()), (Some("ada/home"), Some(false)), "a refused record changes nothing");
+        assert_eq!(v.as_object().unwrap().len(), 3, "time, name and yes/no only: {v}");
     }
 }

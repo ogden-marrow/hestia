@@ -34,6 +34,7 @@ All notable changes. Dates are 2026-11-11 unless noted. This project has not cut
 - **CI**: the whole workspace is lint-clean (clippy with warnings as errors) and so are the shell scripts (shellcheck), clean-computer end-to-end test, release rehearsal, dependency-source check, privacy check, uninstall test.
 
 ### Fixed
+- **"Only on this computer" clears right after sign-in** (#269): adopting or creating the home repository in Hestia now records GitHub's definite answer that it is private, so `lifestream backup-state` stops saying `local_only` at once instead of at the watcher's next run. The engine is now the one writer of `private-check.json`: the watcher hands its answer to the new `lifestream home record-private OWNER/NAME true|false` instead of writing the file itself. A public or gone repository is recorded as not private; an offline, signed-out or unclear answer (a redirect, a reply without a yes/no) records nothing, where the watcher used to record a redirect as "not private".
 - **Capture coverage** (#173): the capture list now survives an OS upgrade (a new version folder starts from the nearest other version's list). Symlinked
   dotfiles (a stow layout) are captured by their target's content, never as a link, when the target is inside your home folder and
   allowed by the never-capture list; others are listed in `SKIPPED.txt`. A cloned folder such as `~/.config/nvim` is stored as its files, without

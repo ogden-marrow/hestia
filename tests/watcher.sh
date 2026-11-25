@@ -136,17 +136,23 @@ mkfake() { # the words and exit status of the fake `home check-private`
 case "\$1 \$2" in
   "auth status") echo '{"event":"status","signed_in":true,"user":"someone"}' ;;
   "home check-private") echo '$1'; exit $2 ;;
+  "home record-private") echo "\$*" >> "$T/recorded"; exec "$ls_bin" "\$@" ;;
   *) exec "$ls_bin" "\$@" ;;
 esac
 EOF
 }
+# the engine is the ONE writer of private-check.json (#269): the watcher hands its answer to `home record-private`
+rec() { grep -qx "home record-private -- someone/private-home $1" "$T/recorded" 2>/dev/null; }
 mkfake '{"event":"offline"}' 1
 echo 'export OFF=1' >> "$T/home/.bashrc"; HESTIA_NET_TIMEOUT=5 LIFESTREAM="$T/fake-ls" runf
 [ ! -e "$pc" ] || fail "an offline check proves nothing and must not be recorded: $(cat "$pc")"
 mkfake 'that repository is public' 1
 echo 'export PUB=1' >> "$T/home/.bashrc"; HESTIA_NET_TIMEOUT=5 LIFESTREAM="$T/fake-ls" runf
 grep -q '"slug":"someone/private-home"' "$pc" && grep -q '"private":false' "$pc" || fail "a public repository must be recorded as not private: $(cat "$pc" 2>/dev/null)"
+rec false || fail "the watcher wrote private-check.json itself instead of through the engine's one writer"
 mkfake '{"event":"private"}' 0
 echo 'export PRIV=1' >> "$T/home/.bashrc"; HESTIA_NET_TIMEOUT=5 LIFESTREAM="$T/fake-ls" runf
 grep -q '"slug":"someone/private-home"' "$pc" && grep -q '"private":true' "$pc" || fail "a verified private repository must be recorded: $(cat "$pc" 2>/dev/null)"
+rec true || fail "the watcher wrote private-check.json itself instead of through the engine's one writer"
+[ ! -e "$pc.tmp" ] || fail "a half-written private-check.json was left behind"
 echo "watcher ok"
