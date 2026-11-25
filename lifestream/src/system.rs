@@ -12,7 +12,6 @@ pub const UNITS: &[(&str, &str)] = &[
     ("lifestream-nightly.service", "overnight scan + suggestions"),
     ("lifestream-morning.timer", "morning notification timer"),
     ("hestia-watch.timer", "capture watcher timer"),
-    ("ollama.service", "local model server"),
     ("hestia-tray.service", "menu bar icon"),
 ];
 
