@@ -44,6 +44,20 @@ pub fn from_engine(st: &Engine, now: i64) -> Verdict {
     }
 }
 
+/// The restore rehearsal as one calm line, and whether it is a problem: "Last restore check: passed 3 days ago",
+/// or "... failed", or "... overdue" past two weeks. Nothing at all when it has never run.
+pub fn restore_line(st: &Engine) -> Option<(String, bool)> {
+    let r = &st.rehearsal;
+    let days = r.age_days?;
+    let when = if days <= 0 { "today".to_string() } else if days == 1 { "yesterday".to_string() } else { format!("{days} days ago") };
+    match r.result {
+        "passed" if days > lifestream::backup::REHEARSAL_OLD_DAYS => Some((format!("Last restore check: passed {when}. It is overdue."), true)),
+        "passed" => Some((format!("Last restore check: passed {when}."), false)),
+        "failed" => Some((format!("Last restore check: failed {when}."), true)),
+        _ => None,
+    }
+}
+
 /// Where the watcher's run history lives, as a change marker: it changes whenever a run is recorded.
 pub fn stamp() -> Option<String> {
     let p = lifestream::feed::history_path()?;
@@ -51,13 +65,15 @@ pub fn stamp() -> Option<String> {
     Some(format!("{}-{:?}", m.len(), m.modified().ok()))
 }
 
-pub fn current(repo_dir: &Path) -> Verdict {
+/// The verdict and the restore-check line, from one read of the engine.
+pub fn current(repo_dir: &Path) -> (Verdict, Option<(String, bool)>) {
     if !lifestream::home::is_home(repo_dir) {
-        return Verdict::Unknown;
+        return (Verdict::Unknown, None);
     }
-    let Ok(dir) = lifestream::backup::dir_of(None) else { return Verdict::Unknown };
+    let Ok(dir) = lifestream::backup::dir_of(None) else { return (Verdict::Unknown, None) };
     let now = chrono::Utc::now().timestamp();
-    from_engine(&lifestream::backup::compute(&dir, now, false), now)
+    let st = lifestream::backup::compute(&dir, now, false);
+    (from_engine(&st, now), restore_line(&st))
 }
 
 #[cfg(test)]
@@ -65,7 +81,7 @@ mod tests {
     use super::*;
 
     fn engine(state: &'static str, reason: Option<&str>, last_ok: Option<i64>) -> Engine {
-        Engine { state, since: None, reason: reason.map(String::from), failing_runs: 0, last_ok, notify: false }
+        Engine { state, since: None, reason: reason.map(String::from), failing_runs: 0, last_ok, notify: false, rehearsal: lifestream::backup::Rehearsal { at: None, result: "never", age_days: None } }
     }
 
     #[test]
@@ -87,6 +103,16 @@ mod tests {
     fn signed_out_is_fixed_by_signing_in() {
         let st = engine("failing", Some("Hestia is signed out of GitHub, so your backup can't be sent."), None);
         assert!(matches!(from_engine(&st, 5), Verdict::NeedsYou { fix: Fix::SignIn, .. }));
+    }
+
+    #[test]
+    fn the_restore_check_is_calm_and_silent_when_never_run() {
+        use lifestream::backup::Rehearsal;
+        let with = |result: &'static str, age: Option<i64>| { let mut s = engine("ok", None, Some(1)); s.rehearsal = Rehearsal { at: None, result, age_days: age }; s };
+        assert_eq!(restore_line(&with("passed", Some(3))), Some(("Last restore check: passed 3 days ago.".into(), false)));
+        assert_eq!(restore_line(&with("passed", Some(20))).map(|x| x.1), Some(true));
+        assert_eq!(restore_line(&with("failed", Some(1))), Some(("Last restore check: failed yesterday.".into(), true)));
+        assert_eq!(restore_line(&with("never", None)), None);
     }
 
     #[test]
