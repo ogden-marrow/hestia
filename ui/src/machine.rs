@@ -299,9 +299,36 @@ pub fn panels(s: &State) -> Vec<El> {
             .child(super::field(&d, "f-cap", &s.f_cap, "A path, like ~/.config/kitty", |s: &mut State| &mut s.f_cap).on_submit(|s: &mut State, _: &mut Tx| s.add_capture()))
             .child(text("For your safety, Hestia never copies anything that looks like a password, a key, or private browser or mail data.").font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink()));
     }
+    // what the backup left out, and why: read-only, with what to do only where it can be included
+    let mut outside = col().w_full().gap(d.gap()).child(heading_line(&d, if s.left_out.is_empty() { "Nothing was left out of the backup.".to_string() } else { format!("Left out of the backup: {}", crate::today::count(s.left_out.len(), "item", "items")) }));
+    let mut grouped: Vec<&str> = vec![];
+    for (title, whys) in crate::backup::GROUPS {
+        let these: Vec<&crate::backup::Left> = s.left_out.iter().filter(|l| whys.contains(&l.why.as_str())).collect();
+        grouped.extend(whys.iter().copied());
+        if these.is_empty() { continue }
+        outside = outside.child(text(format!("{title} ({})", these.len())).font(style(&d, type_::SECTION)).color(t.text_secondary).pt(d.gap()));
+        for l in these.into_iter().take(20) {
+            let mut item = col().w_full().gap(2.0)
+                .child(text(l.path.clone().map(|p| format!("~/{p}")).unwrap_or_else(|| "A file that can't be shown safely".into())).font(style(&d, type_::BODY)).color(t.text).wrap_anywhere().shrink())
+                .child(text(l.detail.clone()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
+            if let Some(fix) = crate::backup::fix_for(l) {
+                item = item.child(text(fix.to_string()).font(style(&d, type_::LABEL)).color(t.text).wrap_anywhere().shrink());
+            }
+            outside = outside.child(item);
+        }
+    }
+    for l in s.left_out.iter().filter(|l| !grouped.contains(&l.why.as_str())).take(20) {
+        outside = outside.child(text(l.detail.clone()).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
+    }
+    let body = body.child(outside);
+
     // two panes: the categories, and one column with the list, what changed in the chosen item, and the add box
     let right = middle.child(col().w_full().scroll(scroll()).shrink().min_h(0.0).grow(1.0).gap(d.pad()).child(list).child(body));
     vec![left, right]
+}
+
+fn heading_line(d: &crate::design::Design, s: String) -> El {
+    text(s).font(style(d, type_::TITLE)).color(d.theme().text).pt(d.pad())
 }
 
 #[cfg(test)]
@@ -341,3 +368,4 @@ mod tests {
         assert_eq!(conds, vec![("z".into(), Cond::New), ("x".into(), Cond::Missing), ("y".into(), Cond::Same)]);
     }
 }
+

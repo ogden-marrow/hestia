@@ -103,6 +103,13 @@ pub fn apply(s: &mut State, pending_folders: bool) {
     s.repo_dir = std::path::PathBuf::from("/nonexistent/fixture-home"); // never show this machine's repository
     s.account_user = None;
     s.feed = feed();
+    let left = |p: &str, why: &str, detail: &str, can: bool| crate::backup::Left { path: Some(p.into()), why: why.into(), detail: detail.into(), can_include: can };
+    s.left_out = vec![
+        left("Videos/holiday.mkv", "too_large", "It is 4.2 GB; the backup keeps files under 100 MB.", true),
+        left(".config/app/state.db", "unreadable", "Your user can't read it.", true),
+        left(".ssh", "private_by_rule", "Your rules say this place is private.", false),
+        left(".config/tool/settings.toml", "withheld_secret_lines", "2 lines looked like a password and were left out; the rest is backed up.", false),
+    ];
     s.refresh_derived();
 }
 
