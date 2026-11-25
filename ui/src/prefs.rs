@@ -122,7 +122,8 @@ pub fn panels(s: &State) -> Vec<El> {
             row().key(format!("tab-{i}")).h(d.row_h()).px(d.item_px()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { t.control_off } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) }
-                    if i == 7 { crate::account::refresh_status(s) } })
+                    if i == 7 { crate::account::refresh_status(s) }
+                    if i == 8 && s.update.lock().map(|u| u.check.is_none() && !u.checking).unwrap_or(false) { s.update_check() } })
                 .child(text(name.to_string()).font(style(&d, type_::LABEL)).color(t.text)),
         );
     }

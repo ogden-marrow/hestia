@@ -44,9 +44,10 @@ pub fn parse_step(line: &str) -> Option<Step> {
     let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
     match s("event").as_deref() {
-        Some("updated") => Some(Step::Updated { version: s("version").or_else(|| s("installed")).unwrap_or_default() }),
+        Some("updated") | Some("rolled_back") => Some(Step::Updated { version: s("to").unwrap_or_default() }),
         Some("failed") => Some(Step::Failed { why: s("message").or_else(|| s("why")).unwrap_or_else(|| "The update did not finish. Nothing was changed.".into()) }),
-        _ => Some(Step::Progress { step: s("step")?, pct: v.get("pct").and_then(|x| x.as_u64()).unwrap_or(0).min(100) as u8 }),
+        Some("step") | None => Some(Step::Progress { step: s("step")?, pct: v.get("pct").and_then(|x| x.as_u64()).unwrap_or(0).min(100) as u8 }),
+        Some(_) => None,
     }
 }
 
@@ -90,11 +91,20 @@ impl State {
 
     /// Install the newer build as a background job, showing each step; the engine refuses during a backup.
     pub(crate) fn update_apply(&mut self) {
+        self.update_run("apply");
+    }
+
+    /// Go back to the build before the last update (a second rollback goes forward again).
+    pub(crate) fn update_rollback(&mut self) {
+        self.update_run("rollback");
+    }
+
+    fn update_run(&mut self, what: &'static str) {
         let (st, wake) = (self.update.clone(), self.jobs.waker());
-        { let mut s = st.lock().unwrap(); s.step = Some(("fetch".into(), 0)); s.done = None; }
+        { let mut s = st.lock().unwrap(); s.step = Some((if what == "apply" { "fetch" } else { "switch" }.into(), 0)); s.done = None; }
         std::thread::spawn(move || {
             let mut finished = None;
-            if let Ok(mut child) = engine(&["update", "apply"]) {
+            if let Ok(mut child) = engine(&["update", what]) {
                 if let Some(out) = child.stdout.take() {
                     for line in BufReader::new(out).lines().map_while(Result::ok) {
                         match parse_step(&line) {
@@ -131,7 +141,7 @@ pub fn section(s: &State, d: &Design) -> El {
     let u = s.update.lock().unwrap().clone();
     let (line, action): (String, Option<El>) = if let Some(done) = &u.done {
         match done {
-            Ok(v) => (format!("Hestia {v} is installed. Restart to use it."), Some(crate::questions::button(d, "upd-restart", "Restart Hestia".into(), true, |_: &mut State| restart()))),
+            Ok(v) => (format!("Hestia build {v} is in place. Restart to use it."), Some(crate::questions::button(d, "upd-restart", "Restart Hestia".into(), true, |_: &mut State| restart()))),
             Err(why) => (why.clone(), Some(crate::questions::button(d, "upd-retry", "Try again".into(), false, |s: &mut State| s.update_apply()))),
         }
     } else if let Some((step, pct)) = &u.step {
@@ -140,9 +150,12 @@ pub fn section(s: &State, d: &Design) -> El {
         ("Checking for updates…".into(), None)
     } else {
         match &u.check {
+            Some(c) if c.error.as_deref().is_some_and(|e| e.contains("install.sh")) => ("Run the installer once to enable updates from here.".into(), None),
             Some(c) if c.error.is_some() => (c.error.clone().unwrap_or_default(), Some(crate::questions::button(d, "upd-check", "Check again".into(), false, |s: &mut State| s.update_check()))),
             Some(c) if c.newer => (format!("Hestia {} is available.", c.available.clone().unwrap_or_default()), Some(crate::questions::button(d, "upd-apply", "Update Hestia".into(), true, |s: &mut State| s.update_apply()))),
-            Some(_) => ("Hestia is up to date.".into(), Some(crate::questions::button(d, "upd-check", "Check again".into(), false, |s: &mut State| s.update_check()))),
+            Some(_) => ("Hestia is up to date.".into(), Some(row().gap(d.gap())
+                .child(crate::questions::button(d, "upd-back", "Go back a version".into(), false, |s: &mut State| s.update_rollback()))
+                .child(crate::questions::button(d, "upd-check", "Check again".into(), false, |s: &mut State| s.update_check())))),
             None => ("Hestia checks for a newer version when you ask.".into(), Some(crate::questions::button(d, "upd-check", "Check for updates".into(), false, |s: &mut State| s.update_check()))),
         }
     };
@@ -180,8 +193,9 @@ mod tests {
 
     #[test]
     fn apply_lines_become_steps_and_an_end() {
-        assert_eq!(parse_step(r#"{"step":"build","pct":40}"#), Some(Step::Progress { step: "build".into(), pct: 40 }));
-        assert_eq!(parse_step(r#"{"event":"updated","version":"0.2.0"}"#), Some(Step::Updated { version: "0.2.0".into() }));
+        assert_eq!(parse_step(r#"{"event":"step","pct":40,"step":"build"}"#), Some(Step::Progress { step: "build".into(), pct: 40 }));
+        assert_eq!(parse_step(r#"{"event":"updated","from":"9641b2ee","to":"a1b2c3d4"}"#), Some(Step::Updated { version: "a1b2c3d4".into() }));
+        assert_eq!(parse_step(r#"{"event":"rolled_back","from":"a1b2c3d4","to":"9641b2ee"}"#), Some(Step::Updated { version: "9641b2ee".into() }));
         assert!(matches!(parse_step(r#"{"event":"failed","message":"A backup is running; try again in a minute."}"#), Some(Step::Failed { .. })));
         assert_eq!(parse_step("not json"), None);
         assert_eq!(step_words("test"), "Checking the new build");
