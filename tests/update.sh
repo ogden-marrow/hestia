@@ -67,9 +67,9 @@ case "$(field "$out" error)" in "Could not reach the Hestia repository"*) ;; *) 
 git -C "$src" remote set-url origin "$T/origin.git"
 
 # 4. an origin that is not the public Hestia repository is refused, by check and by apply
-out="$(HESTIA_UPDATE_ORIGIN= "$LS" update check)"
+out="$(HESTIA_UPDATE_ORIGIN='' "$LS" update check)"
 case "$(field "$out" error)" in *"does not point at the public Hestia repository"*) ;; *) fail "check accepted a non-public origin: $out" ;; esac
-out="$(HESTIA_UPDATE_ORIGIN= "$LS" update apply)" && fail "apply accepted a non-public origin"
+out="$(HESTIA_UPDATE_ORIGIN='' "$LS" update apply)" && fail "apply accepted a non-public origin"
 case "$out" in *"does not point at the public Hestia repository"*) ;; *) fail "apply's refusal is not plain: $out" ;; esac
 
 # 5. a backup or a restore check holds its lock: apply refuses and changes nothing (not even a fetch)
