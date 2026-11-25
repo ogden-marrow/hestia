@@ -575,9 +575,13 @@ fn system_panel(s: &State) -> El {
         }
     }
 
+    // the same numbers Today shows, from the same records: one truth on every screen
+    let newest = s.recs.iter().filter_map(|r| chrono::DateTime::parse_from_rfc3339(&r.first_seen).ok()).max();
+    let updated = newest.map(|t| backup::ago(chrono::Utc::now().timestamp() - t.timestamp())).unwrap_or_else(|| "Never".into());
+    let waiting = s.bundles.len();
     let pipe = card("Progress")
-        .child(kv(&d, "Stream last updated", if st.stream_age.is_empty() { "Never" } else { &st.stream_age }))
-        .child(kv(&d, "Files waiting for you", &st.pending.to_string()))
+        .child(kv(&d, "Newest file in your stream", &updated))
+        .child(kv(&d, "Folders waiting for an answer", &if waiting == 0 { "None".to_string() } else { waiting.to_string() }))
         .child(kv(&d, "Folders with a model suggestion", &if st.folders == 0 { "None yet".to_string() } else { format!("{} of {}", st.suggested, st.folders) }));
 
     let inner = col().w_full().gap(d.pad()).child(scan_now).child(timers).child(models).child(if st.gpu.is_some() { row().w_full().gap(d.pad()).child(pipe.grow(1.0)).child(hw.grow(1.0)) } else { row().w_full().child(pipe.grow(1.0)) });
