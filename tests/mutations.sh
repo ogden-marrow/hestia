@@ -43,6 +43,11 @@ mutate "hostile file names are not cleaned"                lifestream/src/bundle
 mutate "direction-changing characters are not removed from names" lifestream/src/bundle.rs "'\\u{202A}'..='\\u{202E}' | " '' rs hostile_names
 mutate "undo accepts a journal that leaves the home folder" lifestream/src/tree.rs 'rel_ok(rel).then(|| home.join(rel))' 'Some(home.join(rel))' rs undo_treats_the_journal
 mutate "the folder mover replaces an existing destination" lifestream/src/tree.rs 'if fs::symlink_metadata(dst).is_ok() {' 'if false {' rs move_dir_refusals
+mutate "a group move journals each item as its own batch" lifestream/src/tree.rs 'serde_json::json!({"batch": batch, "kind": kind,' 'serde_json::json!({"batch": new_batch(), "kind": kind,' rs a_group_of_files_and_folders
+mutate "a group move goes ahead past a refused item"      lifestream/src/tree.rs 'if !refused.is_empty() {
+        let more' 'if refused.len() > 1000 {
+        let more' rs one_refused_item_refuses_the_whole_group
+mutate "a group move that fails midway leaves the rest moved" lifestream/src/tree.rs '.filter(|&i| move_item(home, &home.join(&items[i].1)' '.filter(|&i| true || move_item(home, &home.join(&items[i].1)' rs a_failure_midway
 mutate "undoing a new folder deletes what was put in it"  lifestream/src/tree.rs 'fs::remove_dir(&to) {' 'fs::remove_dir_all(&to) {' rs undo_of_mkdir
 mutate "the feed lists a path outside the home folder"      lifestream/src/feed.rs 'if tree::under_home(home, to_s).is_none() {' 'if false {' rs a_line_pointing_outside_home
 mutate "the feed has no cap on its output"                 lifestream/src/feed.rs 'if out.len() + line.len() + 1 > OUTPUT_CAP {' 'if false {' rs output_is_capped

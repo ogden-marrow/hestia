@@ -147,7 +147,7 @@ enum Cmd {
         #[arg(long, default_value_t = lifestream::leftout::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Rename or create one folder, journaled so `file --undo` can take it back. One JSON line; exit 1 with a "failed" event if refused.
+    /// Rename or create one folder, or move several things at once, journaled so `file --undo` can take it back. One JSON line; exit 1 with a "failed" event if refused.
     Folder {
         #[command(subcommand)]
         cmd: FolderCmd,
@@ -215,6 +215,13 @@ enum Cmd {
 enum FolderCmd {
     /// Rename FROM to TO (both relative to your home folder, e.g. Documents/Old Archive/Old); same disk only, never merges
     Move { from: String, to: String },
+    /// Move every PATH (files or folders, relative to your home folder) into the folder DEST as one undo batch: all or nothing
+    MoveMany {
+        #[arg(long = "to", value_name = "DEST")]
+        to: String,
+        #[arg(required = true)]
+        paths: Vec<String>,
+    },
     /// Create one new empty folder PATH (relative to your home folder); its parent must exist
     New { path: String },
 }
@@ -340,6 +347,7 @@ fn main() -> Result<()> {
             let stream = stream_dir(out)?;
             match cmd {
                 FolderCmd::Move { from, to } => lifestream::tree::cmd_folder_move(&from, &to, &stream, manifest),
+                FolderCmd::MoveMany { to, paths } => lifestream::tree::cmd_folder_move_many(&to, &paths, &stream, manifest),
                 FolderCmd::New { path } => lifestream::tree::cmd_folder_new(&path, &stream),
             }
         }

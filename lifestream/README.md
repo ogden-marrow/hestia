@@ -81,9 +81,37 @@ Hestia edits it; the nightly flow reads it.
 paths); `move_on_disk` renames the real folder and rewrites stream paths (never merges, never
 touches sensitive paths, same disk only); `Tree::add_folder` accepts a suggestion. From the
 shell: `lifestream tree --move FROM TO [--apply]`. `move_dir` / `make_dir` (`lifestream folder move|new`) are the journaled, undoable
-versions (`lifestream file --undo` takes the last one back). The classifier's label set is the built-in
+versions (`lifestream file --undo` takes the last one back); `move_many` (`lifestream folder move-many`, below) moves
+several files and folders as one undo batch. The classifier's label set is the built-in
 kinds plus every kind in `tree.toml` (`bundle::kinds_for`), and a changed tree makes cached
 folder suggestions stale, so `lifestream suggest` always works from the latest tree.
+
+**Moving several things at once.** `tree::move_many(home, items, excluded, stream, actor, reason) -> Result<String>`
+takes `(from, to)` pairs relative to the home folder, files and folders mixed, and returns the batch id. From the shell:
+
+```
+lifestream folder move-many --to DEST PATH... [--manifest FILE] [--out STREAM]
+```
+
+moves every PATH into the folder DEST, keeping its name, and prints **one JSON line**:
+
+- `{"event":"moved","batch":"<id>","count":N,"items":[{"from":"Downloads/a.pdf","to":"Archive/a.pdf"},...]}`, exit 0;
+- `{"event":"failed","kind":"refused","message":"Nothing was moved, because 1 of 3 items cannot be moved. Secret: it is or holds a sensitive path."}`, exit 1: nothing moved, nothing journaled;
+- `{"event":"failed","kind":"partly_moved","message":"...","batch":"<id>","items":[{"from","to"}]}`, exit 1: rare, see below.
+
+All or nothing. Every item is checked before anything moves, with the refusals of `move_file` and `move_dir` (never
+overwrite, no symlink anywhere on either path, nothing hidden, outside home or sensitive, not into itself, same disk
+only) plus the group's own (an item chosen twice, two items with one destination, an item inside a folder that also
+moves); one refused item refuses the group, and the message names each refused item. The journal gets one line per
+item (`dir` for a folder, `move` for a file), all with one `batch`, once every item has moved, and stream paths are
+rewritten. `file --undo` (or `--undo --batch ID`) puts back all of them in reverse order, never overwriting; whatever
+it could not put back stays in the journal to retry. The feed shows one `moved` item: `Moved 3 items into Archive`.
+
+If a move fails midway (the disk changed after the check, say a destination appeared), the items already moved are put
+back in reverse order and nothing is journaled: the safer outcome, since the person sees exactly what they had before
+and there is nothing half-done to undo. Only an item that cannot go back (something now sits at its old place, which is
+never overwritten) stays moved; those items alone are journaled under one batch, so Undo can take them back once the old
+place is free, and the result is `partly_moved` with their `from`/`to`.
 
 ## Is the backup working? (`lifestream backup-state`)
 
@@ -174,7 +202,7 @@ Each item:
 | `kind` | `filed`, `moved`, `renamed`, `folder_created`, `undone`, `backup_saved`, `backup_failed`. Reserved, not emitted yet because nothing records them: `question_asked`, `question_answered`, `scan` |
 | `actor` | `hestia_rule`, `model`, `you`, `watcher`, or `unknown` (a journal line from before actors were recorded whose record is gone) |
 | `reason` | one plain sentence: `rule: pdf downloads`, `both models agreed: invoice`, `you answered: Taxes`, `you pressed Undo` |
-| `summary` | plain words, no jargon or hashes: `Filed 3 files into Documents/Finance`, `Renamed the folder Old to Older`, `Backup saved 12 changes` |
+| `summary` | plain words, no jargon or hashes: `Filed 3 files into Documents/Finance`, `Renamed the folder Old to Older`, `Moved 3 items into Archive`, `Backup saved 12 changes` |
 | `count` | files or folders in the item (for `backup_saved` the commits; for a repeating `backup_failed` how many runs) |
 | `paths` | up to 5, relative to the home folder, never hidden or outside it |
 | `undoable` | `true` for `filed`, `moved`, `renamed`, `folder_created` while the journal still holds the batch |

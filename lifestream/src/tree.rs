@@ -382,6 +382,7 @@ fn journal_path(stream: &Path) -> PathBuf {
 ///   file   {"batch","id","from","to","actor","reason"}        `apply` moved a file from `from` to `to` (paths as `~/...`)
 ///   dir    {"batch","kind":"dir","from","to","actor","reason"}  `move_dir` renamed a folder
 ///   mkdir  {"batch","kind":"mkdir","to","actor","reason"}       `make_dir` created an empty folder
+///   move   {"batch","kind":"move","from","to","actor","reason"}  `move_many` moved a file the person chose (its folders are `dir` lines in the same batch)
 /// `actor` (hestia_rule | model | you) and `reason` (one plain sentence) say who decided; the feed reads them.
 /// A journal is a file on disk, so undo treats every line as untrusted.
 fn journal_append(stream: &Path, lines: &[serde_json::Value]) -> Result<()> {
@@ -507,7 +508,10 @@ pub fn undo_batch(stream: &Path, home: &Path, which: Option<&str>) -> Result<Und
             }
             continue;
         }
-        let Some(id) = v["id"].as_str() else { continue };
+        let id = v["id"].as_str();
+        if kind != "move" && id.is_none() {
+            continue;
+        }
         match fs::symlink_metadata(&to) {
             Ok(m) if m.file_type().is_file() => {}
             Ok(_) => { skip("it is not a plain file any more", &mut report); continue }
@@ -524,7 +528,9 @@ pub fn undo_batch(stream: &Path, home: &Path, which: Option<&str>) -> Result<Und
                 back.paths.push(from_s.to_string());
                 settled.push(i);
                 stream_changed = true;
-                if let Some(r) = recs.iter_mut().find(|r| r.id == id) {
+                if kind == "move" {
+                    retarget(&mut recs, to_s, from_s);
+                } else if let Some(r) = recs.iter_mut().find(|r| Some(r.id.as_str()) == id) {
                     if let Some(s) = r.sources.iter_mut().find(|s| s.as_str() == to_s) {
                         *s = from_s.to_string();
                     }
@@ -607,6 +613,12 @@ fn one_device(root: &Path, dev: u64) -> Result<()> {
 /// the source is not a mount point and holds no other device, and the destination is on the same device. A rename, never
 /// copy and delete. (Linux lets rename replace an EMPTY destination folder in a race; it can never replace one with files.)
 fn rename_dir(home: &Path, src: &Path, dst: &Path) -> Result<()> {
+    check_dir_move(home, src, dst)?;
+    fs::rename(src, dst).with_context(|| format!("moving {} to {}", src.display(), dst.display()))
+}
+
+/// Everything `rename_dir` refuses, without renaming.
+fn check_dir_move(home: &Path, src: &Path, dst: &Path) -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     if src == home || dst.starts_with(src) {
         bail!("cannot move {} into itself or move your home folder", src.display());
@@ -621,8 +633,7 @@ fn rename_dir(home: &Path, src: &Path, dst: &Path) -> Result<()> {
     if fs::symlink_metadata(src.parent().context("no parent")?)?.dev() != dev || fs::symlink_metadata(parent)?.dev() != dev {
         bail!("{} is a mount point or the destination is on another disk: not moved", src.display());
     }
-    one_device(src, dev)?;
-    fs::rename(src, dst).with_context(|| format!("moving {} to {}", src.display(), dst.display()))
+    one_device(src, dev)
 }
 
 /// Swap the `old` prefix for `new` in every stream path; says whether anything changed.
@@ -661,6 +672,182 @@ pub fn move_dir(home: &Path, from: &str, to: &str, excluded: &[PathBuf], stream:
         write_all(stream, &recs)?;
     }
     Ok(())
+}
+
+// ---- moving several files and folders at once: one batch, all or nothing ----------------------------------------------
+
+/// A group move that failed after some renames and could not put all of them back: what stayed moved is journaled
+/// under `batch`, so Undo can take it back later. Every other failure of `move_many` leaves nothing moved.
+#[derive(Debug)]
+pub struct PartlyMoved {
+    pub batch: String,
+    /// (from, to) relative to home, of the items still at `to`
+    pub stayed: Vec<(String, String)>,
+    pub message: String,
+}
+
+impl std::fmt::Display for PartlyMoved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PartlyMoved {}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    if n == 1 { format!("1 {one}") } else { format!("{n} {many}") }
+}
+
+/// Everything a plain-file move inside the group refuses: a symlink or special file, a symlink on either path, a missing
+/// destination folder, an existing destination, another disk. Same disk means the move is a rename (hard link + unlink).
+fn check_file_move(home: &Path, src: &Path, dst: &Path) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    real_dirs(home, src.parent().context("no parent folder")?)?;
+    check_ends(src, dst)?;
+    let parent = dst.parent().context("no destination folder")?;
+    real_dirs(home, parent).context("the destination's folder must already exist")?;
+    if fs::symlink_metadata(dst).is_ok() {
+        bail!("{} already exists: not overwriting", dst.display());
+    }
+    if fs::symlink_metadata(src)?.dev() != fs::symlink_metadata(parent)?.dev() {
+        bail!("{} is on another disk than its destination: not moved", src.display());
+    }
+    Ok(())
+}
+
+/// One item of a group (paths relative to home), with the refusals of `move_file` and `move_dir`. Says whether it is a folder.
+fn check_item(home: &Path, from: &str, to: &str, excluded: &[PathBuf]) -> Result<bool> {
+    if !rel_ok(from) || !rel_ok(to) {
+        bail!("use visible files and folders inside your home folder (no hidden ones, no .. or empty parts)");
+    }
+    if under(to, from) {
+        bail!("cannot move a folder into itself");
+    }
+    let (src, dst) = (home.join(from), home.join(to));
+    if excluded.iter().any(|e| src.starts_with(e) || dst.starts_with(e) || e.starts_with(&src)) {
+        bail!("it is or holds a sensitive path");
+    }
+    let m = fs::symlink_metadata(&src).context("it is not there")?;
+    if m.file_type().is_dir() {
+        check_dir_move(home, &src, &dst)?;
+        return Ok(true);
+    }
+    check_file_move(home, &src, &dst)?;
+    Ok(false)
+}
+
+/// The one way an item of a group moves (checked again right before, as the disk may have changed since).
+fn move_item(home: &Path, src: &Path, dst: &Path, folder: bool) -> Result<()> {
+    if folder {
+        return rename_dir(home, src, dst);
+    }
+    check_file_move(home, src, dst)?;
+    move_file(src, dst)
+}
+
+/// Journal lines for the items `idx` of a group, all with one batch id: `dir` for a folder, `move` for a file.
+fn group_lines(batch: &str, items: &[(String, String)], folder: &[bool], idx: &[usize], actor: &str, reason: &str) -> Vec<serde_json::Value> {
+    idx.iter()
+        .map(|&i| {
+            let kind = if folder[i] { "dir" } else { "move" };
+            serde_json::json!({"batch": batch, "kind": kind, "from": format!("~/{}", items[i].0), "to": format!("~/{}", items[i].1), "actor": actor, "reason": reason})
+        })
+        .collect()
+}
+
+/// Rewrite every stream path under the moved items.
+fn retarget_group(stream: &Path, items: &[(String, String)], idx: &[usize]) -> Result<()> {
+    let mut recs = load_all(stream)?;
+    let mut changed = false;
+    for &i in idx {
+        changed |= retarget(&mut recs, &format!("~/{}", items[i].0), &format!("~/{}", items[i].1));
+    }
+    if changed {
+        write_all(stream, &recs)?;
+    }
+    Ok(())
+}
+
+/// Move several files and folders (paths relative to home, `(from, to)`) as ONE undo batch, all or nothing. Every item is
+/// checked first with the refusals of `move_file` and `move_dir` (never overwrite, no symlink on either path, nothing
+/// hidden, outside home or sensitive, not into itself, same disk only), plus the group's own: an item chosen twice, two
+/// items with the same destination, an item inside another one that moves. If any is refused, nothing moves and the
+/// error names each refused item. Then the items move in order; the journal gets one line per item, all with one batch id
+/// (returned), after the last one moved, and the stream paths are rewritten. `actor` and `reason` are what the feed shows.
+///
+/// If a move fails midway (the disk changed after the check), the items already moved are put back in reverse order and
+/// nothing is journaled: the result is as if nothing happened. Only if putting one back fails too (something appeared at
+/// its old place) does it stay moved; those, and only those, are journaled under one batch so Undo can take them back
+/// later, and the error is a `PartlyMoved` that names them.
+pub fn move_many(home: &Path, items: &[(String, String)], excluded: &[PathBuf], stream: &Path, actor: &str, reason: &str) -> Result<String> {
+    move_many_with(home, items, excluded, stream, actor, reason, |_| {})
+}
+
+/// `move_many`, calling `before(i)` right before item `i` moves (tests use it to change the disk mid-group).
+fn move_many_with(home: &Path, items: &[(String, String)], excluded: &[PathBuf], stream: &Path, actor: &str, reason: &str, mut before: impl FnMut(usize)) -> Result<String> {
+    if items.is_empty() {
+        bail!("Nothing was moved: nothing was chosen.");
+    }
+    let mut folder = Vec::new();
+    let mut refused = Vec::new();
+    for (i, (from, to)) in items.iter().enumerate() {
+        let clash = items.iter().enumerate().filter(|(j, _)| *j != i).find_map(|(_, (f, t))| {
+            if f == from {
+                Some("it was chosen twice")
+            } else if t == to {
+                Some("another item would end up with the same name there")
+            } else if under(from, f) {
+                Some("it is inside a folder that is also being moved")
+            } else if under(to, f) {
+                Some("its destination is inside a folder that is also being moved")
+            } else {
+                None
+            }
+        });
+        match clash.map_or_else(|| check_item(home, from, to, excluded), |why| Err(anyhow::anyhow!(why))) {
+            Ok(d) => folder.push(d),
+            Err(e) => refused.push(format!("{from}: {e:#}")),
+        }
+    }
+    if !refused.is_empty() {
+        let more = if refused.len() > 3 { format!("; and {} more", refused.len() - 3) } else { String::new() };
+        bail!("Nothing was moved, because {} of {} cannot be moved. {}{more}.", refused.len(), plural(items.len(), "item", "items"), refused[..refused.len().min(3)].join("; "));
+    }
+    let mut done = Vec::new();
+    for (i, (from, to)) in items.iter().enumerate() {
+        before(i);
+        if let Err(e) = move_item(home, &home.join(from), &home.join(to), folder[i]) {
+            return Err(roll_back(home, items, &folder, &done, stream, actor, reason, &format!("{from}: {e:#}")));
+        }
+        done.push(i);
+    }
+    let batch = new_batch();
+    if let Err(e) = journal_append(stream, &group_lines(&batch, items, &folder, &done, actor, reason)) {
+        return Err(roll_back(home, items, &folder, &done, stream, actor, reason, &format!("the undo journal could not be written: {e:#}")));
+    }
+    retarget_group(stream, items, &done)?;
+    Ok(batch)
+}
+
+/// Put the items `done` back in reverse order after a group move failed for `why`; see `move_many`.
+#[allow(clippy::too_many_arguments)]
+fn roll_back(home: &Path, items: &[(String, String)], folder: &[bool], done: &[usize], stream: &Path, actor: &str, reason: &str, why: &str) -> anyhow::Error {
+    let mut stayed: Vec<usize> = done.iter().rev().copied().filter(|&i| move_item(home, &home.join(&items[i].1), &home.join(&items[i].0), folder[i]).is_err()).collect();
+    if stayed.is_empty() {
+        let back = if done.is_empty() { String::new() } else { format!(" The {} already moved went back.", plural(done.len(), "item", "items")) };
+        return anyhow::anyhow!("Nothing was moved, because {why}.{back}");
+    }
+    stayed.reverse();
+    let batch = new_batch();
+    let kept = journal_append(stream, &group_lines(&batch, items, folder, &stayed, actor, reason)).and_then(|()| retarget_group(stream, items, &stayed));
+    let names: Vec<&str> = stayed.iter().map(|&i| items[i].0.as_str()).collect();
+    let undo = if kept.is_ok() { "Undo can put them back once their old place is free" } else { "the undo journal could not be written either, so put them back by hand" };
+    PartlyMoved {
+        message: format!("Not everything could be moved, because {why}. {} could not go back, because something is now at the old place, and stay moved: {}. {undo}.", plural(stayed.len(), "item", "items"), names.join(", ")),
+        stayed: stayed.iter().map(|&i| items[i].clone()).collect(),
+        batch,
+    }
+    .into()
 }
 
 /// Make every missing folder above `path` (relative to home), each one journaled like `make_dir` (and, like it,
@@ -773,6 +960,38 @@ pub fn cmd_folder_move(from: &str, to: &str, stream: &Path, manifest: Option<Pat
         .and_then(|m| sensitive_paths(&m, &home))
         .and_then(|excluded| move_dir(&home, from, to, &excluded, stream));
     folder_event(res, serde_json::json!({"event": "moved", "from": from, "to": to}))
+}
+
+/// `lifestream folder move-many --to DEST PATH...`: every PATH (file or folder, relative to home) into the folder DEST,
+/// keeping its name, as one undo batch. One JSON line:
+/// {"event":"moved","batch","count","items":[{"from","to"}]}, or exit 1 with {"event":"failed","kind":"refused","message"}
+/// (nothing moved) or {"event":"failed","kind":"partly_moved","message","batch","items":[{"from","to"}]} (these stayed moved).
+pub fn cmd_folder_move_many(dest: &str, paths: &[String], stream: &Path, manifest: Option<PathBuf>) -> Result<()> {
+    let home = crate::home()?;
+    let dest = dest.trim_end_matches('/');
+    let items: Vec<(String, String)> = paths
+        .iter()
+        .map(|p| {
+            let p = p.trim_end_matches('/');
+            (p.to_string(), format!("{dest}/{}", p.rsplit('/').next().unwrap_or(p)))
+        })
+        .collect();
+    let pairs = |v: &[(String, String)]| v.iter().map(|(f, t)| serde_json::json!({"from": f, "to": t})).collect::<Vec<_>>();
+    let res = manifest.or_else(find_manifest).context("cannot find manifest/rules.toml (sensitive-path list); refusing to move without it")
+        .and_then(|m| sensitive_paths(&m, &home))
+        .and_then(|excluded| move_many(&home, &items, &excluded, stream, "you", "you changed your folders"));
+    match res {
+        Ok(batch) => println!("{}", serde_json::json!({"event": "moved", "batch": batch, "count": items.len(), "items": pairs(&items)})),
+        Err(e) => {
+            let ev = match e.downcast_ref::<PartlyMoved>() {
+                Some(p) => serde_json::json!({"event": "failed", "kind": "partly_moved", "message": p.message, "batch": p.batch, "items": pairs(&p.stayed)}),
+                None => serde_json::json!({"event": "failed", "kind": "refused", "message": format!("{e:#}")}),
+            };
+            println!("{ev}");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
 }
 
 /// `lifestream folder new PATH`: {"event":"created","path"} or the same "failed" event.
@@ -1360,6 +1579,178 @@ mod tests {
         let log = fs::read_to_string(stream.join("undone.jsonl")).unwrap();
         let v: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
         assert_eq!((v["files"].as_u64(), v["paths"][0].as_str()), (Some(1), Some("~/Downloads/a.png")), "{log}");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    // ---- group moves (`move_many`): one batch, all or nothing ----
+
+    fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter().map(|(f, t)| (f.to_string(), t.to_string())).collect()
+    }
+
+    /// Two files (one the stream knows) and a folder with something inside, all into Archive.
+    fn group_box(tag: &str) -> (PathBuf, PathBuf, String, Vec<(String, String)>) {
+        let (h, stream) = home_box(tag);
+        let id = file(&h, "Downloads/a.pdf", b"a");
+        file(&h, "Pictures/b.png", b"b");
+        file(&h, "Documents/Saab/Inner/c.bin", b"c");
+        fs::create_dir_all(h.join("Archive")).unwrap();
+        write_all(&stream, &[rec(&id, "document", "~/Downloads/a.pdf", 1, "rule", 1.0)]).unwrap();
+        let items = pairs(&[("Downloads/a.pdf", "Archive/a.pdf"), ("Documents/Saab", "Archive/Saab"), ("Pictures/b.png", "Archive/b.png")]);
+        (h, stream, id, items)
+    }
+
+    fn all_at_start(h: &Path) -> bool {
+        fs::read(h.join("Downloads/a.pdf")).ok().as_deref() == Some(b"a".as_slice())
+            && fs::read(h.join("Pictures/b.png")).ok().as_deref() == Some(b"b".as_slice())
+            && fs::read(h.join("Documents/Saab/Inner/c.bin")).ok().as_deref() == Some(b"c".as_slice())
+            && !h.join("Archive/a.pdf").exists()
+            && !h.join("Archive/b.png").exists()
+    }
+
+    #[test]
+    fn a_group_of_files_and_folders_moves_as_one_batch_and_one_undo_puts_all_back() {
+        let (h, stream, _, items) = group_box("grp1");
+        let batch = move_many(&h, &items, &[], &stream, "you", "you changed your folders").unwrap();
+        assert!(h.join("Archive/a.pdf").is_file() && h.join("Archive/b.png").is_file() && h.join("Archive/Saab/Inner/c.bin").is_file());
+        assert!(!h.join("Downloads/a.pdf").exists() && !h.join("Documents/Saab").exists() && !h.join("Pictures/b.png").exists());
+        let lines = journal(&stream);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines.iter().all(|v| v["batch"] == batch.as_str() && v["actor"] == "you" && v["reason"] == "you changed your folders"), "{lines:?}");
+        assert_eq!(lines.iter().map(|v| v["kind"].as_str().unwrap()).collect::<Vec<_>>(), ["move", "dir", "move"]);
+        assert_eq!(load_all(&stream).unwrap()[0].sources, vec!["~/Archive/a.pdf".to_string()], "the stream follows the move");
+        // ONE undo, with no batch named, takes back the whole group
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!((r.restored, r.skipped.len()), (3, 0), "{r:?}");
+        assert!(all_at_start(&h) && !h.join("Archive/Saab").exists());
+        assert_eq!(load_all(&stream).unwrap()[0].sources, vec!["~/Downloads/a.pdf".to_string()]);
+        assert_eq!(undo_last(&stream, &h).unwrap(), UndoReport::default(), "the batch is gone from the journal");
+        let log: serde_json::Value = serde_json::from_str(fs::read_to_string(stream.join("undone.jsonl")).unwrap().lines().next().unwrap()).unwrap();
+        assert_eq!((log["files"].as_u64(), log["folders"].as_u64()), (Some(2), Some(1)), "{log}");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn undo_of_a_group_never_overwrites_and_can_be_retried() {
+        let (h, stream, _, items) = group_box("grp2");
+        move_many(&h, &items, &[], &stream, "you", "you changed your folders").unwrap();
+        file(&h, "Pictures/b.png", b"made since");
+        let r = undo_last(&stream, &h).unwrap();
+        assert_eq!(r.restored, 2, "{r:?}");
+        assert_eq!(r.skipped, vec![("~/Archive/b.png".to_string(), "something is already at the old place".to_string())]);
+        assert_eq!(fs::read(h.join("Pictures/b.png")).unwrap(), b"made since");
+        fs::remove_file(h.join("Pictures/b.png")).unwrap();
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1, "asking again retries what is left");
+        assert!(all_at_start(&h));
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn one_refused_item_refuses_the_whole_group_and_nothing_moves() {
+        use std::os::unix::fs::symlink;
+        let (h, stream, _, good) = group_box("grp3");
+        file(&h, "Archive/taken.txt", b"keep");
+        file(&h, "Other/taken.txt", b"other");
+        file(&h, ".hidden.txt", b"h");
+        fs::create_dir_all(h.join("Sensitive")).unwrap();
+        fs::create_dir_all(h.join("EmptyDest")).unwrap();
+        symlink(h.join("Pictures/b.png"), h.join("Pictures/link.png")).unwrap();
+        symlink(h.join("Archive"), h.join("ArchiveLink")).unwrap();
+        let ex = [h.join("Sensitive")];
+        for (bad, why) in [
+            (("Other/taken.txt", "Archive/taken.txt"), "a file over an existing file"),
+            (("Documents/Saab", "EmptyDest"), "a folder over an existing empty folder"),
+            (("Pictures/link.png", "Archive/link.png"), "a symlink"),
+            (("Pictures/b.png", "ArchiveLink/b.png"), "into a symlinked folder"),
+            (("ArchiveLink/x", "Archive/x"), "out of a symlinked folder"),
+            ((".hidden.txt", "Archive/hidden.txt"), "a hidden source"),
+            (("Other/taken.txt", ".config/taken.txt"), "a hidden destination"),
+            (("Other/taken.txt", "../out.txt"), "outside the home folder"),
+            (("Other/taken.txt", "/tmp/out.txt"), "an absolute path"),
+            (("Sensitive", "Archive/Sensitive"), "a sensitive folder"),
+            (("Other/taken.txt", "Sensitive/taken.txt"), "into a sensitive folder"),
+            (("Documents", "Documents/Saab/Inner/D"), "a folder into its own descendant"),
+            (("Missing.txt", "Archive/Missing.txt"), "something that is not there"),
+            (("Other/taken.txt", "Nowhere/taken.txt"), "a destination folder that is missing"),
+            (("Downloads/a.pdf", "Archive/again.pdf"), "the same item twice"),
+            (("Other/taken.txt", "Archive/a.pdf"), "two items with one destination"),
+            (("Documents/Saab/Inner/c.bin", "Archive/c.bin"), "an item inside a folder that also moves"),
+            (("Other/taken.txt", "Documents/Saab/taken.txt"), "a destination inside a folder that also moves"),
+        ] {
+            let mut items = good.clone();
+            items.insert(1, (bad.0.to_string(), bad.1.to_string()));
+            let e = move_many(&h, &items, &ex, &stream, "you", "r").unwrap_err();
+            let msg = format!("{e:#}");
+            assert!(msg.starts_with("Nothing was moved") && msg.contains(bad.0), "{why}: {msg}");
+            assert!(all_at_start(&h) && h.join("Documents/Saab").is_dir(), "{why}: something moved");
+        }
+        assert_eq!(fs::read(h.join("Archive/taken.txt")).unwrap(), b"keep");
+        assert_eq!(fs::read(h.join("Other/taken.txt")).unwrap(), b"other");
+        assert!(h.join("EmptyDest").is_dir() && fs::read_dir(h.join("EmptyDest")).unwrap().next().is_none());
+        assert!(!journal_path(&stream).exists(), "a refused group writes nothing to the journal");
+        assert!(move_many(&h, &[], &ex, &stream, "you", "r").is_err(), "an empty group is refused");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn a_failure_midway_puts_back_what_already_moved_and_journals_nothing() {
+        let (h, stream, _, items) = group_box("grp4");
+        // the last destination appears after the check, while the group is moving
+        let e = move_many_with(&h, &items, &[], &stream, "you", "r", |i| {
+            if i == 2 {
+                fs::write(h.join("Archive/b.png"), b"appeared").unwrap();
+            }
+        })
+        .unwrap_err();
+        let msg = format!("{e:#}");
+        assert!(msg.starts_with("Nothing was moved") && msg.contains("Pictures/b.png") && msg.contains("2 items already moved went back"), "{msg}");
+        assert!(e.downcast_ref::<PartlyMoved>().is_none());
+        fs::remove_file(h.join("Archive/b.png")).unwrap();
+        assert!(all_at_start(&h) && !h.join("Archive/Saab").exists(), "every item is where it started");
+        assert_eq!(fs::read_dir(h.join("Archive")).unwrap().count(), 0, "nothing left behind in the destination");
+        assert!(!journal_path(&stream).exists(), "nothing journaled: there is nothing to undo");
+        assert_eq!(load_all(&stream).unwrap()[0].sources, vec!["~/Downloads/a.pdf".to_string()], "the stream is unchanged");
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn what_cannot_go_back_after_a_failure_stays_moved_and_journaled_for_undo() {
+        let (h, stream, _, items) = group_box("grp5");
+        let e = move_many_with(&h, &items, &[], &stream, "you", "r", |i| {
+            if i == 2 {
+                fs::write(h.join("Archive/b.png"), b"appeared").unwrap();
+                fs::write(h.join("Downloads/a.pdf"), b"new at the old place").unwrap();
+            }
+        })
+        .unwrap_err();
+        let p = e.downcast_ref::<PartlyMoved>().expect("a partly moved group says so");
+        assert_eq!(p.stayed, pairs(&[("Downloads/a.pdf", "Archive/a.pdf")]));
+        assert!(p.message.contains("Downloads/a.pdf") && p.message.contains("Undo"), "{}", p.message);
+        assert!(h.join("Documents/Saab/Inner/c.bin").is_file() && h.join("Pictures/b.png").is_file(), "the rest went back");
+        assert_eq!(fs::read(h.join("Archive/a.pdf")).unwrap(), b"a");
+        assert_eq!(fs::read(h.join("Downloads/a.pdf")).unwrap(), b"new at the old place", "never overwritten");
+        let lines = journal(&stream);
+        assert_eq!(lines.len(), 1, "only what stayed moved is journaled: {lines:?}");
+        assert_eq!((lines[0]["batch"].as_str(), lines[0]["from"].as_str()), (Some(p.batch.as_str()), Some("~/Downloads/a.pdf")));
+        assert_eq!(load_all(&stream).unwrap()[0].sources, vec!["~/Archive/a.pdf".to_string()], "the stream says where it is");
+        fs::remove_file(h.join("Downloads/a.pdf")).unwrap();
+        assert_eq!(undo_last(&stream, &h).unwrap().restored, 1);
+        fs::remove_file(h.join("Archive/b.png")).unwrap();
+        assert!(all_at_start(&h));
+        assert_eq!(load_all(&stream).unwrap()[0].sources, vec!["~/Downloads/a.pdf".to_string()]);
+        fs::remove_dir_all(h).unwrap();
+    }
+
+    #[test]
+    fn the_feed_shows_a_group_move_as_one_item() {
+        let (h, stream, _, items) = group_box("grp6");
+        let batch = move_many(&h, &items, &[], &stream, "you", "you changed your folders").unwrap();
+        let feed = crate::feed::feed(&h, &stream, &h.join("no-history.jsonl"), &crate::feed::Opts { since: None, limit: 100 });
+        assert_eq!(feed.len(), 1, "{feed:?}");
+        let i = &feed[0];
+        assert_eq!((i.kind, i.actor, i.count, i.summary.as_str()), ("moved", "you", 3, "Moved 3 items into Archive"));
+        assert_eq!((i.batch.as_deref(), i.undoable), (Some(batch.as_str()), true));
+        assert_eq!(i.paths, ["Archive/a.pdf", "Archive/Saab", "Archive/b.png"]);
         fs::remove_dir_all(h).unwrap();
     }
 }
