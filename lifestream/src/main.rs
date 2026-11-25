@@ -137,6 +137,16 @@ enum Cmd {
         #[arg(long)]
         mark_notified: bool,
     },
+    /// What is NOT backed up and why, one JSON object per line, newest first, then a summary line (Computer > Backup). Read-only;
+    /// reads the left-out lists only, never a file's contents. Contract in lifestream/README.md.
+    LeftOut {
+        /// the data folder that holds hestia/skipped.jsonl and hestia/withheld.jsonl (default $XDG_DATA_HOME or ~/.local/share)
+        #[arg(long)]
+        share: Option<PathBuf>,
+        /// at most this many items (default 100, never more than 1000); the summary always counts everything
+        #[arg(long, default_value_t = lifestream::leftout::DEFAULT_LIMIT)]
+        limit: usize,
+    },
     /// Rename or create one folder, journaled so `file --undo` can take it back. One JSON line; exit 1 with a "failed" event if refused.
     Folder {
         #[command(subcommand)]
@@ -315,6 +325,7 @@ fn main() -> Result<()> {
         Cmd::Tree { tree, apply, r#move } => lifestream::tree::cmd_tree(tree, apply, r#move),
         Cmd::File { tree, out, manifest, apply, undo, batch } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply, undo, batch),
         Cmd::BackupState { share, mark_notified } => lifestream::backup::cmd(share, mark_notified),
+        Cmd::LeftOut { share, limit } => lifestream::leftout::cmd(share, limit),
         Cmd::Feed { since, limit, out } => lifestream::feed::cmd_feed(since, limit, &stream_dir(out)?),
         Cmd::Folder { cmd, out, manifest } => {
             let stream = stream_dir(out)?;

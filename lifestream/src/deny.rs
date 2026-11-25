@@ -64,6 +64,13 @@ pub fn capture_refused(rel: &str) -> bool {
         || crate::looks_secret(rel.rsplit('/').next().unwrap_or(rel))
 }
 
+/// What kind of private thing this path is, in a few plain words, for "left out and why": the entry of `SENSITIVE_DIRS`
+/// it is under, else None (it was refused for its name).
+pub fn kind_of(rel: &str) -> Option<&'static str> {
+    let lower = rel.to_lowercase();
+    SENSITIVE_DIRS.iter().find(|(d, _)| lower == *d || lower.strip_prefix(d).is_some_and(|r| r.starts_with('/'))).map(|(_, why)| *why)
+}
+
 /// The starter `manifest/rules.toml` rules for a new home repository, generated from the list above.
 pub fn manifest_rules() -> String {
     SENSITIVE_DIRS

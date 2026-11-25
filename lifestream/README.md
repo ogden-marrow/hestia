@@ -105,6 +105,38 @@ The one policy behind the desktop notification and the tray icon; the app can sh
 - `--mark-notified`: record the current episode as told (so `notify` turns false for it), or, when the state is `ok`, forget the told episode. It exits **10** (after printing) when it just forgot an episode that had been told and notifications are on, the one moment to say "working again"; otherwise 0.
 - Read-only without `--mark-notified`; never prints file contents or paths.
 - `rehearsal`: the last restore rehearsal, from `<share>/hestia/rehearsal.json` (written weekly by `rehearse.sh`, see below): `{"age_days":3,"at":"2026-11-15T03:12:00Z","result":"passed"}`. `result` is `passed`, `failed`, or `never` (no readable result yet: then `at` and `age_days` are `null`). `age_days` is whole days since `at` (never negative). Only the time and the verdict are read; the file's sentences are never copied. It never changes `state` or `notify`. When `reason` is not `null` and the last check failed or is older than 14 days, `reason` gets a **second line** (separated by `\n`): `Your last restore check failed: ...` or `Your backup has not been checked by a restore for more than two weeks.` A healthy backup keeps `reason: null` whatever the rehearsal says; the app should show `rehearsal` itself ("Last restore check: passed 3 days ago", or "failed", or nothing for `never`).
+- `left_out` (#227): how much the backup leaves out, from the same lists `lifestream left-out` reads (below): `{"by_why":{"link_outside_home":0,"link_to_private":0,"private_by_rule":3,"too_large":1,"unreadable":0,"withheld_secret_file":0,"withheld_secret_lines":1},"count":5}`. Every reason is always present (0 when none). Counts only, never a path. It never changes `state`, `reason` or `notify`: something left out on purpose is not a failing backup.
+
+## Left out and why (`lifestream left-out`)
+
+```
+lifestream left-out [--share DIR] [--limit N]
+```
+
+The one reader behind Computer > Backup "Left out and why" (#227). Read-only; prints **one JSON object per line, newest first, then one summary line**, and nothing else on stdout. Exit 0 even when the lists are missing or damaged (bad lines are skipped); with nothing left out it prints only the summary.
+
+- `--share`: the data folder (default `$XDG_DATA_HOME` or `~/.local/share`); the lists are `<share>/hestia/skipped.jsonl` (written by `capture.sh` on every capture) and `<share>/hestia/withheld.jsonl` (written by `watch.sh` after its secret scan), both through the one writer `packaging/libexec/left-out.sh`. They stay on this computer and are never committed.
+- `--limit`: default 100, clamped to 1..=1000; the items never exceed 512 KB (stops at a whole line). The summary always counts everything, so `sum(counts) > items printed` means there is more.
+
+Each item (keys in this order):
+
+```
+{"path":".config/big/huge.bin","why":"too_large","detail":"120 MB is over the 50 MB limit","since":"2026-11-25T09:00:00Z","can_include":true}
+```
+
+| field | meaning |
+|---|---|
+| `path` | relative to the home folder (`.bashrc`, `.config/gtk-3.0/bookmarks`; hidden components are normal here). `null` when it cannot be shown safely: not plainly relative (`..`, a leading `/` or `~`, an empty component), a control, direction-changing or replacement character, a backslash, or more than 240 characters. Never cleaned or cut. For a link, this is the link, never what it points to |
+| `why` | `too_large`, `unreadable`, `private_by_rule`, `withheld_secret_lines`, `withheld_secret_file`, `link_outside_home`, `link_to_private`. New reasons may be added: show an unknown one with its `detail` |
+| `detail` | one plain sentence chosen by `why` and built from numbers only: `120 MB is over the 50 MB limit`; `Hestia could not read it: it is missing, a broken link, or you do not have permission to open it`; `Never backed up: it holds private things (SSH keys and known hosts)` (the kind comes from the never-capture list; otherwise `Never backed up: its name or place says it holds private things (keys, sign-ins, passwords)`); `2 lines that looked like secrets were left out; the rest of the file is backed up`; `This file looked like it holds a secret, so all of it was left out`; `This is a link to something outside your home folder, and links are not followed there`; `This is a link to a private file, so it is not followed` |
+| `since` | RFC3339 UTC: when this reason and path were first seen (carried over from run to run); `null` if unknown |
+| `can_include` | `true` only for `too_large` and `unreadable`: the person can fix it (make it smaller, make it readable, fix the link) and the next capture takes it. Always `false` for `private_by_rule`, the two `withheld_*` reasons and the links |
+
+Where each comes from: `too_large` (over `HESTIA_MAX_FILE_BYTES`, 50 MB); `unreadable` (tar could not read it, or a link inside the home folder that points at nothing or at a folder); `private_by_rule` (a capture-list entry or a file inside a captured folder that the never-capture list refuses, `lifestream deny-path`); `withheld_secret_lines` (lines of a shell startup file the scanner flagged, replaced in the copy by a comment); `withheld_secret_file` (any other captured file with a finding, or a shell file holding a private key; `path` is `null` for captured system files such as `dconf.ini` that are not in the home folder); `link_outside_home` / `link_to_private` (a symlink in the capture list or inside a captured folder whose target is outside the home folder, or a file inside it that the never-capture list refuses).
+
+Summary, always last: `{"counts":{"link_outside_home":0,"link_to_private":1,"private_by_rule":3,"too_large":1,"unreadable":0,"withheld_secret_file":1,"withheld_secret_lines":1},"event":"summary"}` (every reason present).
+
+Never printed: file contents, the withheld lines, their line numbers, what the scanner matched, a link's target. The lists are opened only if they are regular files (never through a link) and only their first 1 MB is read. There is no "back this up anyway" action: including a private or withheld file would change the deny policy and is not offered.
 
 ### The restore rehearsal (`rehearse.sh`, weekly)
 

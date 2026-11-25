@@ -50,13 +50,16 @@ mutate "watcher pushes to a repo Hestia cannot vouch for" packaging/libexec/watc
 mutate "capture no longer refuses a mass deletion"         packaging/libexec/capture.sh '[ "$before" -ge 4 ]' '[ "$before" -ge 4000000 ]' bash tests/watcher.sh
 mutate "deny-list is not applied inside captured folders"  packaging/libexec/capture.sh 'if [ "${#inside[@]}" -gt 0 ]; then' 'if [ 1 -eq 0 ]; then' bash tests/watcher.sh
 mutate "a secret line is left in a shell file"             packaging/libexec/watch.sh 'sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f"' 'true' bash tests/watcher.sh
-mutate "capture keeps secret-named files whole"            packaging/libexec/watch.sh 'for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)); done' 'true' bash tests/watcher.sh
+mutate "capture keeps secret-named files whole"            packaging/libexec/watch.sh 'for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)) && left_out withheld_secret_file "$(home_of "$f")"; done' 'true' bash tests/watcher.sh
 mutate "a backup failing for minutes already raises a notification" lifestream/src/backup.rs 'age >= NOTIFY_AFTER && notified' 'notified' bash tests/watcher-notify.sh
 mutate "the same failing backup is announced on every run" lifestream/src/backup.rs 'notified != Some(since)' 'true' bash tests/watcher-notify.sh
 mutate "a computer with no verified private copy reads as backed up" lifestream/src/backup.rs 'return if now - first > GRACE { Local::OnlyHere' 'return if false { Local::OnlyHere' rs a_fresh_repository_with_no_remote
 mutate "commits that never reach the private copy for days read as ok" lifestream/src/backup.rs 'Some(oldest) if now - oldest > GRACE =>' 'Some(oldest) if now - oldest > GRACE * 1000 =>' rs commits_unpushed_for_over_a_day
 mutate "a repository nobody verified counts as private"    lifestream/src/backup.rs 'v["private"].as_bool() == Some(true) && v["slug"]' 'v["slug"]' rs a_remote_nobody_verified
 mutate "local_only never raises its one notification"      lifestream/src/backup.rs 'let notify = notifications && notified_episode(dir) != Some(since);' 'let notify = false;' bash tests/watcher-notify.sh
+mutate "the left-out list records the secret line it withheld" packaging/libexec/watch.sh '[ "$k" = 0 ] || left_out withheld_secret_lines "$(home_of "$f")" "\"count\":$k"' '[ "$k" = 0 ] || left_out withheld_secret_lines "$(home_of "$f")" "\"count\":$k,\"was\":\"$(grep -h ghp_ "$HOME/$(home_of "$f")" | head -1 | tr -d "\"\\\\")\""' bash tests/watcher-failures.sh
+mutate "left out: a private-by-rule file is offered for inclusion" lifestream/src/leftout.rs 'can_include: matches!(why, "too_large" | "unreadable")' 'can_include: matches!(why, "too_large" | "unreadable" | "private_by_rule")' rs private_by_rule_is_never_includable
+mutate "left out: a path outside the home folder is shown"  lifestream/src/leftout.rs "&& !p.starts_with(['/', '~'])" '' rs unsafe_paths_are_null
 mutate "uninstall keeps the clipboard history"            uninstall.sh 'rm -f "$share/hestia/clipboard.jsonl"' 'true' bash tests/uninstall.sh
 mutate "bootstrap restores code that runs by itself"       packaging/libexec/bootstrap.sh 'if is_executable_config "$rel" && [ "$EXEC" != 1 ]; then review+=("$kind/$rel"); continue; fi' 'true' bash tests/bootstrap.sh
 mutate "the rehearsal no longer notices restored code that runs by itself" packaging/libexec/rehearse.sh 'if is_executable_config "$name" || is_executable_config "$rel"; then' 'if false; then' bash tests/rehearse.sh

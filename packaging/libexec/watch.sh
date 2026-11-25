@@ -117,14 +117,22 @@ while IFS= read -r -d '' f && IFS= read -r -d '' n && IFS= read -r -d '' r; do
     *) drop["$f"]=1 ;;
   esac
 done < "$state/scan.out"
-for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)); done
+# What was withheld is recorded for `lifestream left-out` (left-out.sh, in Hestia's data folder on this computer, never
+# committed): the home-relative path, the kind and how many lines. Never the line, its number or anything the scanner matched.
+. "$libexec/left-out.sh"
+left_out_begin "$state/withheld.jsonl"
+home_of() { case "$1" in "$here/config/"*) printf '.config/%s' "${1#"$here/config/"}" ;; "$here/dotfiles/"*) printf '%s' "${1#"$here/dotfiles/"}" ;; esac; }
+for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)) && left_out withheld_secret_file "$(home_of "$f")"; done
 for f in "${!redact[@]}"; do
   [ -f "$f" ] && [ -z "${drop[$f]:-}" ] || continue
+  k=0
   # shellcheck disable=SC2086 # the recorded line numbers are a space-separated list: splitting is the point
   for n in $(printf '%s\n' ${redact[$f]} | sort -un); do
-    sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f" && redacted=$((redacted+1))
+    sed -i "${n}s/.*/# [Hestia left this line out: it looked like a secret]/" "$f" && redacted=$((redacted+1)) && k=$((k+1))
   done
+  [ "$k" = 0 ] || left_out withheld_secret_lines "$(home_of "$f")" "\"count\":$k"
 done
+left_out_end
 { [ "$withheld" -gt 0 ] || [ "$redacted" -gt 0 ]; } && withheld_note="; $withheld file(s) and $redacted line(s) withheld: possible secrets"
 if [ -s "$here/SKIPPED.txt" ]; then withheld_note="$withheld_note; $(wc -l < "$here/SKIPPED.txt") file(s) skipped: unreadable or too big (see SKIPPED.txt)"; fi
 

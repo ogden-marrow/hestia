@@ -233,5 +233,53 @@ HESTIA_APT_SOURCES_DIR="$T/apt$n" watch; want 'ok:*' "setup for apt sources"
 tracked "$rel/apt-sources/ext.sources" || fail "a deb822 .sources file was not captured"
 tracked "$rel/apt-sources/ext.list" || fail "a .list file was not captured"
 tracked "$rel/apt-sources/ubuntu.sources" && fail "the distribution's own sources file was captured"
+
+# ---- #227: everything left out is listed with a plain reason (lifestream left-out), counted in backup-state, and the list
+#      never holds a secret. Each kind is made on purpose here.
+fresh; guard
+paths '~/.bashrc' '~/.config/big' '~/.config/many' '~/.config/gtk-3.0' '~/.ssh/config' '~/.config/odd' '~/.outside' '~/.mylink'
+printf 'export A=1\nexport GITHUB_TOKEN=%s\nexport ALSO=%s\n' "$tok" "$tok" > "$HOME/.bashrc"
+mkdir -p "$HOME/.config/big" "$HOME/.config/gtk-3.0" "$HOME/.ssh" "$HOME/.config/odd"; many
+head -c 5000 /dev/zero | tr '\0' 'x' > "$HOME/.config/big/huge.bin"
+echo "gtk-theme-name=Adwaita" > "$HOME/.config/gtk-3.0/settings.ini"; echo "file:///private" > "$HOME/.config/gtk-3.0/bookmarks"
+echo "k=v" > "$HOME/.config/gtk-3.0/my-secret.conf"; echo "Host example" > "$HOME/.ssh/config"
+printf 'token=%s\n' "$tok" > "$HOME/.config/odd/tok.conf"; echo fine > "$HOME/.config/odd/plain.txt"
+ln -s /etc/hostname "$HOME/.outside"; printf 'machine x login y\n' > "$HOME/.netrc"; ln -s "$HOME/.netrc" "$HOME/.mylink"
+unreadable=0; if [ "$(id -u)" != 0 ]; then chmod 000 "$HOME/.config/many/f3"; unreadable=1; fi
+HESTIA_MAX_FILE_BYTES=1000 watch; [ "$unreadable" = 0 ] || chmod 600 "$HOME/.config/many/f3"
+want 'ok:*' "setup for left-out"
+lo="$("$ls_bin" left-out)" || fail "left-out failed"
+has() { # why path: one line that says exactly this
+  printf '%s\n' "$lo" | grep -qF "{\"path\":\"$2\",\"why\":\"$1\"," || fail "left-out does not list $2 as $1: $lo"
+}
+has too_large .config/big/huge.bin
+[ "$unreadable" = 0 ] || has unreadable .config/many/f3
+has private_by_rule .config/gtk-3.0/bookmarks
+has private_by_rule .config/gtk-3.0/my-secret.conf
+has private_by_rule .ssh/config
+has withheld_secret_lines .bashrc
+has withheld_secret_file .config/odd/tok.conf
+has link_outside_home .outside
+has link_to_private .mylink
+printf '%s\n' "$lo" | grep -qF '{"path":".bashrc","why":"withheld_secret_lines","detail":"2 lines that looked like secrets were left out' || fail "the withheld lines are not counted in plain words: $lo"
+printf '%s\n' "$lo" | grep '"why":"private_by_rule"' | grep -q '"can_include":true' && fail "a private-by-rule file must never be includable"
+printf '%s\n' "$lo" | grep '"why":"too_large"' | grep -q '"can_include":true' || fail "a too-large file can be included after a fix"
+printf '%s\n' "$lo" | tail -1 | grep -q '^{"counts":{.*"withheld_secret_file":1.*},"event":"summary"}$' || fail "no summary line last: $(printf '%s\n' "$lo" | tail -1)"
+# the secret is in no list, no output and nothing captured (only in the person's own files)
+state="$HOME/.local/share/hestia"
+for f in "$state"/*; do grep -qF "$tok" "$f" && fail "the secret leaked into $f"; done
+grep -rqF "$tok" "$r/$rel" && fail "the secret is in the captured copy"
+grep -qF "$tok" <<<"$lo" && fail "left-out printed the secret"
+bs="$("$ls_bin" backup-state)"; grep -qF "$tok" <<<"$bs" && fail "backup-state printed the secret"
+grep -q '"left_out":{"by_why":{[^}]*"private_by_rule":3[^}]*"withheld_secret_lines":1[^}]*},"count":' <<<"$bs" || fail "backup-state does not count what was left out: $bs"
+grep -qE 'huge|bookmarks|bashrc' <<<"$bs" && fail "backup-state names a path (counts only): $bs"
+# since is when it was FIRST left out, carried over from run to run; a fixed problem leaves the list
+sed -i 's/"path":".config\/big\/huge.bin","since":[0-9]*/"path":".config\/big\/huge.bin","since":1000000000/' "$state/skipped.jsonl"
+HESTIA_MAX_FILE_BYTES=1000 watch
+"$ls_bin" left-out | grep '"why":"too_large"' | grep -q '"since":"2001-09-09T01:46:40Z"' || fail "since was not carried over: $("$ls_bin" left-out)"
+rm -f "$HOME/.config/big/huge.bin" "$HOME/.outside"; HESTIA_MAX_FILE_BYTES=1000 watch
+"$ls_bin" left-out | grep -qE 'huge.bin|\.outside' && fail "a fixed problem is still listed"
+# damaged lists are skipped, never fatal
+printf 'garbage\n{"why":"nope"}\n' >> "$state/skipped.jsonl"; "$ls_bin" left-out >/dev/null || fail "a damaged list made left-out fail"
 [ "$bad" = 0 ] || exit 1
 echo "watcher failures ok"

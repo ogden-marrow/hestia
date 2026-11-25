@@ -51,10 +51,16 @@ libexec="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # unless the capture list itself changed or you say it is fine (touch the file the message names).
 # A file that cannot be read, or is bigger than HESTIA_MAX_FILE_BYTES (50 MB: GitHub refuses 100 MB), is skipped, not fatal,
 # and is listed in SKIPPED.txt so it is never silently missing.
+# Everything left out (those, refused paths and links that are not followed) is also recorded by reason in skipped.jsonl in
+# Hestia's data folder on this computer (left-out.sh is the one writer, `lifestream left-out` the one reader): paths and numbers only.
 repo_root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")"; repo_root="$(readlink -f "$repo_root")"
 new=".capture-new.$$"; rm -rf "$new"; mkdir -p "$new/dotfiles" "$new/config"
 skipped="$new.skipped"; : > "$skipped"
-trap 'rm -rf "$new" "$skipped" "$new.err"' EXIT
+. "$libexec/left-out.sh"
+state="${XDG_DATA_HOME:-$HOME/.local/share}/hestia"; mkdir -p "$state"
+left_out_begin "$state/skipped.jsonl"
+# shellcheck disable=SC2154 # lo_new is set by left_out_begin (left-out.sh)
+trap 'rm -rf "$new" "$skipped" "$new.err" "${lo_new:-}"' EXIT
 home_rel() { case "$1" in "$new/config/"*) printf '.config/%s' "${1#"$new/config/"}" ;; "$new/dotfiles/"*) printf '%s' "${1#"$new/dotfiles/"}" ;; esac; }
 # A symlink target is captured only when it is a real file inside the home folder that the deny-list allows.
 home_real="$(readlink -f ~)"
@@ -63,13 +69,20 @@ link_ok() { # <resolved path>
   [ -e "$1" ] || return 1
   "${LIFESTREAM:-lifestream}" deny-path "${1#"$home_real"/}" >/dev/null 2>&1
 }
+link_left_out() { # <the link, relative to home> <its resolved target>: why it was not followed
+  case "$2" in
+    "$home_real"/*) if [ -f "$2" ]; then left_out link_to_private "$1"; else left_out unreadable "$1"; fi ;;   # private, or broken / not a file
+    *) left_out link_outside_home "$1" ;;
+  esac
+}
 fix_links() { # <copied tree> <where it came from>: replace each symlink in the copy by its target's content, or drop and list it
   local tree="$1" orig="$2" l r t
   while IFS= read -r -d '' l; do
     r="${l#"$tree"}"; t="$(readlink -f "$orig$r" 2>/dev/null || true)"
     rm -f -- "$l"
     if [ -n "$t" ] && [ -f "$t" ] && link_ok "$t"; then cp -p -- "$t" "$l"
-    else printf 'symlink not captured (target is not a file inside the home folder, or never captured): ~/%s\n' "$(home_rel "$l" | tr '\n' '?')" >> "$skipped"; fi
+    else printf 'symlink not captured (target is not a file inside the home folder, or never captured): ~/%s\n' "$(home_rel "$l" | tr '\n' '?')" >> "$skipped"
+         link_left_out "$(home_rel "$l")" "$t"; fi
   done < <(find "$tree" -type l -print0)
 }
 while IFS= read -r line; do
@@ -80,7 +93,9 @@ while IFS= read -r line; do
   case "$p" in "~/"*) rel="${p#\~/}" ;; *) echo "skip (not under ~): $p" >&2; continue ;; esac
   # one deny-list for everything (lifestream deny-path); if it cannot be asked, nothing is captured from home
   if ! "${LIFESTREAM:-lifestream}" deny-path "$rel" >/dev/null 2>&1; then
-    echo "REFUSED (never captured): $p" >&2; continue
+    echo "REFUSED (never captured): $p" >&2
+    if [ -e ~/"$rel" ] || [ -L ~/"$rel" ]; then left_out private_by_rule "$rel"; fi
+    continue
   fi
   [ -e ~/"$rel" ] || continue
   case "$rel" in .config/*) dest="$new/config/${rel#.config/}" ;; *) dest="$new/dotfiles/$rel" ;; esac
@@ -98,6 +113,7 @@ while IFS= read -r line; do
            rm -rf "$stage"; [ -d "$dest" ] && fix_links "$dest" "$real"
          else
            printf 'symlink not captured (target outside the home folder or never captured): ~/%s\n' "$rel" >> "$skipped"
+           link_left_out "$rel" "$real"
          fi
          continue
        fi
@@ -106,9 +122,14 @@ while IFS= read -r line; do
        pre="${rel%/*}/"; [ "$pre" = "$rel/" ] && pre=""
        tar --exclude=.git -C "$HOME/$pre" -cf - -- "${rel##*/}" 2>"$new.err" | tar -C "$(dirname "$dest")" -xpf - || {
          [ "${PIPESTATUS[1]}" = 0 ] || exit 1
-         grep -v '^tar: Exiting with failure' "$new.err" | while IFS= read -r e; do
-           e="${e#tar: }"; printf '%s\n' "${e//$'\n'/?}" | sed -E "s#^(.*): Cannot [a-z ]+: (.*)\$#unreadable (\2): ~/$pre\1#" >> "$skipped"
-         done; }
+         re='^(.*): Cannot [a-z ]+: (.*)$'
+         while IFS= read -r e; do
+           e="${e#tar: }"
+           if [[ $e =~ $re ]]; then
+             printf 'unreadable (%s): ~/%s\n' "${BASH_REMATCH[2]}" "$pre${BASH_REMATCH[1]}" >> "$skipped"
+             left_out unreadable "$pre${BASH_REMATCH[1]}"
+           else printf '%s\n' "$e" >> "$skipped"; fi
+         done < <(grep -v '^tar: Exiting with failure' "$new.err"); }
        ;;
   esac
   # links INSIDE a captured folder are resolved the same way
@@ -117,6 +138,7 @@ done < capture-paths.txt
 # one big file must not wedge every later push: it is left out and listed
 max="${HESTIA_MAX_FILE_BYTES:-52428800}"
 while IFS= read -r -d '' f; do
+  left_out too_large "$(home_rel "$f")" "\"bytes\":$(stat -c %s -- "$f" 2>/dev/null || echo 0),\"limit\":$max"
   rm -f -- "$f"; printf 'too big (over %s MB): ~/%s\n' "$((max / 1048576))" "$(home_rel "$f" | tr '\n' '?')" >> "$skipped"
 done < <(find "$new" -type f -size +"${max}"c -print0)
 # The deny-list also applies to what is INSIDE a captured folder (a bookmarks file in ~/.config/gtk-3.0, a token file in an app's
@@ -132,6 +154,7 @@ if [ "${#inside[@]}" -gt 0 ]; then
     [ -n "$h" ] || continue
     case "$h" in .config/*) rm -f -- "$new/config/${h#.config/}" ;; *) rm -f -- "$new/dotfiles/$h" ;; esac
     echo "REFUSED inside a captured folder (never captured): ~/$h" >&2
+    left_out private_by_rule "$h"
   done <<< "$refused"
 fi
 before=$( { find dotfiles config -type f 2>/dev/null || true; } | wc -l); after=$( { find "$new/dotfiles" "$new/config" -type f 2>/dev/null || true; } | wc -l)
@@ -144,6 +167,7 @@ fi
 rm -f "$accept"
 rm -rf dotfiles config && mv "$new/dotfiles" dotfiles && mv "$new/config" config
 if [ -s "$skipped" ]; then sort -u "$skipped" > SKIPPED.txt; else rm -f SKIPPED.txt; fi
+left_out_end
 
 # --- identity & hardware notes --------------------------------------------
 {
