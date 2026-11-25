@@ -23,7 +23,7 @@ git config --global user.email t@t.t; git config --global user.name t; git confi
 bash "$here/install.sh" >"$T/install.log" 2>&1 || { cat "$T/install.log" >&2; fail "install.sh failed"; }
 for b in hestia hestia-tray lifestream; do [ -x "$PREFIX/bin/$b" ] || fail "$b was not installed"; done
 "$PREFIX/bin/lifestream" --version >/dev/null || fail "lifestream does not run"
-for f in watch.sh capture.sh bootstrap.sh rehearse.sh restore-rules.sh dconf-filter.sh capture-paths.default; do [ -e "$PREFIX/libexec/hestia/$f" ] || fail "libexec/$f missing"; done
+for f in watch.sh capture.sh left-out.sh bootstrap.sh rehearse.sh restore-rules.sh dconf-filter.sh capture-paths.default; do [ -e "$PREFIX/libexec/hestia/$f" ] || fail "libexec/$f missing"; done
 for f in watch.sh capture.sh bootstrap.sh rehearse.sh dconf-filter.sh; do [ -x "$PREFIX/libexec/hestia/$f" ] || fail "$f is not executable"; done
 grep -qx "home=$HESTIA_HOME" "$HOME/.config/hestia/settings" || fail "the home repository setting was not seeded in the app's settings"
 [ ! -e "$HOME/.config/environment.d/hestia.conf" ] || fail "a second place for the home repository was written (one setting only)"

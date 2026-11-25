@@ -41,7 +41,7 @@ Goal: the owner opens Hestia and it feels like a native app that does the job: l
 Goal: the owner never has to wonder whether the backup works.
 - Desktop notification and tray state when a backup keeps failing (#225): done in the engine, watcher and tray; the app should show `lifestream backup-state` too.
 - Weekly restore rehearsal in a scratch folder (#226): done in the engine, restore script and a weekly timer; shown through `lifestream backup-state` (`rehearsal`), the app shows it next.
-- "Left out and why": skipped, withheld and denied files shown (#227).
+- "Left out and why": skipped, withheld and denied files shown (#227): done in the engine (`lifestream left-out`, `left_out` in `backup-state`); the app shows it next. "Back this up anyway" is not built: it would change the deny policy.
 - Coverage check: warn when important config is not captured (#228).
 - Repository size guard (#229).
 - **Exit test**: break each of network, token, remote and disk on purpose; each produces one clear message and recovers on its own when fixed; a restore rehearsal passes and is shown in the app.

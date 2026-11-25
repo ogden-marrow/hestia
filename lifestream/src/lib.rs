@@ -13,6 +13,7 @@ pub mod domains;
 pub mod feed;
 pub mod ghrepo;
 pub mod home;
+pub mod leftout;
 pub mod machine;
 pub mod query;
 pub mod rules;

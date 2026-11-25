@@ -351,11 +351,19 @@ pub fn cmd(share: Option<PathBuf>, mark_notified: bool) -> Result<()> {
     let on = crate::setting("notifications").as_deref() != Some("off");
     let st = compute(&dir, Utc::now().timestamp(), on);
     let recovered = mark_notified && mark(&dir, &st)?;
-    println!("{}", st.to_json());
+    println!("{}", report(&st, &dir));
     if recovered && on {
         std::process::exit(EXIT_RECOVERED);
     }
     Ok(())
+}
+
+/// The line `backup-state` prints: the state plus `left_out` (`{"count":N,"by_why":{...}}`, from the left-out lists in `dir`:
+/// counts only, never a path). It never changes the state or `notify`: something left out is not a failing backup.
+pub fn report(st: &State, dir: &Path) -> String {
+    let mut v: Value = serde_json::from_str(&st.to_json()).unwrap_or_else(|_| json!({}));
+    v["left_out"] = crate::leftout::summary_json(dir);
+    v.to_string()
 }
 
 #[cfg(test)]
@@ -437,6 +445,22 @@ mod tests {
         fs::write(d.join("watch.json"), "{{{{").unwrap();
         let s = compute(&d, NOW, true);
         assert_eq!((s.state, s.notify), ("unknown", false));
+    }
+
+    #[test]
+    fn left_out_is_counted_by_reason_without_paths_and_never_changes_the_state() {
+        let d = dir_with(&[(NOW - H, "ok: 1 commit(s), pushed")]);
+        let r = report(&compute(&d, NOW, true), &d);
+        assert!(r.contains(r#""left_out":{"by_why":{"link_outside_home":0,"#) && r.contains(r#""count":0}"#), "{r}");
+        fs::write(d.join("skipped.jsonl"), concat!(r#"{"why":"too_large","path":".config/secretive-name","since":1,"bytes":9,"limit":1}"#, "\n", "garbage\n", r#"{"why":"private_by_rule","path":".ssh/config","since":1}"#, "\n")).unwrap();
+        fs::write(d.join("withheld.jsonl"), r#"{"why":"withheld_secret_lines","path":".bashrc","since":1,"count":2}"#).unwrap();
+        let s = compute(&d, NOW, true);
+        let r = report(&s, &d);
+        let v: Value = serde_json::from_str(&r).unwrap();
+        assert_eq!((v["state"].as_str(), v["notify"].as_bool()), (Some("ok"), Some(false)), "left out is not a failing backup");
+        assert_eq!(v["left_out"]["count"], 3);
+        assert_eq!((v["left_out"]["by_why"]["too_large"].as_u64(), v["left_out"]["by_why"]["private_by_rule"].as_u64(), v["left_out"]["by_why"]["withheld_secret_lines"].as_u64()), (Some(1), Some(1), Some(1)));
+        assert!(!r.contains("secretive") && !r.contains(".ssh") && !r.contains("bashrc"), "counts only, never a path: {r}");
     }
 
     fn with_rehearsal(d: &Path, at: i64, result: &str) {
