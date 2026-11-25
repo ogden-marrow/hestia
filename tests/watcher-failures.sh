@@ -81,6 +81,31 @@ watch; want 'FAILED: *' "a corrupt index was not reported as FAILED"
 # one canonical path for the reason: the result is one valid JSON line with the quotes in it made safe
 grep -q '^{"at":[0-9]*,"result":"FAILED: [^"]*"}$' "$HOME/.local/share/hestia/watch.json" || fail "watch.json is not one clean JSON line"
 
+# ---- #253: a failed commit leaves its files staged; once the cause is fixed the next run commits them normally
+hist() { tail -1 "$HOME/.local/share/hestia/watch-history.jsonl"; }
+fresh; paths '~/.bashrc'; echo 'export A=1' > "$HOME/.bashrc"
+git config --global --unset user.email; git config --global --unset user.name; git config --global user.useConfigOnly true
+watch; want 'FAILED: git commit failed: *' "setup: the first capture without a git identity must fail"
+hist | grep -q '"result":"FAILED: git commit failed' || fail "the failed first capture is not in the history"
+git config --global user.email t@t.t; git config --global user.name t
+watch; want 'ok:*' "after the git identity was set, the first capture still did not commit"
+git -C "$r" log --format=%s | grep -qx 'machine: first capture of this computer' || fail "the run after the fix did not make the first capture commit"
+clean || fail "tree not clean after the fixed first capture"
+git -C "$r" show "HEAD:$rel/dotfiles/.bashrc" | grep -q 'export A=1' || fail "the first capture lost the captured file"
+hist | grep -Eq '^\{"at":[0-9]+,"result":"ok[^"]*","commits":[1-9][0-9]*\}$' || fail "the history does not record the fixed run as ok with its commits: $(hist)"
+# a later commit that fails (cannot be signed), then the fix: one ordinary commit, nothing left staged
+fresh; paths '~/.bashrc'; echo 'export A=1' > "$HOME/.bashrc"; watch; want 'ok:*' "setup for a later failed commit"
+echo 'export B=2' >> "$HOME/.bashrc"
+git -C "$r" config commit.gpgsign true; git -C "$r" config gpg.program /bin/false
+watch; want 'FAILED: git commit failed: *' "setup: an unsignable later commit must fail"
+git -C "$r" config --unset commit.gpgsign
+watch; want 'ok:*' "after signing was fixed, the later change still did not commit"
+git -C "$r" log -1 --format=%s | grep -q 'config, 1 files changed' || fail "the later change was not committed as an ordinary change: $(git -C "$r" log -1 --format=%s)"
+git -C "$r" show "HEAD:$rel/dotfiles/.bashrc" | grep -q 'export B=2' || fail "the later change is not in the commit"
+clean || fail "tree not clean after the fixed later commit"
+[ -z "$(git -C "$r" diff --cached --name-only)" ] || fail "something is still staged"
+hist | grep -Eq '"result":"ok[^"]*","commits":[1-9]' || fail "the history does not record the fixed later run: $(hist)"
+
 # ---- #167: another computer pushed first: fetch, rebase, push; a real conflict is FAILED and leaves no half rebase
 fresh; paths '~/.bashrc'; echo 'export A=1' > "$HOME/.bashrc"; watch; want 'ok:*pushed*' "the first push failed"
 git clone -q "$S/remote.git" "$S/other"; mkdir -p "$S/other/applications/linux/other/1"

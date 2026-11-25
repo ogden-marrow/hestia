@@ -170,6 +170,10 @@ commit_strays() { # words for the message, then the ls-files flags that select t
 made=0
 # ---- one commit per kind of change
 commit_all() {
+  # every run starts from the last commit: what an earlier run staged but could not commit (no git identity, a commit
+  # that could not be signed, a killed run) goes back to being an ordinary change in the folder and takes the one path
+  # below. Only the index is reset, never the files themselves (#253).
+  g reset -q -- "$rel" machines
   # the first capture of a computer is one commit; after that, one per kind of change
   if [ -z "$(git -C "$repo" ls-files -- "$rel" | head -1)" ]; then
     g add -A -- "$rel"
