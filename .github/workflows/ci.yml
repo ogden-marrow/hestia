@@ -64,12 +64,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Dependencies come only from where we expect, under licences we allow
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
         with:
           command: check sources licenses
       - name: Known vulnerabilities (reported, not blocking)
         continue-on-error: true
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2
         with:
           command: check advisories
 
