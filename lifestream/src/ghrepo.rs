@@ -154,18 +154,56 @@ pub struct Ctx<'a> {
     pub settings: &'a Path,
     pub exe: &'a Path,
     pub today: &'a str,
+    /// `<share>/hestia`, where a definite private/public answer is recorded for `backup-state` (#269); None records nothing
+    pub state: Option<&'a Path>,
 }
 
 impl<'a> Ctx<'a> {
     pub fn new(token: &'a str, ep: &'a Endpoints, git_base: &'a str, settings: &'a Path, exe: &'a Path, today: &'a str) -> Self {
-        Self { token, ep, git_base, settings, exe, today }
+        Self { token, ep, git_base, settings, exe, today, state: None }
+    }
+    /// Record what sign-in learns about the repository's privacy in `dir` (`<share>/hestia`).
+    pub fn recording(self, dir: &'a Path) -> Self {
+        Self { state: Some(dir), ..self }
+    }
+    /// A definite answer, through the one writer. Best effort: failing to write only means `backup-state` waits for the watcher.
+    fn record(&self, full: &str, private: bool) {
+        if let Some(d) = self.state {
+            let _ = crate::backup::record_private(d, full, private);
+        }
     }
 }
+
+/// What GitHub says about `owner/name`. `Private`, `Public` and `Missing` are definite answers (the only ones ever recorded);
+/// `Unclear` (a redirect, an answer without a yes/no) and the HTTP error (offline, signed out, forbidden, a server error)
+/// prove nothing. Every answer but `Private` fails closed.
+#[derive(Debug, PartialEq)]
+enum Visibility {
+    Private,
+    Public,
+    Missing,
+    Unclear,
+}
+
+#[allow(clippy::result_large_err)] // ureq's own error type
+fn visibility(ep: &Endpoints, token: &str, full: &str) -> Result<Visibility, ureq::Error> {
+    match get(ep, token, &format!("/repos/{full}")) {
+        Ok(v) => Ok(match v["private"].as_bool() {
+            Some(true) => Visibility::Private,
+            Some(false) => Visibility::Public,
+            None => Visibility::Unclear,
+        }),
+        Err(ureq::Error::Status(404, _)) => Ok(Visibility::Missing),
+        Err(e) => Err(e),
+    }
+}
+
+const UNCLEAR: &str = "GitHub did not say whether that repository is private";
 
 /// Clone the person's own private home repository into `dest` and make it this computer's home.
 /// `git_base` is where git fetches from (https://github.com in production; a local folder in tests).
 pub fn adopt(out: &mut dyn Write, c: &Ctx, full: &str, dest: &Path) -> bool {
-    let Ctx { token, ep, git_base, settings, exe, today } = *c;
+    let Ctx { token, ep, git_base, settings, exe, today, .. } = *c;
     if !valid_full_name(full) {
         return other(out, "that is not a repository name (use owner/name)");
     }
@@ -174,10 +212,17 @@ pub fn adopt(out: &mut dyn Write, c: &Ctx, full: &str, dest: &Path) -> bool {
     if !owner.eq_ignore_ascii_case(&user) {
         return other(out, "a home repository must be one of your own");
     }
-    match get(ep, token, &format!("/repos/{full}")) {
-        Ok(v) if v["private"].as_bool() == Some(true) => {}
-        Ok(_) => return other(out, "that repository is public; a home repository must be private"),
-        Err(ureq::Error::Status(404, _)) => return other(out, "that repository was not found"),
+    match visibility(ep, token, full) {
+        Ok(Visibility::Private) => {}
+        Ok(Visibility::Public) => {
+            c.record(full, false);
+            return other(out, "that repository is public; a home repository must be private");
+        }
+        Ok(Visibility::Missing) => {
+            c.record(full, false);
+            return other(out, "that repository was not found");
+        }
+        Ok(Visibility::Unclear) => return other(out, UNCLEAR),
         Err(e) => {
             fail_http(out, e);
             return false;
@@ -232,6 +277,8 @@ pub fn adopt(out: &mut dyn Write, c: &Ctx, full: &str, dest: &Path) -> bool {
     if let Err(e) = set_home_setting(settings, dest) {
         return other(out, &e.to_string());
     }
+    // the private check above was a definite yes: "only on this computer" clears now, not at the watcher's next run (#269)
+    c.record(full, true);
     emit(out, json!({"event": "cloned", "path": dest.to_string_lossy(), "repo": full}));
     true
 }
@@ -245,13 +292,14 @@ pub fn check_private(out: &mut dyn Write, token: &str, ep: &Endpoints, full: &st
     if !full.split('/').next().is_some_and(|o| o.eq_ignore_ascii_case(&user)) {
         return other(out, "not one of your own repositories");
     }
-    match get(ep, token, &format!("/repos/{full}")) {
-        Ok(v) if v["private"].as_bool() == Some(true) => {
+    match visibility(ep, token, full) {
+        Ok(Visibility::Private) => {
             emit(out, json!({"event": "private", "repo": full}));
             true
         }
-        Ok(_) => other(out, "that repository is public"),
-        Err(ureq::Error::Status(404, _)) => other(out, "that repository was not found"),
+        Ok(Visibility::Public) => other(out, "that repository is public"),
+        Ok(Visibility::Missing) => other(out, "that repository was not found"),
+        Ok(Visibility::Unclear) => other(out, UNCLEAR),
         Err(e) => {
             fail_http(out, e);
             false
@@ -273,7 +321,7 @@ pub fn guard_history(dir: &Path) -> Result<()> {
 /// Order matters: nothing is sent until the whole history has been scanned, and a name that is already taken is reported
 /// (`exists`) rather than reused.
 pub fn create(out: &mut dyn Write, c: &Ctx, name: &str, dest: &Path) -> bool {
-    let Ctx { token, ep, git_base, settings, exe, today } = *c;
+    let Ctx { token, ep, git_base, settings, exe, today, .. } = *c;
     if !valid_full_name(&format!("x/{name}")) {
         return other(out, "that is not a repository name (letters, digits, - _ and . only)");
     }
@@ -327,6 +375,13 @@ pub fn create(out: &mut dyn Write, c: &Ctx, name: &str, dest: &Path) -> bool {
     let _ = crate::auth::agent().put(&format!("{}/repos/{full}/topics", ep.api)).set("Authorization", &format!("Bearer {token}")).set("Accept", "application/vnd.github+json").send_json(json!({"names": [TOPIC]}));
     if let Err(e) = set_home_setting(settings, dest) {
         return other(out, &e.to_string());
+    }
+    // asking for a private repository is not proof of one: ask GitHub what it made, and record only a definite answer, so
+    // "only on this computer" clears now and not at the watcher's next run (#269)
+    match visibility(ep, token, &full) {
+        Ok(Visibility::Private) => c.record(&full, true),
+        Ok(Visibility::Public | Visibility::Missing) => c.record(&full, false),
+        Ok(Visibility::Unclear) | Err(_) => {}
     }
     emit(out, json!({"event": "created", "repo": full, "path": d}));
     true
@@ -634,6 +689,81 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dest.join("mine.txt")).unwrap(), "keep me");
         assert!(!settings.exists());
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// What sign-in recorded in `<share>/hestia` (all under the test's temp folder): (slug, private), or None.
+    fn recorded(state: &Path) -> Option<(String, bool)> {
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(state.join("private-check.json")).ok()?).ok()?;
+        Some((v["slug"].as_str()?.to_string(), v["private"].as_bool()?))
+    }
+
+    /// `backup-state` two days after sign-in (past the sign-in grace), with no watcher run since the one before sign-in: the
+    /// push target is the GitHub address git really has after a real adopt.
+    fn backup_state_after_signin(dest: &Path, state: &Path) -> &'static str {
+        git(dest, &["remote", "set-url", "origin", "https://github.com/ada/home.git"]);
+        let now = chrono::Utc::now().timestamp() + 2 * crate::backup::GRACE;
+        std::fs::create_dir_all(state).unwrap();
+        std::fs::write(state.join("watch-history.jsonl"), format!("{}\n", json!({"at": now - 3600, "result": "ok: 0 commit(s) (no remote yet)", "commits": 0}))).unwrap();
+        crate::backup::compute_in(state, Some(dest), now, true).state
+    }
+
+    #[test]
+    fn adopting_a_private_repository_clears_only_on_this_computer_at_once_without_a_watcher_run() {
+        let (root, base) = git_side("rec-adopt", true);
+        let state = root.join("share/hestia");
+        let (ep, _) = fake(adopt_routes(true, true));
+        let dest = root.join("Home");
+        let mut out = Vec::new();
+        let (settings, token) = (root.join("cfg/settings"), tok());
+        let c = Ctx::new(&token, &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11").recording(&state);
+        assert!(adopt(&mut out, &c, "ada/home", &dest), "{}", String::from_utf8_lossy(&out));
+        assert_eq!(recorded(&state), Some(("ada/home".into(), true)), "sign-in records the definite private answer");
+        assert!(!state.join("private-check.json.tmp").exists());
+        assert_eq!(backup_state_after_signin(&dest, &state), "ok", "no longer local_only, and no watcher ran");
+        // the same home without that record (what sign-in did before #269) is local_only until the watcher's next run
+        std::fs::remove_file(state.join("private-check.json")).unwrap();
+        assert_eq!(backup_state_after_signin(&dest, &state), "local_only");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn adopting_a_public_or_gone_repository_records_false_and_offline_or_signed_out_records_nothing() {
+        let (root, base) = git_side("rec-no", true);
+        let run = |routes: Option<Vec<(String, u16, String)>>, tag: &str| {
+            let state = root.join(format!("share-{tag}/hestia"));
+            let dead = Endpoints { web: "http://127.0.0.1:9".into(), api: "http://127.0.0.1:9".into() };
+            let ep = routes.map(|r| fake(r).0).unwrap_or(dead);
+            let mut out = Vec::new();
+            let (settings, token) = (root.join("cfg/settings"), tok());
+            let c = Ctx::new(&token, &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11").recording(&state);
+            assert!(!adopt(&mut out, &c, "ada/home", &root.join(format!("Home-{tag}"))), "{tag}");
+            recorded(&state)
+        };
+        assert_eq!(run(Some(adopt_routes(false, true)), "public"), Some(("ada/home".into(), false)));
+        assert_eq!(run(Some(vec![me()]), "gone"), Some(("ada/home".into(), false)));
+        assert_eq!(run(None, "offline"), None, "an offline check proves nothing");
+        assert_eq!(run(Some(vec![("/user".into(), 401, "{}".into())]), "signed-out"), None, "a signed-out check proves nothing");
+        assert_eq!(run(Some(vec![me(), ("/repos/ada/home".into(), 500, "{}".into())]), "error"), None, "a server error proves nothing");
+        assert_eq!(run(Some(vec![me(), ("/repos/ada/home".into(), 301, "{}".into())]), "moved"), None, "a redirect proves nothing");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn creating_records_what_github_says_it_made_and_nothing_when_it_cannot_say() {
+        for (k, v) in [("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t.t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t.t")] { unsafe { std::env::set_var(k, v) } }
+        for (tag, answer, want) in [("priv", (200u16, r#"{"private":true}"#), Some(true)), ("pub", (200, r#"{"private":false}"#), Some(false)), ("err", (502, "{}"), None), ("unclear", (200, "{}"), None)] {
+            let (root, base, _) = empty_remote(&format!("rec-create-{tag}"));
+            let state = root.join("share/hestia");
+            let mut routes = create_routes(201);
+            routes.push(("/repos/ada/home".into(), answer.0, answer.1.into()));
+            let (ep, _) = fake(routes);
+            let mut out = Vec::new();
+            let (settings, token) = (root.join("cfg/settings"), tok());
+            let c = Ctx::new(&token, &ep, &base, &settings, Path::new("/usr/bin/true"), "2026-11-11").recording(&state);
+            assert!(create(&mut out, &c, "home", &root.join("Home")), "{tag}: {}", String::from_utf8_lossy(&out));
+            assert_eq!(recorded(&state), want.map(|p| ("ada/home".to_string(), p)), "{tag}");
+            std::fs::remove_dir_all(&root).unwrap();
+        }
     }
 
     #[test]

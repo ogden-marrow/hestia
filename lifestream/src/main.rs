@@ -264,6 +264,15 @@ enum HomeCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Record a definite answer of a private check for `backup-state` (the watcher's; offline, needs no sign-in). Never use it
+    /// for an offline or signed-out check: that proves nothing.
+    RecordPrivate {
+        /// owner/name
+        repo: String,
+        /// true (a private repository of yours) or false (public or gone)
+        #[arg(value_parser = ["true", "false"])]
+        private: String,
+    },
     /// Make a new private home repository on GitHub, set it up here, and send the first copy
     Create {
         /// the repository name (default: home)
@@ -371,6 +380,10 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Home { what: HomeCmd::RecordPrivate { repo, private } } => {
+            // offline: no GitHub, no keyring. The watcher hands over its own definite answer to the one writer.
+            lifestream::backup::record_private(&lifestream::backup::dir_of(None)?, &repo, private == "true")
+        }
         Cmd::Home { what } => {
             use lifestream::{auth, auth::Store, ghrepo};
             let mut out = std::io::stdout();
@@ -396,20 +409,30 @@ fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             };
+            // sign-in records what it learns about the repository's privacy where backup-state reads it (#269)
+            let state = lifestream::backup::dir_of(None).ok();
+            let ctx = |settings, exe, today| {
+                let c = ghrepo::Ctx::new(&token, &ep, "https://github.com", settings, exe, today);
+                match &state {
+                    Some(d) => c.recording(d),
+                    None => c,
+                }
+            };
             let ok = match what {
                 HomeCmd::Discover { .. } => ghrepo::discover(&mut out, &token, &ep),
                 HomeCmd::CheckPrivate { repo, .. } => ghrepo::check_private(&mut out, &token, &ep, &repo),
+                HomeCmd::RecordPrivate { .. } => unreachable!("handled before signing in"),
                 HomeCmd::Create { name, into, .. } => {
                     let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
                     let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));
                     let exe = std::env::current_exe()?;
-                    ghrepo::create(&mut out, &ghrepo::Ctx::new(&token, &ep, "https://github.com", &settings, &exe, &chrono_today()), &name, &dest)
+                    ghrepo::create(&mut out, &ctx(&settings, &exe, &chrono_today()), &name, &dest)
                 }
                 HomeCmd::Adopt { repo, into, .. } => {
                     let dest = into.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Home"));
                     let settings = ghrepo::default_settings().unwrap_or_else(|| PathBuf::from("settings"));
                     let exe = std::env::current_exe()?;
-                    ghrepo::adopt(&mut out, &ghrepo::Ctx::new(&token, &ep, "https://github.com", &settings, &exe, &chrono_today()), &repo, &dest)
+                    ghrepo::adopt(&mut out, &ctx(&settings, &exe, &chrono_today()), &repo, &dest)
                 }
             };
             if !ok {

@@ -230,9 +230,9 @@ why_not() { # the engine's JSON events (or gh's words), one string
 }
 # What this run learned about the push target, for `lifestream backup-state` (offline, cheap): private-check.json says which
 # repository was last found private ("private":true) or not. An offline or signed-out answer proves nothing, so it changes nothing.
+# The engine is the one writer of that file (sign-in writes it too, #269); a refused record never stops the run.
 record_private() { # slug true|false
-  local sl; sl="$(printf '%s' "$1" | tr -cd 'A-Za-z0-9._/-')"
-  printf '{"at":%s,"slug":"%s","private":%s}\n' "$(date +%s)" "$sl" "$2" > "$state/private-check.json.tmp" && mv -f "$state/private-check.json.tmp" "$state/private-check.json"
+  "$LS" home record-private -- "$1" "$2" >/dev/null 2>&1 || true
 }
 not_private() { # slug, the failed check's words
   case "$2" in *"is public"*|*"was not found"*|*"HTTP 404"*|*"Could not resolve to a Repository"*) record_private "$1" false ;; esac
