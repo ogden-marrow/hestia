@@ -35,13 +35,16 @@ ago() { # hours-ago result : one line of history (as the watcher writes it)
   mkdir -p "$share"; printf '{"at":%s,"result":"%s","commits":0}\n' "$(( $(now) - $1 * 3600 ))" "$2" >> "$hist"
 }
 n=0
-fresh() { # a new home repository with one file to capture, an empty history, no notifications yet
+fresh() { # a new home repository with one file to capture, an empty history, no notifications yet. $1: hours since its first commit (then the settings point at it, so backup-state judges it)
+  local age="${1:-0}" when; when="$(( $(now) - age * 3600 ))"
   n=$((n+1)); S="$T/s$n"; mkdir -p "$S/home"; export HOME="$S/home" XDG_RUNTIME_DIR="$S" GIT_CONFIG_GLOBAL="$S/home/.gitconfig"
   case "$HOME" in "$T"/*) ;; *) fail "HOME is not in the sandbox: $HOME" ;; esac
   git config --global user.email t@t.t; git config --global user.name t
   share="$HOME/.local/share/hestia"; hist="$share/watch-history.jsonl"; calls="$S/calls"
   sed -i "s#>> \"[^\"]*\"\$#>> \"$calls\"#" "$T/bin/notify-send"; : > "$calls"
-  r="$S/repo"; git init -q -b main "$r"; touch "$r/tree.toml"; git -C "$r" add -A; git -C "$r" commit -qm init
+  r="$S/repo"; git init -q -b main "$r"; touch "$r/tree.toml"; git -C "$r" add -A
+  GIT_AUTHOR_DATE="@$when +0000" GIT_COMMITTER_DATE="@$when +0000" git -C "$r" commit -qm init
+  if [ "$age" -gt 0 ]; then mkdir -p "$HOME/.config/hestia"; printf 'home=%s\n' "$r" > "$HOME/.config/hestia/settings"; fi
   mkdir -p "$r/$rel"; printf '%s\n' '~/.bashrc' > "$r/$rel/capture-paths.txt"
   echo 'export A=1' > "$HOME/.bashrc"
   # the first capture is made (and its record thrown away), so a later failure is a plain failure to commit a change
@@ -123,5 +126,33 @@ fresh; ago 8 "FAILED: git commit failed: $HOME/.bashrc ghp_$(printf 'a1B2c3D4%.0
 reason="$(state | sed -n 's/.*"reason":"\([^"]*\)".*/\1/p')"
 [ -n "$reason" ] || fail "no reason: $(state)"
 case "$reason" in */*|*"$HOME"*|*ghp_*) fail "the reason holds a path or token: $reason" ;; esac
+
+# ---- #256: a backup only on this disk is not a backup (no private remote Hestia verified)
+fresh 2; run
+[ "$rc" = 0 ] || fail "a run with no remote yet is fine (rc $rc)"
+is '"state":"ok"' '"notify":false' || fail "2 hours after the first commit, signing in is not expected yet: $(state)"
+[ "$(sent)" = 0 ] || fail "a new computer inside the grace sent a notification"
+fresh 30; run
+is '"state":"local_only"' '"notify":false' || fail "past the grace and told: local_only, no longer news: $(state)"
+[ "$(sent)" = 1 ] || fail "local_only after the grace should send ONE notification (sent $(sent))"
+grep -q "only on this computer" "$calls" || fail "the notification must say why: $(cat "$calls")"
+case "$(cat "$calls")" in */*) fail "the notification holds a path: $(cat "$calls")" ;; esac
+run; run
+[ "$(sent)" = 1 ] || fail "the same local_only episode was announced again (sent $(sent))"
+state | grep -q '"reason":"Your backup is only on this computer. Sign in to keep a private copy online."' || fail "wrong sentence: $(state)"
+# signing in (a verified private remote, everything pushed) clears it, with one quiet "working again"
+git -C "$r" remote add origin https://github.com/ada/home.git
+printf '{"at":%s,"slug":"ada/home","private":true}\n' "$(now)" > "$share/private-check.json"
+git -C "$r" update-ref refs/remotes/origin/main HEAD
+is '"state":"ok"' '"notify":false' || fail "signed in and pushed should be ok: $(state)"
+rc=0; "$ls_bin" backup-state --share "$HOME/.local/share" --mark-notified >/dev/null || rc=$?
+[ "$rc" = 10 ] || fail "closing a told local_only episode should exit 10 (got $rc)"
+# notifications=off: still local_only, never a notification
+fresh 30; printf 'home=%s\nnotifications=off\n' "$r" > "$HOME/.config/hestia/settings"; run
+is '"state":"local_only"' '"notify":false' || fail "off: local_only, never notify: $(state)"
+[ "$(sent)" = 0 ] || fail "notifications=off still sent one for local_only"
+# a repository git cannot read: unknown, never a notification
+fresh 30; printf 'garbage' > "$r/.git/HEAD"; ago 1 "ok: 0 commit(s), up to date"
+is '"state":"unknown"' '"notify":false' || fail "a broken repository must read unknown: $(state)"
 
 echo "watcher notification checks passed"
