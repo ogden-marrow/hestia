@@ -352,6 +352,9 @@ fn icon_for(s: &State, h: &Hit, on: bool) -> El {
 }
 
 /// The launcher, drawn like Spotlight: a wide bar with a magnifier, and results only once you type.
+/// The search box's key, so screens can hand it the keyboard.
+pub const SEARCH_BOX: &str = "ask-big";
+
 pub fn panel(s: &State) -> El {
     let d = s.design;
     let t = d.theme();
@@ -359,7 +362,7 @@ pub fn panel(s: &State) -> El {
     let big = TextStyle { size: d.size(22.0), ..type_::BODY };
     let hits = results(s);
     let n = hits.len();
-    let field = rune::text_input(&s.ask, d.font(big)).key("ask-big").single_line().grow(1.0).h(64.0).py(19.0).color(t.text)
+    let field = rune::text_input(&s.ask, d.font(big)).key(SEARCH_BOX).single_line().grow(1.0).h(64.0).py(19.0).color(t.text)
         .placeholder("Search your files, apps and folders", t.text_secondary)
         .on_edit(|s: &mut State| &mut s.ask)
         .on_input_change(|s: &mut State, _: &mut Tx| {
@@ -372,7 +375,9 @@ pub fn panel(s: &State) -> El {
             match ev.key {
                 Key::Down => s.asel = (s.asel + 1).min(count.saturating_sub(1)),
                 Key::Up => s.asel = s.asel.saturating_sub(1),
-                Key::Escape => s.pane = Pane::Today,
+                // Escape clears what was typed; a second Escape leaves Search
+                Key::Escape if !s.ask.text.is_empty() => { s.ask.clear(); s.asel = 0; s.asked.clear(); s.ask_hits.clear(); }
+                Key::Escape => s.go_pane(Pane::Today),
                 _ => return false,
             }
             true
@@ -493,5 +498,45 @@ mod tests {
         assert_eq!((a.name.as_str(), a.generic.as_str()), ("Calc", "Calculator"));
         assert!(parse_entry("h.desktop", std::path::Path::new("/x"), "[Desktop Entry]\nType=Application\nName=H\nNoDisplay=true\n").is_none());
         assert!(parse_entry("l.desktop", std::path::Path::new("/x"), "[Desktop Entry]\nType=Link\nName=L\n").is_none());
+    }
+}
+
+#[cfg(test)]
+mod enter_tests {
+    use super::*;
+    use rune::{Env, KeyEvent, Mods, Runtime};
+
+    /// Typing a name in Search and pressing Enter opens the first result (#264).
+    #[test]
+    fn typing_then_enter_opens_the_top_app() {
+        let dir = std::env::temp_dir().join(format!("hestia-enter-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        TEST_LAUNCHES.with(|t| *t.borrow_mut() = Some(dir.join("launches.tsv")));
+        let (marker, entry) = (dir.join("ran"), dir.join("zzfire.desktop"));
+        let text = format!("[Desktop Entry]\nType=Application\nName=Zzfire Browser\nExec=touch {}\n", marker.display());
+        std::fs::write(&entry, &text).unwrap();
+        let mut s = State::with(vec![], None);
+        s.apps = vec![parse_entry("zzfire.desktop", &entry, &text).unwrap()];
+        s.clips.clear();
+        let mut rt = Runtime::new(s, crate::view, (1280.0, 800.0), Env { system_dark: true, scale: 1.0 });
+        rt.frame(0.0);
+        // open Search the way a person does, from its tab: the box must get the keyboard
+        rt.state.go_pane(Pane::Today);
+        rt.frame(0.02);
+        let (x, y) = rt.find("tab-Search").expect("Search is a tab of the Stream");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(0.05);
+        rt.key(KeyEvent { key: Key::Text("zzfire".into()), mods: Mods::default() });
+        rt.frame(0.1);
+        assert_eq!(rt.state.ask.text, "zzfire", "the search box has the focus when Search opens");
+        rt.key(KeyEvent { key: Key::Enter, mods: Mods::default() });
+        rt.frame(0.2);
+        for _ in 0..50 {
+            if marker.exists() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(marker.exists(), "Enter did not open the app; msg = {:?}", rt.state.msg);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

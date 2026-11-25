@@ -52,6 +52,14 @@ impl State {
         }
     }
 
+    /// Go to a screen and put the keyboard where it belongs: Search's box, so typing and Enter work at once.
+    pub(crate) fn go_pane_focused(&mut self, p: Pane, tx: &mut rune::Tx) {
+        self.go_pane(p);
+        if p == Pane::Ask {
+            tx.focus(crate::launcher::SEARCH_BOX, false);
+        }
+    }
+
     /// Go to a place: stay on the current screen if it already belongs there, else its first tab.
     pub(crate) fn go_place(&mut self, place: Place) {
         if place_of(self.pane) == place {
@@ -79,7 +87,7 @@ pub fn tab_bar(s: &State, d: &Design) -> Option<El> {
         r = r.child(
             col().key(format!("tab-{label}")).px(d.item_px()).h(d.row_h())
                 .border_sides([0.0, 0.0, if on { 2.0 } else { 0.0 }, 0.0], d.accent_color())
-                .on_press(move |s: &mut State| s.go_pane(p))
+                .on_press_tx(move |s: &mut State, tx: &mut rune::Tx| s.go_pane_focused(p, tx))
                 .child(text(format!("{label}{badge}")).font(style(d, if on { type_::TITLE } else { type_::LABEL })).color(if on { t.text } else { t.text_secondary })),
         );
     }
