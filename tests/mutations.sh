@@ -53,7 +53,11 @@ mutate "a secret line is left in a shell file"             packaging/libexec/wat
 mutate "capture keeps secret-named files whole"            packaging/libexec/watch.sh 'for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)); done' 'true' bash tests/watcher.sh
 mutate "a backup failing for minutes already raises a notification" lifestream/src/backup.rs 'age >= NOTIFY_AFTER && notified' 'notified' bash tests/watcher-notify.sh
 mutate "the same failing backup is announced on every run" lifestream/src/backup.rs 'notified != Some(since)' 'true' bash tests/watcher-notify.sh
-mutate "uninstall keeps the clipboard history"             uninstall.sh 'rm -f "$share/hestia/clipboard.jsonl"' 'true' bash tests/uninstall.sh
+mutate "a computer with no verified private copy reads as backed up" lifestream/src/backup.rs 'return if now - first > GRACE { Local::OnlyHere' 'return if false { Local::OnlyHere' rs a_fresh_repository_with_no_remote
+mutate "commits that never reach the private copy for days read as ok" lifestream/src/backup.rs 'Some(oldest) if now - oldest > GRACE =>' 'Some(oldest) if now - oldest > GRACE * 1000 =>' rs commits_unpushed_for_over_a_day
+mutate "a repository nobody verified counts as private"    lifestream/src/backup.rs 'v["private"].as_bool() == Some(true) && v["slug"]' 'v["slug"]' rs a_remote_nobody_verified
+mutate "local_only never raises its one notification"      lifestream/src/backup.rs 'let notify = notifications && notified_episode(dir) != Some(since);' 'let notify = false;' bash tests/watcher-notify.sh
+mutate "uninstall keeps the clipboard history"            uninstall.sh 'rm -f "$share/hestia/clipboard.jsonl"' 'true' bash tests/uninstall.sh
 mutate "bootstrap restores code that runs by itself"       packaging/libexec/bootstrap.sh 'if is_executable_config "$rel" && [ "$EXEC" != 1 ]; then review+=("$kind/$rel"); continue; fi' 'true' bash tests/bootstrap.sh
 mutate "the rehearsal no longer notices restored code that runs by itself" packaging/libexec/rehearse.sh 'if is_executable_config "$name" || is_executable_config "$rel"; then' 'if false; then' bash tests/rehearse.sh
 mutate "the rehearsal accepts restored content that differs from the repository" packaging/libexec/rehearse.sh 'if [ "$(sha256sum < "$src")" != "$(sha256sum < "$dest")" ]; then' 'if false; then' bash tests/rehearse.sh

@@ -64,9 +64,9 @@ Where a crate offers a choice (`OR`), Hestia uses the permissive alternative. Th
 | cfg_aliases | 0.2.2 | MIT |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
 | cipher | 0.4.4 | MIT OR Apache-2.0 |
-| clap | 4.6.7 | MIT OR Apache-2.0 |
+| clap | 4.6.9 | MIT OR Apache-2.0 |
 | clap_builder | 4.6.7 | MIT OR Apache-2.0 |
-| clap_derive | 4.6.7 | MIT OR Apache-2.0 |
+| clap_derive | 4.6.9 | MIT OR Apache-2.0 |
 | clap_lex | 1.1.1 | MIT OR Apache-2.0 |
 | codespan-reporting | 0.13.1 | Apache-2.0 |
 | color_quant | 1.1.0 | MIT |
@@ -233,9 +233,9 @@ Where a crate offers a choice (`OR`), Hestia uses the permissive alternative. Th
 | rayon | 1.12.0 | MIT OR Apache-2.0 |
 | rayon-core | 1.13.0 | MIT OR Apache-2.0 |
 | read-fonts | 0.41.0 | MIT OR Apache-2.0 |
-| regex | 1.13.1 | MIT OR Apache-2.0 |
-| regex-automata | 0.4.18 | MIT OR Apache-2.0 |
-| regex-syntax | 0.8.11 | MIT OR Apache-2.0 |
+| regex | 1.13.2 | MIT OR Apache-2.0 |
+| regex-automata | 0.4.19 | MIT OR Apache-2.0 |
+| regex-syntax | 0.8.12 | MIT OR Apache-2.0 |
 | renderdoc-sys | 1.1.0 | MIT OR Apache-2.0 |
 | resvg | 0.45.1 | Apache-2.0 OR MIT |
 | rgb | 0.8.53 | MIT |
@@ -300,10 +300,10 @@ Where a crate offers a choice (`OR`), Hestia uses the permissive alternative. Th
 | tinystr | 0.8.5 | Unicode-3.0 |
 | tokio | 1.54.1 | MIT |
 | tokio-macros | 2.7.2 | MIT |
-| toml | 1.2.1+spec-1.1.0 | MIT OR Apache-2.0 |
+| toml | 1.2.2+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_datetime | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_edit | 0.25.19+spec-1.1.0 | MIT OR Apache-2.0 |
-| toml_parser | 1.1.5+spec-1.1.0 | MIT OR Apache-2.0 |
+| toml_parser | 1.1.7+spec-1.1.0 | MIT OR Apache-2.0 |
 | toml_writer | 1.2.0+spec-1.1.0 | MIT OR Apache-2.0 |
 | tracing | 0.1.44 | MIT |
 | tracing-attributes | 0.1.31 | MIT |

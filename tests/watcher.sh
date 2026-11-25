@@ -126,4 +126,27 @@ chmod +x "$T/fake-ls"
 echo 'export BAZ=3' >> "$T/home/.bashrc"
 LIFESTREAM="$T/fake-ls" runf
 grep -q "confirmed private repo of yours" "$T/home/.local/share/hestia/watch.json" || fail "a repository Hestia could not vouch for was pushed to"
+
+# what the watcher learns about the push target is recorded for backup-state (#256): private:true only when Hestia vouched for it
+pc="$T/home/.local/share/hestia/private-check.json"
+[ ! -e "$pc" ] || fail "a failed, unexplained check must not record anything: $(cat "$pc")"
+mkfake() { # the words and exit status of the fake `home check-private`
+  cat > "$T/fake-ls" <<EOF
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "auth status") echo '{"event":"status","signed_in":true,"user":"someone"}' ;;
+  "home check-private") echo '$1'; exit $2 ;;
+  *) exec "$ls_bin" "\$@" ;;
+esac
+EOF
+}
+mkfake '{"event":"offline"}' 1
+echo 'export OFF=1' >> "$T/home/.bashrc"; HESTIA_NET_TIMEOUT=5 LIFESTREAM="$T/fake-ls" runf
+[ ! -e "$pc" ] || fail "an offline check proves nothing and must not be recorded: $(cat "$pc")"
+mkfake 'that repository is public' 1
+echo 'export PUB=1' >> "$T/home/.bashrc"; HESTIA_NET_TIMEOUT=5 LIFESTREAM="$T/fake-ls" runf
+grep -q '"slug":"someone/private-home"' "$pc" && grep -q '"private":false' "$pc" || fail "a public repository must be recorded as not private: $(cat "$pc" 2>/dev/null)"
+mkfake '{"event":"private"}' 0
+echo 'export PRIV=1' >> "$T/home/.bashrc"; HESTIA_NET_TIMEOUT=5 LIFESTREAM="$T/fake-ls" runf
+grep -q '"slug":"someone/private-home"' "$pc" && grep -q '"private":true' "$pc" || fail "a verified private repository must be recorded: $(cat "$pc" 2>/dev/null)"
 echo "watcher ok"

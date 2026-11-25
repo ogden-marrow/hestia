@@ -220,18 +220,29 @@ why_not() { # the engine's JSON events (or gh's words), one string
     *) echo "remote is not a confirmed private repo of yours" ;;
   esac
 }
+# What this run learned about the push target, for `lifestream backup-state` (offline, cheap): private-check.json says which
+# repository was last found private ("private":true) or not. An offline or signed-out answer proves nothing, so it changes nothing.
+record_private() { # slug true|false
+  local sl; sl="$(printf '%s' "$1" | tr -cd 'A-Za-z0-9._/-')"
+  printf '{"at":%s,"slug":"%s","private":%s}\n' "$(date +%s)" "$sl" "$2" > "$state/private-check.json.tmp" && mv -f "$state/private-check.json.tmp" "$state/private-check.json"
+}
+not_private() { # slug, the failed check's words
+  case "$2" in *"is public"*|*"was not found"*|*"HTTP 404"*|*"Could not resolve to a Repository"*) record_private "$1" false ;; esac
+}
 publish() {
   git -C "$repo" remote get-url origin >/dev/null 2>&1 || { note "ok: $made commit(s) (no remote yet)"; return 0; }
   local url slug out e rc=0; url=$(git -C "$repo" remote get-url --push origin)
   case "$url" in https://github.com/*|git@github.com:*) ;; *) die "not pushed: remote is not a GitHub repository" ;; esac
   slug=$(printf '%s' "$url" | sed -E 's#^(https://github.com/|git@github.com:)##; s#\.git$##')
   if signed_in; then
-    out=$("$LS" home check-private "$slug" 2>&1) || die "not pushed: $(why_not "$out")"
+    out=$("$LS" home check-private "$slug" 2>&1) || { not_private "$slug" "$out"; die "not pushed: $(why_not "$out")"; }
+    record_private "$slug" true
     case "$LS" in *\'*) die "not pushed: the Hestia program path has a quote in it" ;; esac
     creds=(-c credential.helper= -c "credential.helper=!'$LS' auth git-credential")
   else
     out=$(gh repo view "$slug" --json isPrivate --jq .isPrivate 2>&1) || true
-    [ "$out" = "true" ] || { [ "$out" = "false" ] && out="is public"; die "not pushed: $(why_not "$out")"; }
+    [ "$out" = "true" ] || { [ "$out" = "false" ] && out="is public"; not_private "$slug" "$out"; die "not pushed: $(why_not "$out")"; }
+    record_private "$slug" true
   fi
   # another computer may have pushed since: fetch, then put this computer's commits on top (the paths are different per computer)
   e=$(gitnet fetch -q origin main) || { rc=$?; case "$e" in *"couldn't find remote ref"*) ;; *) netdie "fetch" "$e" "$rc" ;; esac; }
