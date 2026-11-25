@@ -62,6 +62,43 @@ pub fn restore_line(st: &Engine) -> Option<(String, bool)> {
     }
 }
 
+/// One thing the backup left out, as the engine says it (`lifestream::leftout`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Left {
+    pub path: Option<String>,
+    pub why: String,
+    pub detail: String,
+    pub can_include: bool,
+}
+
+/// What is left out, newest first, read-only.
+pub fn left_out() -> Vec<Left> {
+    let Ok(dir) = lifestream::backup::dir_of(None) else { return vec![] };
+    lifestream::leftout::items(&dir).into_iter().take(500)
+        .map(|i| Left { path: i.path, why: i.why.to_string(), detail: i.detail, can_include: i.can_include }).collect()
+}
+
+/// The groups, in the order a person reads them; a reason this build does not know goes last under its own words.
+pub const GROUPS: [(&str, &[&str]); 5] = [
+    ("Too large", &["too_large"]),
+    ("Could not be read", &["unreadable"]),
+    ("Private by your rules", &["private_by_rule"]),
+    ("Withheld for a possible secret", &["withheld_secret_lines", "withheld_secret_file"]),
+    ("Links", &["link_outside_home", "link_to_private"]),
+];
+
+/// What a person can do about it, only where the engine says it could be included.
+pub fn fix_for(l: &Left) -> Option<&'static str> {
+    if !l.can_include {
+        return None;
+    }
+    match l.why.as_str() {
+        "too_large" => Some("Make it smaller, or keep it somewhere that is not backed up; it is included again next time if it fits."),
+        "unreadable" => Some("Make it readable for your user; it is included on the next backup."),
+        _ => Some("Fix what the line above says; it is included on the next backup."),
+    }
+}
+
 /// Where the watcher's run history lives, as a change marker: it changes whenever a run is recorded.
 pub fn stamp() -> Option<String> {
     let p = lifestream::feed::history_path()?;
@@ -124,6 +161,18 @@ mod tests {
         let st = engine("local_only", Some("Your backup is only on this computer. Sign in to keep a private copy online."), Some(1));
         assert!(matches!(from_engine(&st, 5), Verdict::NeedsYou { fix: Fix::SignIn, .. }));
         assert_eq!(from_engine(&engine("someday_new", Some("x"), Some(1)), 5), Verdict::Unknown);
+    }
+
+    #[test]
+    fn only_includable_things_get_fix_guidance() {
+        let l = |why: &str, can: bool| Left { path: None, why: why.into(), detail: String::new(), can_include: can };
+        assert!(fix_for(&l("too_large", true)).is_some());
+        assert!(fix_for(&l("private_by_rule", false)).is_none());
+        assert!(fix_for(&l("withheld_secret_file", false)).is_none());
+        let grouped: Vec<&str> = GROUPS.iter().flat_map(|g| g.1.iter().copied()).collect();
+        for w in ["too_large", "unreadable", "private_by_rule", "withheld_secret_lines", "withheld_secret_file", "link_outside_home", "link_to_private"] {
+            assert!(grouped.contains(&w), "{w}");
+        }
     }
 
     #[test]
