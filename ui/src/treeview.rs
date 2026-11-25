@@ -193,6 +193,24 @@ impl State {
         }
     }
 
+    /// File only what the plan would move out of this folder: one journaled batch, undone in one step.
+    pub(crate) fn file_folder(&mut self, dir: &Path) {
+        let Some(stream) = self.stream.clone() else { return };
+        let Some(plan) = self.tplan.as_ref() else { return };
+        let moves: Vec<lifestream::tree::Move> = plan.moves.iter().filter(|m| m.from.starts_with(dir)).cloned().collect();
+        if moves.is_empty() {
+            return;
+        }
+        let home = home();
+        self.tree_undoable = true;
+        self.msg = "Filing…".into();
+        self.jobs.start("file", Some(crate::folders::reload_after_filing), move || {
+            let plan = lifestream::tree::Plan { moves, skipped: vec![] };
+            let (n, failed) = lifestream::tree::apply(&plan, &stream, &home).map_err(|e| format!("Couldn't file them: {e:#}"))?;
+            Ok(format!("{n}\u{1f}{}", failed.len()))
+        });
+    }
+
     pub(crate) fn tree_rename(&mut self) {
         let Some(from) = self.tree_sel.clone() else { return };
         match valid_name(&self.tree_rename.text) {
@@ -210,6 +228,19 @@ impl State {
         let to = dir.join(from.file_name().unwrap_or_default());
         self.tree_move(&from, &to);
     }
+}
+
+/// Where the files planned from `dir` would go, as (destination, count), most first.
+fn where_they_go(s: &State, dir: &Path) -> Vec<(String, usize)> {
+    let mut by: std::collections::BTreeMap<String, usize> = Default::default();
+    if let Some(p) = &s.tplan {
+        for m in p.moves.iter().filter(|m| m.from.starts_with(dir)) {
+            *by.entry(m.to.parent().map(tilde).unwrap_or_default()).or_default() += 1;
+        }
+    }
+    let mut v: Vec<_> = by.into_iter().collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    v
 }
 
 fn chevron(d: &crate::design::Design, r: &Row) -> El {
@@ -295,6 +326,20 @@ pub fn panel(s: &State) -> El {
                 .child(text(tilde(&r.path)).font(style(&d, type_::MONO_CAPTION)).color(t.text_secondary).wrap_anywhere().shrink())
                 .child(text(if r.is_dir { "Folder".to_string() } else { format!("{} · {}", crate::kinds::label(&r.kind), lifestream::human(r.size)) }).font(style(&d, type_::LABEL)).color(t.text_secondary));
             if r.is_dir {
+                if planned > 0 {
+                    // the suggestion, in the place people browse: where they would go, then one button
+                    let mut card = col().w_full().padding(d.pad()).gap(d.gap()).tile(&d)
+                        .child(text(format!("{} here can be filed.", crate::today::count(planned, "file", "files"))).font(style(&d, type_::BODY)).color(t.text).wrap_anywhere().shrink());
+                    for (dest, n) in where_they_go(s, &r.path).into_iter().take(5) {
+                        card = card.child(text(format!("{} to {dest}", crate::today::count(n, "file", "files"))).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink());
+                    }
+                    let dir = r.path.clone();
+                    card = card.child(row().child(crate::questions::action(&d, "tv-file", "File these", "Filing…", true, s.jobs.running("file"), move |s: &mut State| s.file_folder(&dir))))
+                        .child(text("Undo puts them back.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary));
+                    detail = detail.child(card);
+                } else {
+                    detail = detail.child(text("Nothing waiting to be filed from here.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary));
+                }
                 detail = detail
                     .child(super::field(&d, "tv-name", &s.tree_rename, "New name", |s: &mut State| &mut s.tree_rename).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_rename()))
                     .child(row().w_full().gap(d.gap()).flex_wrap()
@@ -302,12 +347,6 @@ pub fn panel(s: &State) -> El {
                         .child(crate::questions::button(&d, "tv-move", "Move to…".into(), false, { let p = r.path.clone(); move |s: &mut State| { s.tree_moving = Some(p.clone()); s.msg.clear() } })))
                     .child(super::field(&d, "tv-new", &s.tree_new, "New folder inside", |s: &mut State| &mut s.tree_new).on_submit(|s: &mut State, _: &mut rune::Tx| s.tree_new_folder()))
                     .child(row().child(crate::questions::button(&d, "tv-newbtn", "Make folder".into(), false, |s: &mut State| s.tree_new_folder())));
-                if planned > 0 {
-                    detail = detail.child(text(format!("{} would be filed from here tonight.", crate::today::count(planned, "file", "files"))).font(style(&d, type_::LABEL)).color(t.text).wrap_anywhere().shrink())
-                        .child(row().child(crate::questions::button(&d, "tv-review", "Review in Files".into(), false, |s: &mut State| { s.pane = super::Pane::Files; s.open_files() })));
-                } else {
-                    detail = detail.child(text("Nothing waiting to be filed from here.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary));
-                }
             } else {
                 detail = detail
                     .child(text(format!("Modified {}", r.modified)).font(style(&d, type_::LABEL)).color(t.text_secondary))
@@ -349,6 +388,20 @@ mod tests {
         let r = rows(&root, &open, &none, false);
         assert_eq!(r.iter().map(|x| (x.name.as_str(), x.depth)).collect::<Vec<_>>(), [("a", 0), ("b", 1), ("one.txt", 1), ("top.txt", 0)]);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_suggestion_counts_only_this_folders_files_by_destination() {
+        let mut s = State::default();
+        let mv = |from: &str, to: &str| lifestream::tree::Move { id: String::new(), from: PathBuf::from(from), to: PathBuf::from(to), size: 1 };
+        s.tplan = Some(lifestream::tree::Plan { moves: vec![
+            mv("/h/Downloads/a.pdf", "/h/Documents/Finance/a.pdf"),
+            mv("/h/Downloads/b.pdf", "/h/Documents/Finance/b.pdf"),
+            mv("/h/Downloads/c.jpg", "/h/Pictures/c.jpg"),
+            mv("/h/Desktop/d.pdf", "/h/Documents/Finance/d.pdf"),
+        ], skipped: vec![] });
+        let w = where_they_go(&s, Path::new("/h/Downloads"));
+        assert_eq!(w.iter().map(|x| x.1).collect::<Vec<_>>(), [2, 1]);
     }
 
     #[test]

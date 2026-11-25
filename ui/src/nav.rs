@@ -47,7 +47,7 @@ impl State {
             Pane::Files => self.open_files(),
             Pane::History => self.reload_repo(),
             Pane::Machine => self.reload_machine(),
-            Pane::Folders => self.reload_tree(),
+            Pane::Folders => { self.reload_tree(); self.refresh_plan(); }
             _ => {}
         }
     }
