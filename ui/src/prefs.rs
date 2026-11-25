@@ -122,7 +122,8 @@ pub fn panels(s: &State) -> Vec<El> {
             row().key(format!("tab-{i}")).h(d.row_h()).px(d.item_px()).center_y().radius(d.r(tok::radius::SM))
                 .fill(if on { t.control_off } else { rune::Color::TRANSPARENT })
                 .on_press(move |s: &mut State| { s.stab = i; if i == 6 && s.dom_edit.id.is_empty() { s.select_domain(0) }
-                    if i == 7 { crate::account::refresh_status(s) } })
+                    if i == 7 { crate::account::refresh_status(s) }
+                    if i == 8 && s.update.lock().map(|u| u.check.is_none() && !u.checking).unwrap_or(false) { s.update_check() } })
                 .child(text(name.to_string()).font(style(&d, type_::LABEL)).color(t.text)),
         );
     }
@@ -229,6 +230,7 @@ pub fn panels(s: &State) -> Vec<El> {
         _ => {
             body = body
                 .child(setting(&d, "Hestia", "The hearth of your computer: files, history and time.", text(format!("{} · build {}", env!("CARGO_PKG_VERSION"), env!("HESTIA_BUILD"))).font(style(&d, type_::LABEL)).color(t.text_secondary)))
+                .child(crate::update::section(s, &d))
                 .child(setting(&d, "Your repository", &s.repo_dir.to_string_lossy(), text("").font(style(&d, type_::LABEL))))
                 .child(setting(&d, "Settings file", "~/.config/hestia/settings. Schedules are applied as small overrides in ~/.config/systemd/user, so removing them restores the defaults.", text("").font(style(&d, type_::LABEL))))
                 .child(setting(&d, "Welcome tour", "The short introduction shown the first time Hestia opens.",
