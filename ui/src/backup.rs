@@ -33,13 +33,17 @@ pub fn ago(secs: i64) -> String {
 
 /// The engine's state as the UI's verdict. A signed-out backup is fixed by signing in; anything else by backing up.
 pub fn from_engine(st: &Engine, now: i64) -> Verdict {
-    if st.needs_you() {
-        let why = st.reason.clone().unwrap_or_else(|| "Your backup needs a look.".into());
-        let fix = if why.contains("signed out") { Fix::SignIn } else { Fix::BackUpNow };
-        return Verdict::NeedsYou { why, fix };
-    }
+    let why = || st.reason.clone().unwrap_or_else(|| "Your backup needs a look.".into());
     match (st.state, st.last_ok) {
+        // a backup only on this computer is fixed by signing in, so a private copy can be kept online
+        ("local_only", _) => Verdict::NeedsYou { why: why(), fix: Fix::SignIn },
+        ("failing" | "stale", _) => {
+            let why = why();
+            let fix = if why.contains("signed out") { Fix::SignIn } else { Fix::BackUpNow };
+            Verdict::NeedsYou { why, fix }
+        }
         ("ok", Some(t)) => Verdict::Safe { when: ago(now - t) },
+        // "unknown", and any state this build does not know yet, says nothing rather than guess
         _ => Verdict::Unknown,
     }
 }
@@ -113,6 +117,13 @@ mod tests {
         assert_eq!(restore_line(&with("passed", Some(20))).map(|x| x.1), Some(true));
         assert_eq!(restore_line(&with("failed", Some(1))), Some(("Last restore check: failed yesterday.".into(), true)));
         assert_eq!(restore_line(&with("never", None)), None);
+    }
+
+    #[test]
+    fn a_backup_only_on_this_computer_is_fixed_by_signing_in() {
+        let st = engine("local_only", Some("Your backup is only on this computer. Sign in to keep a private copy online."), Some(1));
+        assert!(matches!(from_engine(&st, 5), Verdict::NeedsYou { fix: Fix::SignIn, .. }));
+        assert_eq!(from_engine(&engine("someday_new", Some("x"), Some(1)), 5), Verdict::Unknown);
     }
 
     #[test]

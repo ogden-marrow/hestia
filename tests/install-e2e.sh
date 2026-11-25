@@ -39,6 +39,13 @@ grep -q "systemctl --user enable hestia-rehearse.timer" "$T/calls.log" || fail "
 grep -q "Exec=" "$HOME/.local/share/applications/app.hestia.Hestia.desktop" || fail "no desktop entry"
 [ -d "$HOME/.local/share/gnome-shell/extensions/hestia-clipboard@hestia.app" ] || fail "the shell extension was not installed"
 grep -q "systemctl --user enable hestia-watch.timer" "$T/calls.log" || fail "the watch timer was not enabled"
+# the build has its own folder; the installed programs and scripts are links through `current` (the units never name a build
+# folder, so an update or rollback is one rename); install.json says which build is installed and where it came from
+[ "$(find "$PREFIX/lib/hestia/builds" -mindepth 1 -maxdepth 1 | wc -l)" = 1 ] || fail "a fresh install should have exactly one build folder"
+for b in hestia hestia-tray lifestream; do [ "$(readlink -f "$PREFIX/bin/$b")" = "$(readlink -f "$PREFIX/lib/hestia/current")/bin/$b" ] || fail "$b is not a link through the current build"; done
+[ -L "$PREFIX/libexec/hestia" ] || fail "the scripts are not a link through the current build"
+grep -l "lib/hestia/builds" "$unit"/* && fail "a systemd unit names a build folder"
+grep -q "\"build_id\":\"$(git -C "$here" rev-parse --short=8 HEAD)" "$XDG_DATA_HOME/hestia/install.json" && grep -q "\"source\":\"checkout\",\"source_dir\":\"$here\"" "$XDG_DATA_HOME/hestia/install.json" || fail "install.json does not say what was installed from where: $(cat "$XDG_DATA_HOME/hestia/install.json" 2>&1)"
 
 # 2. the person's own home repository, and a file of theirs that must survive everything below
 mkdir -p "$HESTIA_HOME"; ( cd "$HESTIA_HOME" && git init -q . && touch tree.toml && git add -A && git commit -qm "Start the home repository" )
@@ -83,5 +90,6 @@ bash "$here/uninstall.sh" >/dev/null || fail "uninstall failed"
 for b in hestia hestia-tray lifestream; do [ ! -e "$PREFIX/bin/$b" ] || fail "$b survived uninstall"; done
 [ ! -e "$PREFIX/libexec/hestia" ] && [ ! -e "$unit/hestia-watch.timer" ] && [ ! -e "$unit/hestia-rehearse.timer" ] && [ ! -e "$unit/hestia-rehearse.service" ] || fail "libexec or units survived uninstall"
 [ "$(cat "$HESTIA_HOME/notes.txt")" = "mine" ] && [ -d "$HESTIA_HOME/.git" ] || fail "uninstall touched the home repository"
+[ ! -e "$PREFIX/lib/hestia" ] && [ ! -e "$XDG_DATA_HOME/hestia/install.json" ] || fail "uninstall left the build folders or install.json behind"
 [ "$(cat "$HOME/.bashrc")" = "my own bashrc" ] || fail "uninstall touched the person's files"
 echo "install end to end ok"

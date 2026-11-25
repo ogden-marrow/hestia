@@ -581,13 +581,13 @@ fn system_panel(s: &State) -> El {
 }
 
 /// Ctrl+, opens Settings and Ctrl+F opens Search, from anywhere; arrow keys move through time on the time view.
-fn on_key(s: &mut State, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+fn on_key(s: &mut State, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if ev.is_command(',') {
-        s.pane = Pane::Settings;
+        s.go_pane(Pane::Settings);
         return true;
     }
     if ev.is_command('f') {
-        s.pane = Pane::Ask;
+        s.go_pane_focused(Pane::Ask, tx); // the search box gets the focus, so typing and Enter work at once
         return true;
     }
     if s.pane != Pane::Time {
@@ -668,7 +668,7 @@ fn poll(s: &mut State, _t: f64, tx: &mut Tx) -> bool {
 fn field(d: &Design, key: &str, edit: &TextEdit, hint: &str, get: fn(&mut State) -> &mut TextEdit) -> El {
     let t = d.theme();
     text_input(edit, style(d, type_::BODY)).key(key).single_line().w_full().h(d.row_h()).px(d.item_px()).py((d.row_h() - d.size(13.0) * 1.25) / 2.0).radius(d.r(tok::radius::SM))
-        .fill(t.control_track).border(1.0, d.hairline()).color(t.text).placeholder(hint, t.text_secondary)
+        .fill(t.control_track).border(1.0, d.hairline()).focus_within_ring(1.0, -1.0, d.accent_color()).color(t.text).placeholder(hint, t.text_secondary)
         .on_edit(get)
 }
 
