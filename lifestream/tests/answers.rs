@@ -167,7 +167,7 @@ fn malformed_answer_lines_are_skipped_not_fatal() {
 #[test]
 fn answers_outside_home_are_never_shown() {
     let (h, stream) = scratch("out");
-    let bad = ["/etc", "/etc/passwd", "../../etc", "Downloads/../../etc", ".ssh", "Documents/.gnupg", "~/Documents", "Docs//x", "a\nb", "Docs/\u{202E}gpj.exe"];
+    let bad = ["/etc", "/etc/hosts", "../../etc", "Downloads/../../etc", ".ssh", "Documents/.gnupg", "~/Documents", "Docs//x", "a\nb", "Docs/\u{202E}gpj.exe"];
     let mut lines: Vec<String> = Vec::new();
     for f in bad {
         lines.push(json!({"at": at(10), "kind": "asked", "id": "q-1", "actor": "model", "folder": f}).to_string());
@@ -177,7 +177,7 @@ fn answers_outside_home_are_never_shown() {
     write(&stream, &lines);
     let feed = items(&h, &stream);
     let text = lifestream::feed::render(&feed);
-    for leak in ["/etc", "passwd", ".ssh", ".gnupg", "..", "~", "\u{202E}", "//"] {
+    for leak in ["/etc", "hosts", ".ssh", ".gnupg", "..", "~", "\u{202E}", "//"] {
         assert!(!text.contains(leak), "{leak} leaked: {text}");
     }
     assert_eq!(feed.len(), 1, "only the answer about a plain folder in the home: {feed:?}");
