@@ -186,7 +186,7 @@ fn say(c: Cond) -> &'static str {
 
 impl State {
     pub(crate) fn reload_machine(&mut self) {
-        self.mach = scan(&dir(&self.repo_dir), &super::files::home());
+        self.mach = if self.fixture { crate::fixture::machine() } else { scan(&dir(&self.repo_dir), &super::files::home()) };
         self.mcat = self.mcat.min(self.mach.len().saturating_sub(1));
         self.mit = self.mit.min(self.mach.get(self.mcat).map(|c| c.items.len().saturating_sub(1)).unwrap_or(0));
     }

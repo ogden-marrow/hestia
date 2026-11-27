@@ -24,7 +24,7 @@ fn get_started(s: &State) -> Option<El> {
     let home = lifestream::home::is_home(&s.repo_dir);
     let scanned = s.total > 0;
     let launcher = crate::clipboard::extension_state() == "recording";
-    if home && scanned && launcher {
+    if (home && scanned && launcher) || s.fixture {
         return None;
     }
     let step = |n: u8, done: bool, title: &str, why: &str, action: Option<El>| -> El {

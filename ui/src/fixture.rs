@@ -59,6 +59,17 @@ pub fn records(pending_folders: bool) -> Vec<Record> {
     v
 }
 
+/// A backed-up computer: everything matches the backup except one settings file changed since.
+pub fn machine() -> Vec<crate::machine::Cat> {
+    use crate::machine::{Cat, Cond, Item};
+    let item = |name: &str, cond: Cond| Item { name: name.into(), cond, path: None, diff: vec![] };
+    vec![
+        Cat { name: "Settings files", items: vec![item("~/.config/terminal/settings.toml", Cond::Changed), item("~/.bashrc", Cond::Same), item("~/.gitconfig", Cond::Same)] },
+        Cat { name: "Installed programs", items: vec![item("firefox", Cond::Same), item("gimp", Cond::Same)] },
+        Cat { name: "Desktop settings", items: vec![item("Keyboard shortcuts", Cond::Same)] },
+    ]
+}
+
 /// Synthetic events for snapshots: no real paths or names.
 pub fn feed() -> Vec<crate::feedview::Row> {
     use crate::feedview::Row;
@@ -69,7 +80,7 @@ pub fn feed() -> Vec<crate::feedview::Row> {
     };
     vec![
         row(12, "backup_saved", "watcher", "Saved 2 changes from this computer", "Settings of Terminal and Desktop changed.", 2, false),
-        row(95, "filed", "hestia_rule", "Filed 3 screenshots to Pictures/Screenshots", "Matched your rule: kind is screenshot.", 3, true),
+        row(95, "filed", "hestia_rule", "Filed 3 screenshots to Pictures/Screenshots", "Matched your rule: Screenshots go to Pictures/Screenshots.", 3, true),
         row(160, "filed", "model", "Filed lease-renewal.pdf to Documents/Housing", "Both on-device models agreed it is a housing document.", 1, true),
         row(60 * 26, "moved", "you", "You moved notes.txt to Documents", "Moved from the Folders screen.", 1, true),
         row(60 * 27, "backup_failed", "watcher", "The last backup failed: git commit: no identity", "Set your name and email for git, then back up again.", 0, false),
@@ -103,6 +114,16 @@ pub fn apply(s: &mut State, pending_folders: bool) {
     s.repo_dir = std::path::PathBuf::from("/nonexistent/fixture-home"); // never show this machine's repository
     s.account_user = None;
     s.feed = feed();
+    s.fixture = true;
+    s.backup = crate::backup::Verdict::Safe { when: "12 minutes ago".into() };
+    s.restore_check = Some(("Last restore check: passed 3 days ago.".into(), false));
+    s.mach = machine();
+    // the rules the feed's events speak of, so every screen tells one story
+    s.tree = lifestream::tree::Tree { inbox: vec!["Downloads".into()], folders: vec![
+        lifestream::tree::Folder { path: "Documents".into(), kind: vec!["document".into()], ..Default::default() },
+        lifestream::tree::Folder { path: "Documents/Housing".into(), kind: vec!["document/housing".into()], ..Default::default() },
+        lifestream::tree::Folder { path: "Pictures/Screenshots".into(), kind: vec!["image/screenshot".into()], ..Default::default() },
+    ] };
     let left = |p: &str, why: &str, detail: &str, can: bool| crate::backup::Left { path: Some(p.into()), why: why.into(), detail: detail.into(), can_include: can };
     s.left_out = vec![
         left("Videos/holiday.mkv", "too_large", "It is 4.2 GB; the backup keeps files under 100 MB.", true),
