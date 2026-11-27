@@ -1,12 +1,12 @@
 //! The feed: one read-only, time-ordered list of what happened and who decided it. It is the one reader the
 //! Stream screen uses. Sources: the move journal (`<stream>/moves.jsonl`, with `actor` and `reason` on each line),
-//! the log of undos (`<stream>/undone.jsonl`) and the watcher's run history (`<share>/hestia/watch-history.jsonl`).
+//! the log of undos (`<stream>/undone.jsonl`), the answers log (`<stream>/answers.jsonl`, questions asked and answered)
+//! and the watcher's run history (`<share>/hestia/watch-history.jsonl`).
 //! Every source is a file on disk, so every line is untrusted: a line that does not parse, or names a path that is not a
 //! plain visible path inside the home folder, is skipped, never fatal and never printed. Nothing is moved, changed or
 //! deleted, and no file contents are read, only relative paths the journal already holds.
 //!
-//! Not emitted yet, because nothing records them: `question_asked`, `question_answered` (an answer is stored on the
-//! record, not logged) and `scan` (a scan leaves no log). The kinds are reserved in the contract.
+//! Not emitted yet, because nothing records it: `scan` (a scan leaves no log). The kind is reserved in the contract.
 
 use crate::{tree, By};
 use anyhow::{bail, Context, Result};
@@ -35,8 +35,8 @@ pub struct Item {
     pub id: String,
     /// RFC3339, UTC
     pub at: String,
-    /// filed | moved | renamed | folder_created | undone | backup_saved | backup_failed
-    /// (reserved: question_asked | question_answered | scan)
+    /// filed | moved | renamed | folder_created | undone | backup_saved | backup_failed | question_asked | question_answered
+    /// (reserved: scan)
     pub kind: &'static str,
     /// hestia_rule | model | you | watcher | unknown
     pub actor: &'static str,
@@ -351,10 +351,94 @@ fn watch_items(home: &Path, history: &Path, out: &mut Vec<Item>) {
     }
 }
 
+/// The kind label as plain words: `finance/tax_returns` -> `tax returns`.
+fn label_of(choice: &str) -> String {
+    name_of(choice).replace(['-', '_'], " ")
+}
+
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+}
+
+/// `<stream>/answers.jsonl` (`answers.rs`): questions asked (grouped per run and top folder) and answers given. An
+/// answer that moved files carries its journal batch, and is undoable while the journal still holds it (`batches`).
+fn answer_items(stream: &Path, batches: &BTreeSet<String>, out: &mut Vec<Item>) {
+    let choice_ok = |s: &str| s.len() <= 80 && !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | ':' | '.'));
+    let id_ok = |s: &str| s.len() <= 64 && !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    // (at, actor, top folder) -> folders asked about
+    let mut asked: BTreeMap<(DateTime<Utc>, &'static str, String), BTreeSet<String>> = BTreeMap::new();
+    for l in tail_lines(&stream.join(crate::answers::FILE)) {
+        let Ok(v) = serde_json::from_str::<Value>(&l) else { continue };
+        let (Some(when), Some(id), Some(folder)) = (parse_time(&v["at"]), v["id"].as_str().filter(|s| id_ok(s)), v["folder"].as_str()) else { continue };
+        // the home folder itself, or a plain, visible path inside it; nothing else is ever listed
+        if !(folder.is_empty() || tree::rel_ok(folder) && path_ok(folder).is_some()) {
+            continue;
+        }
+        let actor = match v["actor"].as_str() {
+            Some("you") => "you",
+            Some("model") => "model",
+            _ => continue,
+        };
+        match v["kind"].as_str() {
+            Some("asked") => {
+                let top = folder.split('/').next().unwrap_or("").to_string();
+                asked.entry((when, actor, top)).or_default().insert(folder.to_string());
+            }
+            Some("answered") => {
+                let Some(choice) = v["choice"].as_str().filter(|s| choice_ok(s)) else { continue };
+                let label = label_of(choice);
+                let batch = v["batch"].as_str().filter(|b| batches.contains(*b)).map(String::from);
+                let (who, reason) = if actor == "you" { ("You", format!("you answered: {label}")) } else { ("The models", format!("both models agreed: {label}")) };
+                out.push(Item {
+                    id: format!("answered:{id}:{}", rfc(when)),
+                    at: rfc(when),
+                    kind: "question_answered",
+                    actor,
+                    reason: clean(&reason),
+                    summary: clean(&format!("{who} answered: {} for {}", capital(&label), nice(folder))),
+                    count: 1,
+                    paths: (!folder.is_empty()).then(|| folder.to_string()).into_iter().collect(),
+                    undoable: batch.is_some(),
+                    batch,
+                    when,
+                });
+            }
+            _ => continue,
+        }
+    }
+    let mut ordinal: BTreeMap<DateTime<Utc>, usize> = BTreeMap::new();
+    for ((when, actor, top), folders) in asked {
+        let n = ordinal.entry(when).or_default();
+        let id = format!("asked:{}:{n}", rfc(when));
+        *n += 1;
+        let count = folders.len();
+        let summary = match folders.iter().next() {
+            Some(only) if count == 1 => format!("Hestia has a question about {}", nice(only)),
+            _ => format!("Hestia has {} about {}", plural(count, "question", "questions"), nice(&top)),
+        };
+        out.push(Item {
+            id,
+            at: rfc(when),
+            kind: "question_asked",
+            actor,
+            reason: "no rule knew what these files are, so the models had a look".into(),
+            summary: clean(&summary),
+            count,
+            paths: folders.into_iter().filter(|f| !f.is_empty()).take(PATHS_CAP).collect(),
+            undoable: false,
+            batch: None,
+            when,
+        });
+    }
+}
+
 /// The feed, newest first.
 pub fn feed(home: &Path, stream: &Path, history: &Path, opts: &Opts) -> Vec<Item> {
     let mut items = Vec::new();
     journal_items(home, stream, &mut items);
+    let batches: BTreeSet<String> = items.iter().filter_map(|i| i.batch.clone()).collect();
+    answer_items(stream, &batches, &mut items);
     undone_items(home, stream, &mut items);
     watch_items(home, history, &mut items);
     if let Some(since) = opts.since {

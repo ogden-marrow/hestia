@@ -190,7 +190,7 @@ The one reader behind the Stream screen. Read-only; prints **one JSON object per
 
 - `--since`: `90s`, `30m`, `2h`, `7d`, `1w`, or an RFC3339 timestamp (`2026-11-18T09:00:00Z`). An unreadable value exits 1 with a message on stderr.
 - `--limit`: default 100, clamped to 1..=1000. The whole output never exceeds 512 KB (it stops at a whole line).
-- `--out`: the stream folder (default `~/.local/share/lifestream/stream`); the journal is `<stream>/moves.jsonl`, the undo log `<stream>/undone.jsonl`, the watcher history `$XDG_DATA_HOME/hestia/watch-history.jsonl` (default `~/.local/share/hestia/`).
+- `--out`: the stream folder (default `~/.local/share/lifestream/stream`); the journal is `<stream>/moves.jsonl`, the undo log `<stream>/undone.jsonl`, the answers log `<stream>/answers.jsonl`, the watcher history `$XDG_DATA_HOME/hestia/watch-history.jsonl` (default `~/.local/share/hestia/`).
 - Exit 0 even when a source is missing or has damaged lines (those are skipped); an empty feed prints nothing.
 
 Each item:
@@ -199,13 +199,13 @@ Each item:
 |---|---|
 | `id` | stable string for this event (a key for the UI; not a hash) |
 | `at` | RFC3339 UTC, whole seconds |
-| `kind` | `filed`, `moved`, `renamed`, `folder_created`, `undone`, `backup_saved`, `backup_failed`. Reserved, not emitted yet because nothing records them: `question_asked`, `question_answered`, `scan` |
+| `kind` | `filed`, `moved`, `renamed`, `folder_created`, `undone`, `backup_saved`, `backup_failed`, `question_asked`, `question_answered`. Reserved, not emitted yet because nothing records it: `scan` |
 | `actor` | `hestia_rule`, `model`, `you`, `watcher`, or `unknown` (a journal line from before actors were recorded whose record is gone) |
 | `reason` | one plain sentence: `rule: pdf downloads`, `both models agreed: invoice`, `you answered: Taxes`, `you pressed Undo` |
 | `summary` | plain words, no jargon or hashes: `Filed 3 files into Documents/Finance`, `Renamed the folder Old to Older`, `Moved 3 items into Archive`, `Backup saved 12 changes` |
 | `count` | files or folders in the item (for `backup_saved` the commits; for a repeating `backup_failed` how many runs) |
 | `paths` | up to 5, relative to the home folder, never hidden or outside it |
-| `undoable` | `true` for `filed`, `moved`, `renamed`, `folder_created` while the journal still holds the batch |
+| `undoable` | `true` for `filed`, `moved`, `renamed`, `folder_created`, and `question_answered` when the answer moved files, while the journal still holds the batch |
 | `batch` | for those items the id to give `lifestream file --undo --batch ID` (one JSON line back: `{"event":"undone","restored":N,"skipped":[...]}`); `null` otherwise |
 
 One journal batch can give several items when it holds different deciders; each keeps the same `batch`, and undoing the batch undoes them all. `file --undo` with no `--batch` still takes back the newest batch. An undone batch leaves the journal and appears as an `undone` item instead. A backup that fails again and again with the same words is one `backup_failed` item at its first run; runs that changed nothing and routine "waiting for a quieter moment" runs are not items.
@@ -215,6 +215,40 @@ Example:
 ```json
 {"id":"2026-11-18T09:12:01.123456789Z:0","at":"2026-11-18T09:12:01Z","kind":"filed","actor":"hestia_rule","reason":"rule: pdf downloads","summary":"Filed 3 files into Documents/Finance","count":3,"paths":["Documents/Finance/a.pdf","Documents/Finance/b.pdf","Documents/Finance/c.pdf"],"undoable":true,"batch":"2026-11-18T09:12:01.123456789Z"}
 ```
+
+### Questions asked and answered (`<stream>/answers.jsonl`)
+
+An append-only log, one JSON object per line, with two writers: `lifestream suggest` (the nightly look at the question
+queue) writes `asked` for every folder new to the queue or whose files changed (a changed label set alone asks nothing
+new), all lines of one run sharing one `at`; and the one place an answer is recorded, `teach` (and `teach_and_file`,
+which also files what the answer covers in one journaled batch), writes `answered`, one line per folder the answered
+files were asked about.
+
+```json
+{"at":"2026-11-27T09:00:00.123Z","kind":"asked","id":"q-3f2a9c0d1e4b5a6c","actor":"model","folder":"Downloads/App","choice":null,"batch":null}
+{"at":"2026-11-27T09:05:00.456Z","kind":"answered","id":"q-1b2c3d4e5f607182","actor":"you","folder":"Downloads/2024","choice":"finance/taxes","batch":"2026-11-27T09:05:00.401234567Z"}
+```
+
+| field | meaning |
+|---|---|
+| `at` | RFC3339 UTC |
+| `kind` | `asked` or `answered` |
+| `id` | the question's id: `q-` and 16 hex characters derived from the folder, the same for the question and its answer |
+| `actor` | `model` (asked), `you` (answered; `model` is accepted for answers the models give) |
+| `folder` | relative to the home folder, `""` for the home folder itself; only a plain, visible path inside it is ever written |
+| `choice` | `answered` only: the kind picked, lower case, letters, digits and `/ - _ : .` (e.g. `finance/taxes`) |
+| `batch` | `answered` only: the journal batch (`moves.jsonl`) when the answer moved files, otherwise `null` |
+
+Never file names, contents or secrets. The feed treats every line as untrusted: a line with a bad time, an unknown
+kind or actor, an id with anything but letters, digits and `-` (or over 64 long), a choice outside those characters or over 80 long, or a folder that is
+not a plain visible path inside the home folder is skipped. It shows:
+
+- `question_asked`: one item per run and top folder, actor `model`, `count` = folders, `paths` = up to 5 folders:
+  `Hestia has 3 questions about Downloads`, or `Hestia has a question about Downloads/App` for one.
+- `question_answered`: one item per answer, `count` 1, `paths` = the folder: `You answered: Taxes for Downloads/2024`,
+  reason `you answered: taxes`. `undoable` with its `batch` while the journal holds that batch (an undone or forged
+  batch shows `null` and no Undo). The files it moved also show as a `filed` item with the same `batch`; undoing either
+  undoes both.
 
 The journal format (`moves.jsonl`) gained `actor` and `reason` on every line; older lines without them are read as the person's own (`you`) for folder changes, and for files from the record that was filed, otherwise `unknown`.
 

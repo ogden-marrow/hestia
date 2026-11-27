@@ -346,6 +346,11 @@ pub fn copy_move(from: &Path, to: &Path) -> Result<()> {
 /// Do the moves, then record them in the stream (new path in `sources`, old path in `was`).
 /// Returns (moved, failures).
 pub fn apply(plan: &Plan, stream: &Path, home: &Path) -> Result<(usize, Vec<String>)> {
+    apply_batch(plan, stream, home).map(|(n, failed, _)| (n, failed))
+}
+
+/// `apply`, also giving the journal batch the moves were written under (`None` when nothing moved).
+pub(crate) fn apply_batch(plan: &Plan, stream: &Path, home: &Path) -> Result<(usize, Vec<String>, Option<String>)> {
     let mut done: Vec<&Move> = Vec::new();
     let mut failed = Vec::new();
     for m in &plan.moves {
@@ -367,8 +372,8 @@ pub fn apply(plan: &Plan, stream: &Path, home: &Path) -> Result<(usize, Vec<Stri
         }
     }
     write_all(stream, &recs)?;
-    journal_batch(stream, home, &done, &recs)?;
-    Ok((done.len(), failed))
+    let batch = journal_batch(stream, home, &done, &recs)?;
+    Ok((done.len(), failed, batch))
 }
 
 // ---- undo: every batch of moves is written down, so the last one can be put back ----------------------------------
@@ -406,7 +411,11 @@ fn new_batch() -> String {
 
 /// One line per file `apply` moved, all sharing one batch id.
 /// Each line says who decided it, from the record that was filed (a rule, or the person's own answer).
-fn journal_batch(stream: &Path, home: &Path, done: &[&Move], recs: &[Record]) -> Result<()> {
+/// The batch id, or `None` when nothing moved (nothing is written).
+fn journal_batch(stream: &Path, home: &Path, done: &[&Move], recs: &[Record]) -> Result<Option<String>> {
+    if done.is_empty() {
+        return Ok(None);
+    }
     let batch = new_batch();
     let lines: Vec<_> = done
         .iter()
@@ -415,7 +424,8 @@ fn journal_batch(stream: &Path, home: &Path, done: &[&Move], recs: &[Record]) ->
             serde_json::json!({"batch": batch, "id": m.id, "from": tilde(&m.from, home), "to": tilde(&m.to, home), "actor": actor, "reason": reason})
         })
         .collect();
-    journal_append(stream, &lines)
+    journal_append(stream, &lines)?;
+    Ok(Some(batch))
 }
 
 #[derive(Debug, Default, PartialEq)]

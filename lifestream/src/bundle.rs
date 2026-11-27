@@ -53,7 +53,8 @@ pub struct Bundle {
     pub samples: Vec<String>,
 }
 
-fn root_of(src: &str) -> String {
+/// The folder a file's question is about (`~/Downloads/App/server`): at most four path parts.
+pub(crate) fn root_of(src: &str) -> String {
     let dir = src.rsplit_once('/').map(|x| x.0).unwrap_or(src);
     dir.split('/').take(ROOT_DEPTH).collect::<Vec<_>>().join("/")
 }
@@ -207,12 +208,18 @@ pub fn load_cache(dir: &Path) -> HashMap<String, Cached> {
 }
 
 /// Fill in missing or stale suggestions, saving after every folder so an interrupted run loses nothing.
-pub fn run(recs: &[Record], dir: &Path, host: &str, tax: &Taxonomy) -> Result<()> {
+/// This is where a question is asked: a folder new to the queue, or whose files changed, is logged as `asked` in
+/// `<stream>/answers.jsonl` (a changed label set alone asks nothing new).
+pub fn run(recs: &[Record], stream: &Path, dir: &Path, host: &str, tax: &Taxonomy) -> Result<()> {
     let tag = kinds_tag(tax);
     let mut cache = load_cache(dir);
     let all = bundles(recs);
     let todo: Vec<&Bundle> = all.iter().filter(|b| cache.get(&b.root).map(|c| c.fingerprint != b.fingerprint() || c.kinds != tag).unwrap_or(true)).collect();
     eprintln!("{} folders in the queue, {} need suggestions", all.len(), todo.len());
+    let new: Vec<String> = todo.iter().filter(|b| cache.get(&b.root).is_none_or(|c| c.fingerprint != b.fingerprint())).map(|b| b.root.clone()).collect();
+    if let Err(e) = crate::answers::asked(stream, &new) {
+        eprintln!("the questions are queued, but the Stream will not show them: {e:#}");
+    }
     for (i, b) in todo.iter().enumerate() {
         let mut suggestions = Vec::new();
         for m in MODELS {
