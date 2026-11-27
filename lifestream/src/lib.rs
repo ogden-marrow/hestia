@@ -5,6 +5,7 @@
 //! (JSON Lines shards by the file's own month). It NEVER writes inside the
 //! scanned folders and skips every path the sensitive list covers.
 
+pub mod answers;
 pub mod auth;
 pub mod backup;
 pub mod bundle;
@@ -583,8 +584,38 @@ pub fn cmd_scan(
 }
 
 /// Record a human decision for one or more files: kind + tags, filed by "human", never overwritten by
-/// rules. Re-reads the stream from disk so a scan that ran meanwhile is never clobbered.
+/// rules. Re-reads the stream from disk so a scan that ran meanwhile is never clobbered. Nothing moves.
 pub fn teach(stream: &Path, ids: &[String], kind: &str, tags: &[String]) -> Result<Vec<Record>> {
+    Ok(answer(stream, ids, kind, tags, None)?.recs)
+}
+
+/// Where the files an answer covers are filed, right after it is recorded.
+pub struct FileInto<'a> {
+    pub home: &'a Path,
+    pub tree: &'a tree::Tree,
+    /// the sensitive paths (`tree::excluded`), never moved
+    pub excluded: &'a [PathBuf],
+}
+
+/// What an answer did.
+#[derive(Debug)]
+pub struct Answered {
+    pub recs: Vec<Record>,
+    /// the journal batch of the files it moved (what `lifestream file --undo --batch` and the feed's Undo take)
+    pub batch: Option<String>,
+    pub moved: usize,
+    pub failed: Vec<String>,
+}
+
+/// Like `teach`, then file what the answer covers (only those of its files loose in an inbox that the tree has a
+/// folder for) in one journaled batch, so the answer can be undone in one step.
+pub fn teach_and_file(stream: &Path, ids: &[String], kind: &str, tags: &[String], into: &FileInto) -> Result<Answered> {
+    answer(stream, ids, kind, tags, Some(into))
+}
+
+/// The one place an answer is recorded: on the records, then (if asked) on disk, then in the answers log the Stream
+/// reads, one `answered` line per folder the answered files were asked about (`answers.rs`).
+fn answer(stream: &Path, ids: &[String], kind: &str, tags: &[String], into: Option<&FileInto>) -> Result<Answered> {
     let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | ':' | '.'));
     let kind = kind.to_lowercase();
     let tags: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
@@ -593,7 +624,11 @@ pub fn teach(stream: &Path, ids: &[String], kind: &str, tags: &[String]) -> Resu
     }
     let mut recs = load_all(stream)?;
     let mut n = 0;
+    let mut roots: Vec<String> = Vec::new();
     for r in recs.iter_mut().filter(|r| ids.contains(&r.id) && r.status != "gone") {
+        if let Some(src) = r.sources.first() {
+            roots.push(bundle::root_of(src));
+        }
         r.kind = kind.clone();
         for t in &tags {
             if !r.tags.contains(t) {
@@ -609,7 +644,20 @@ pub fn teach(stream: &Path, ids: &[String], kind: &str, tags: &[String]) -> Resu
         bail!("no matching file on disk any more");
     }
     write_all(stream, &recs)?;
-    Ok(recs)
+    let mut done = Answered { recs, batch: None, moved: 0, failed: vec![] };
+    if let Some(into) = into {
+        let mut plan = tree::plan(&done.recs, into.tree, into.home, into.excluded, &tree::open_files());
+        plan.moves.retain(|m| ids.contains(&m.id));
+        if !plan.moves.is_empty() {
+            let (moved, failed, batch) = tree::apply_batch(&plan, stream, into.home)?;
+            done = Answered { recs: load_all(stream)?, batch, moved, failed };
+        }
+    }
+    // the answer is saved; a history line that cannot be written must not undo that
+    if let Err(e) = answers::answered(stream, &roots, &kind, "you", done.batch.as_deref()) {
+        eprintln!("the answer is saved, but the Stream will not show it: {e:#}");
+    }
+    Ok(done)
 }
 
 fn add_auto_tags(tags: &mut BTreeSet<String>, src: &str, mtime: &str) {

@@ -51,6 +51,7 @@ mutate "a group move that fails midway leaves the rest moved" lifestream/src/tre
 mutate "undoing a new folder deletes what was put in it"  lifestream/src/tree.rs 'fs::remove_dir(&to) {' 'fs::remove_dir_all(&to) {' rs undo_of_mkdir
 mutate "the feed lists a path outside the home folder"      lifestream/src/feed.rs 'if tree::under_home(home, to_s).is_none() {' 'if false {' rs a_line_pointing_outside_home
 mutate "the feed has no cap on its output"                 lifestream/src/feed.rs 'if out.len() + line.len() + 1 > OUTPUT_CAP {' 'if false {' rs output_is_capped
+mutate "the feed lists an answer about a folder outside the home" lifestream/src/feed.rs 'if !(folder.is_empty() || tree::rel_ok(folder) && path_ok(folder).is_some()) {' 'if false {' rs answers_outside_home_are_never_shown
 mutate "watcher pushes to a repo Hestia cannot vouch for" packaging/libexec/watch.sh 'out=$("$LS" home check-private "$slug" 2>&1) ||' 'out=$(true) ||' bash tests/watcher.sh
 mutate "capture no longer refuses a mass deletion"         packaging/libexec/capture.sh '[ "$before" -ge 4 ]' '[ "$before" -ge 4000000 ]' bash tests/watcher.sh
 mutate "deny-list is not applied inside captured folders"  packaging/libexec/capture.sh 'if [ "${#inside[@]}" -gt 0 ]; then' 'if [ 1 -eq 0 ]; then' bash tests/watcher.sh

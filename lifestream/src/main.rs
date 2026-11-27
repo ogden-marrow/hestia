@@ -517,7 +517,7 @@ fn main() -> Result<()> {
             let tree_path = lifestream::query::find_up("tree.toml");
             let tree = tree_path.as_ref().and_then(|p| lifestream::tree::Tree::load(p).ok());
             let domains = lifestream::domains::load(tree_path.as_ref().and_then(|p| p.parent()).map(|r| r.join("domains")).as_deref())?;
-            lifestream::bundle::run(&load_all(&stream)?, &dir, &host, &lifestream::bundle::taxonomy(tree.as_ref(), &domains))
+            lifestream::bundle::run(&load_all(&stream)?, &stream, &dir, &host, &lifestream::bundle::taxonomy(tree.as_ref(), &domains))
         }
         Cmd::Find { text, tag, kind, year, status, limit, out } => {
             let recs = load_all(&stream_dir(out)?)?;
