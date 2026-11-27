@@ -318,7 +318,7 @@ pub fn panel(s: &State) -> El {
 
     let mut crumb_row = row().w_full().gap(d.gap()).center_y().flex_wrap();
     let at = sel.clone().unwrap_or_else(home);
-    for (n, (label, p)) in crumbs(sel.as_deref().and_then(|x| x.parent()).unwrap_or(&at), &home()).into_iter().enumerate() {
+    for (n, (label, p)) in crumbs(sel.as_deref().map(|x| if x.is_dir() { x } else { x.parent().unwrap_or(x) }).unwrap_or(&at), &home()).into_iter().enumerate() {
         if n > 0 {
             crumb_row = crumb_row.child(text("›".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary));
         }
@@ -338,8 +338,8 @@ pub fn panel(s: &State) -> El {
     let picking = match &s.tree_multi {
         Some(list) => row().w_full().gap(d.gap()).center_y()
             .child(text(if list.is_empty() { "Click files and folders to select them.".to_string() } else { format!("{} selected", crate::today::count(list.len(), "item", "items")) }).font(style(&d, type_::LABEL)).color(t.text).grow(1.0).shrink().min_w(0.0))
-            .children((!list.is_empty()).then(|| crate::questions::button(&d, "tv-move-many", "Move to…".into(), true, |s: &mut State| { s.tree_moving_many = s.tree_multi.clone(); s.msg.clear() })))
-            .child(crate::questions::button(&d, "tv-done", "Done".into(), false, |s: &mut State| { s.tree_multi = None; s.tree_moving_many = None })),
+            // with something chosen, Move to… and Done live in the inspector beside it (one place for each)
+            .children(list.is_empty().then(|| crate::questions::button(&d, "tv-done", "Done".into(), false, |s: &mut State| { s.tree_multi = None; s.tree_moving_many = None }))),
         None => row().w_full().child(crate::questions::button(&d, "tv-select", "Select several".into(), false, |s: &mut State| { s.tree_multi = Some(vec![]); s.tree_inline = None })),
     };
     let mut list = col().w_full().gap(1.0);
@@ -395,6 +395,17 @@ pub fn panel(s: &State) -> El {
     let center = center.child(col().w_full().scroll(ScrollSpec { stick_bottom: false }).shrink().min_h(0.0).grow(1.0).child(list));
 
     let mut detail = col().w(d.size(300.0)).shrink().min_w(220.0).padding(d.pad()).gap(d.pad()).panel(&d);
+    // in Select several, the inspector speaks about the selection, not one item
+    let chosen: Option<Vec<&Row>> = s.tree_multi.as_ref().map(|l| s.tree_rows.iter().filter(|r| l.contains(&r.path)).collect());
+    let multi = chosen.filter(|r| !r.is_empty()).map(|rows| {
+        let size: u64 = rows.iter().map(|r| r.size).sum();
+        col().w(d.size(300.0)).shrink().min_w(220.0).padding(d.pad()).gap(d.pad()).panel(&d)
+            .child(text(crate::today::count(rows.len(), "item", "items")).font(style(&d, type_::TITLE)).color(t.text))
+            .child(text(format!("{} · {}", rows.iter().map(|r| r.name.as_str()).take(3).collect::<Vec<_>>().join(", "), lifestream::human(size))).font(style(&d, type_::LABEL)).color(t.text_secondary).wrap_anywhere().shrink())
+            .child(row().w_full().gap(d.gap()).flex_wrap()
+                .child(crate::questions::button(&d, "tv-move-many-2", "Move to…".into(), true, |s: &mut State| { s.tree_moving_many = s.tree_multi.clone(); s.msg.clear() }))
+                .child(crate::questions::button(&d, "tv-done-2", "Done".into(), false, |s: &mut State| { s.tree_multi = None; s.tree_moving_many = None })))
+    });
     match sel.as_ref().and_then(|p| s.tree_rows.iter().find(|r| &r.path == p)) {
         Some(r) => {
             let planned = s.tplan.as_ref().map(|pl| pl.moves.iter().filter(|m| m.from.starts_with(&r.path)).count()).unwrap_or(0);
@@ -438,6 +449,7 @@ pub fn panel(s: &State) -> El {
         }
         None => detail = detail.child(text("Select a file or folder.".to_string()).font(style(&d, type_::LABEL)).color(t.text_secondary)),
     }
+    let detail = multi.unwrap_or(detail);
     vec![center, detail].into_iter().fold(row().grow(1.0).min_w(0.0).min_h(0.0), |r, c| r.child(c))
 }
 
