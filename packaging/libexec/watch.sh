@@ -50,28 +50,12 @@ exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hestia-watch.lock"
 flock -n 9 || { keep_history=0 note "busy: another capture is still running, so nothing new was captured"; exit 75; }
 
 # ---- a person who never opens Hestia must still find out when the backup keeps failing (#225).
-# After every run (whatever way it ends) ask the engine, the one place that decides (lifestream backup-state): it says
-# when a problem has lasted long enough and nobody was told yet. Then ONE desktop notification, with a plain sentence
-# (no paths, no secrets: the engine writes it), and the engine remembers it so the next run stays quiet. When the
-# backup works again the episode is forgotten, and a failure that was told gets one quiet "working again".
+# After every run (whatever way it ends) the engine decides, sends at most ONE desktop notification in plain words (no paths,
+# no secrets) and remembers it, or one quiet "working again" when a told problem is over: `lifestream backup-state --notify`,
+# the same code the tray runs every minute, so a stopped timer is still told (#252) and the two never tell one problem twice.
 tell() {
   [ -x "${LS:-}" ] || return 0
-  local js rc=0 reason
-  js="$("$LS" backup-state --share "${state%/hestia}" 2>/dev/null)" || return 0
-  case "$js" in
-    *'"state":"ok"'*)
-      "$LS" backup-state --share "${state%/hestia}" --mark-notified >/dev/null 2>&1 || rc=$?
-      [ "$rc" = 10 ] && command -v notify-send >/dev/null 2>&1 && notify-send -u low -a Hestia "Hestia" "Your backup is working again." >/dev/null 2>&1
-      ;;
-    *'"notify":true'*)
-      command -v notify-send >/dev/null 2>&1 || return 0
-      reason="$(printf '%s' "$js" | sed -n 's/.*"reason":"\([^"]*\)".*/\1/p' | sed 's/\\n/ /g')"   # a second line (the restore check) joins the first in a one-line notification
-      [ -n "$reason" ] || return 0
-      notify-send -u normal -a Hestia "Hestia: your backup needs you" "$reason" >/dev/null 2>&1 \
-        && "$LS" backup-state --share "${state%/hestia}" --mark-notified >/dev/null 2>&1
-      ;;
-  esac
-  return 0
+  "$LS" backup-state --share "${state%/hestia}" --notify >/dev/null 2>&1 || true
 }
 trap tell EXIT
 

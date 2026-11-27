@@ -1,6 +1,8 @@
 //! Menu bar icon: how many files need you, a click to open the screen, a scan-now item. When the backup needs you
 //! (`lifestream backup-state`: failing or stale) the flame turns warm orange and the tooltip says why in plain words.
-//! Refreshes every minute from the stream and the watcher's files; touches nothing else.
+//! Refreshes every minute from the stream and the watcher's files. It is also the always-on backup check (#252): every minute
+//! it asks the engine's one notifier (`lifestream::backup::check`), so a stopped or dead watcher timer still raises its one
+//! notification; the engine's lock and `notified.json` keep the tray and the watcher from both telling the same problem.
 
 use ksni::blocking::TrayMethods;
 use ksni::menu::{MenuItem, StandardItem};
@@ -116,7 +118,8 @@ fn app_open() -> bool {
 
 fn main() {
     let (needs, folders, total) = counts();
-    let mut backup = lifestream::backup::needs_you();
+    // the backup check (and its one notification, if due) runs before the tray host is reached: a missing host must not stop it (#252)
+    let mut backup = lifestream::backup::check();
     let handle = Tray { needs, folders, total, frame: 0, backup: backup.clone() }.spawn().expect("no tray host: is the GNOME appindicator extension on?");
     let mut tick = 0u32;
     let mut stats = (needs, folders, total);
@@ -126,7 +129,7 @@ fn main() {
         tick = tick.wrapping_add(1);
         if tick.is_multiple_of(REFRESH_EVERY) {
             stats = counts();
-            backup = lifestream::backup::needs_you();
+            backup = lifestream::backup::check();
         }
         // it only wiggles while the app is open; checked about once a second
         if tick.is_multiple_of(5) {

@@ -10,8 +10,8 @@ git -C "$here" worktree add --detach -q "$W" HEAD || exit 2   # the committed st
 cd "$W" || exit 2
 export CARGO_TARGET_DIR="${MUTATION_TARGET:-$HOME/.cache/hestia-mutations-target}"
 echo "building a baseline (the first run compiles everything)..." >&2
-cargo build --release -p lifestream >/dev/null 2>&1 || { echo "baseline does not build" >&2; exit 2; }
-mkdir -p "$W/target/release"; ln -sf "$CARGO_TARGET_DIR/release/lifestream" "$W/target/release/lifestream"
+cargo build --release -p lifestream -p hestia-tray >/dev/null 2>&1 || { echo "baseline does not build" >&2; exit 2; }
+mkdir -p "$W/target/release"; for b in lifestream hestia-tray; do ln -sf "$CARGO_TARGET_DIR/release/$b" "$W/target/release/$b"; done
 survived=0; killed=0
 mutate() { # description  file  old  new  test-command...
   local desc="$1" file="$2" old="$3" new="$4"; shift 4
@@ -23,7 +23,7 @@ s = open(p).read()
 if old not in s: sys.exit(1)
 open(p, "w").write(s.replace(old, new, 1))
 PY
-  case "$file" in *.rs) cargo build --release -p lifestream >/dev/null 2>&1 || { echo "SKIP  $desc (the mutant does not compile)"; return; } ;; esac
+  case "$file" in *.rs) cargo build --release -p lifestream -p hestia-tray >/dev/null 2>&1 || { echo "SKIP  $desc (the mutant does not compile)"; return; } ;; esac
   if ( cd "$W" && "$@" ) >/dev/null 2>&1; then echo "SURVIVED  $desc"; survived=$((survived+1)); else echo "killed    $desc"; killed=$((killed+1)); fi
 }
 rs() { cargo test -p lifestream "$1"; }
@@ -58,6 +58,7 @@ mutate "a secret line is left in a shell file"             packaging/libexec/wat
 mutate "capture keeps secret-named files whole"            packaging/libexec/watch.sh 'for f in "${!drop[@]}"; do [ -f "$f" ] && rm -f -- "$f" && withheld=$((withheld+1)) && left_out withheld_secret_file "$(home_of "$f")"; done' 'true' bash tests/watcher.sh
 mutate "a backup failing for minutes already raises a notification" lifestream/src/backup.rs 'age >= NOTIFY_AFTER && notified' 'notified' bash tests/watcher-notify.sh
 mutate "the same failing backup is announced on every run" lifestream/src/backup.rs 'notified != Some(since)' 'true' bash tests/watcher-notify.sh
+mutate "the tray never tells a stopped watcher timer"       lifestream/src/backup.rs 'tell_in(&dir, repo_dir().as_deref(), now, notifications_on(), &mut desktop)' 'tell_in(&dir, repo_dir().as_deref(), now, false, &mut desktop)' bash tests/watcher-notify.sh
 mutate "a computer with no verified private copy reads as backed up" lifestream/src/backup.rs 'return if now - first > GRACE { Local::OnlyHere' 'return if false { Local::OnlyHere' rs a_fresh_repository_with_no_remote
 mutate "commits that never reach the private copy for days read as ok" lifestream/src/backup.rs 'Some(oldest) if now - oldest > GRACE =>' 'Some(oldest) if now - oldest > GRACE * 1000 =>' rs commits_unpushed_for_over_a_day
 mutate "a repository nobody verified counts as private"    lifestream/src/backup.rs 'v["private"].as_bool() == Some(true) && v["slug"]' 'v["slug"]' rs a_remote_nobody_verified

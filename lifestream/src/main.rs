@@ -133,9 +133,9 @@ enum Cmd {
         /// the data folder that holds hestia/watch.json (default $XDG_DATA_HOME or ~/.local/share)
         #[arg(long)]
         share: Option<PathBuf>,
-        /// remember that this problem was told (or forget it when the backup works again)
+        /// send the one desktop notification if it is due (or "working again" once a told problem is over) and remember it
         #[arg(long)]
-        mark_notified: bool,
+        notify: bool,
     },
     /// What is NOT backed up and why, one JSON object per line, newest first, then a summary line (Computer > Backup). Read-only;
     /// reads the left-out lists only, never a file's contents. Contract in lifestream/README.md.
@@ -340,7 +340,7 @@ fn main() -> Result<()> {
     match cmd {
         Cmd::Tree { tree, apply, r#move } => lifestream::tree::cmd_tree(tree, apply, r#move),
         Cmd::File { tree, out, manifest, apply, undo, batch } => lifestream::tree::cmd_file(tree, &stream_dir(out)?, manifest, apply, undo, batch),
-        Cmd::BackupState { share, mark_notified } => lifestream::backup::cmd(share, mark_notified),
+        Cmd::BackupState { share, notify } => lifestream::backup::cmd(share, notify),
         Cmd::LeftOut { share, limit } => lifestream::leftout::cmd(share, limit),
         Cmd::Feed { since, limit, out } => lifestream::feed::cmd_feed(since, limit, &stream_dir(out)?),
         Cmd::Folder { cmd, out, manifest } => {
