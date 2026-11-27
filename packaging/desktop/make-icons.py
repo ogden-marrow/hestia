@@ -71,30 +71,13 @@ open(os.path.join(here, "app.hestia.Hestia.svg"), "w").write("\n".join(svg2) + "
 os.makedirs(os.path.join(root, "tray/icons"), exist_ok=True)
 for old in os.listdir(os.path.join(root, "tray/icons")):
     os.remove(os.path.join(root, "tray/icons", old))
-# the tip of the flame flickers: four frames that differ only in the top rows
-TIPS = [
-    {},                                              # 0 steady
-    {2: (6, "##"), 3: (6, "##")},                    # 1 leans left
-    {2: (8, "##"), 3: (7, "##")},                    # 2 leans right
-    {2: None},                                       # 3 short
-]
-def frame_grid(tip):
-    g = [r[:] for r in grid]
-    for y, spec in tip.items():
-        g[y] = ["." for _ in range(16)]
-        if spec:
-            x0, row = spec
-            for i, c in enumerate(row):
-                g[y][x0 + i] = c
-    return g
-for f, tip in enumerate(TIPS):
-    g = frame_grid(tip)
-    for scale, n in ((1, 16), (2, 32), (3, 48)):
-        out = bytearray()
-        for y in range(n):
-            for x in range(n):
-                out += bytes([255, 242, 242, 242]) if g[y // scale][x // scale] == "#" else bytes([0, 0, 0, 0])
-        open(os.path.join(root, f"tray/icons/flame-{n}-{f}.argb"), "wb").write(out)
+# one steady flame: the tray never animates, since every new picture is work for the shell's single thread
+for scale, n in ((1, 16), (2, 32), (3, 48)):
+    out = bytearray()
+    for y in range(n):
+        for x in range(n):
+            out += bytes([255, 242, 242, 242]) if grid[y // scale][x // scale] == "#" else bytes([0, 0, 0, 0])
+    open(os.path.join(root, f"tray/icons/flame-{n}.argb"), "wb").write(out)
 
 sym = ['<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">']
 for y in range(16):

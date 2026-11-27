@@ -88,7 +88,7 @@ Hestia itself. The same extension can keep a text-only clipboard history; it is 
 | Crate / folder | |
 |---|---|
 | [`ui`](ui) (`hestia`) | the desktop app: Today, Search, Time, Files, History, Machine, Questions, System, Settings |
-| [`tray`](tray) (`hestia-tray`) | the animated menu bar icon (StatusNotifierItem) |
+| [`tray`](tray) (`hestia-tray`) | the menu bar icon (StatusNotifierItem) |
 | [`lifestream`](lifestream) | the engine and CLI: `scan`, `find`, `ask`, `brief`, `file`, `machine`, ... |
 | [`packaging`](packaging) | GNOME Shell extension (Alt+Space launcher and clipboard history), systemd user units, desktop entry, icons |
 

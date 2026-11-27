@@ -14,7 +14,6 @@ struct Tray {
     needs: usize,
     folders: usize,
     total: usize,
-    frame: usize, // which flicker frame is showing
     backup: Option<String>, // the plain sentence when the backup needs you, else None
 }
 
@@ -32,18 +31,14 @@ impl ksni::Tray for Tray {
     }
     /// The icon drawn into the tray itself, so it shows even when the desktop's icon cache is stale.
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        // a one-colour pixel flame at 1x, 2x and 3x (the shell picks the closest), in four flicker frames
+        // a one-colour pixel flame at 1x, 2x and 3x (the shell picks the closest). It never animates: each new
+        // picture is decoded on GNOME Shell's one thread, and a steady stream of them stalled the whole desktop.
         macro_rules! flame {
-            ($n:literal, $f:literal) => {
-                ksni::Icon { width: $n, height: $n, data: include_bytes!(concat!("../icons/flame-", $n, "-", $f, ".argb")).to_vec() }
+            ($n:literal) => {
+                ksni::Icon { width: $n, height: $n, data: include_bytes!(concat!("../icons/flame-", $n, ".argb")).to_vec() }
             };
         }
-        let icons = match self.frame {
-            1 => vec![flame!(16, 1), flame!(32, 1), flame!(48, 1)],
-            2 => vec![flame!(16, 2), flame!(32, 2), flame!(48, 2)],
-            3 => vec![flame!(16, 3), flame!(32, 3), flame!(48, 3)],
-            _ => vec![flame!(16, 0), flame!(32, 0), flame!(48, 0)],
-        };
+        let icons = vec![flame!(16), flame!(32), flame!(48)];
         if self.backup.is_some() { icons.into_iter().map(warm).collect() } else { icons }
     }
     fn title(&self) -> String {
@@ -101,58 +96,25 @@ fn counts() -> (usize, usize, usize) {
     (recs.iter().filter(|r| r.status == "pending").count(), lifestream::bundle::bundles(&recs).len(), live.count())
 }
 
-/// The order the flame's tip moves in, one step per tick.
-const FLICKER: [usize; 8] = [0, 1, 0, 2, 0, 3, 2, 1];
-const TICK: Duration = Duration::from_millis(220);
-const REFRESH_EVERY: u32 = 60 * 1000 / 220;
-
-/// Is the Hestia window open? (The headless `--serve` engine behind the Shell launcher does not count.)
-fn app_open() -> bool {
-    let Ok(dir) = std::fs::read_dir("/proc") else { return false };
-    dir.flatten().any(|e| {
-        let p = e.path();
-        std::fs::read_to_string(p.join("comm")).map(|c| c.trim() == "hestia").unwrap_or(false)
-            && !std::fs::read(p.join("cmdline")).map(|c| String::from_utf8_lossy(&c).contains("--serve")).unwrap_or(true)
-    })
-}
+/// How often the counts and the backup state are read again.
+const REFRESH: Duration = Duration::from_secs(60);
 
 fn main() {
     let (needs, folders, total) = counts();
     // the backup check (and its one notification, if due) runs before the tray host is reached: a missing host must not stop it (#252)
     let mut backup = lifestream::backup::check();
-    let handle = Tray { needs, folders, total, frame: 0, backup: backup.clone() }.spawn().expect("no tray host: is the GNOME appindicator extension on?");
-    let mut tick = 0u32;
+    let handle = Tray { needs, folders, total, backup: backup.clone() }.spawn().expect("no tray host: is the GNOME appindicator extension on?");
     let mut stats = (needs, folders, total);
-    let (mut open, mut last, mut shown, mut shown_backup) = (false, 0usize, stats, backup.clone());
     loop {
-        std::thread::sleep(TICK);
-        tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(REFRESH_EVERY) {
-            stats = counts();
-            backup = lifestream::backup::check();
-        }
-        // it only wiggles while the app is open; checked about once a second
-        if tick.is_multiple_of(5) {
-            open = app_open();
-        }
-        let frame = if open { FLICKER[tick as usize % FLICKER.len()] } else { 0 };
-        if frame == last && stats == shown && backup == shown_backup {
+        std::thread::sleep(REFRESH);
+        let (new_stats, new_backup) = (counts(), lifestream::backup::check());
+        // the shell redraws the item on every update, so only send one when something shown has changed
+        if new_stats == stats && new_backup == backup {
             continue;
         }
-        last = frame;
-        shown = stats;
-        shown_backup = backup.clone();
-        if handle.update(|t| { t.needs = stats.0; t.folders = stats.1; t.total = stats.2; t.frame = frame; t.backup = backup.clone(); }).is_none() {
+        (stats, backup) = (new_stats, new_backup);
+        if handle.update(|t| { t.needs = stats.0; t.folders = stats.1; t.total = stats.2; t.backup = backup.clone(); }).is_none() {
             std::process::exit(1); // the tray service went away: exit non-zero so systemd restarts us
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn warm_recolours_drawn_pixels_only() {
-        let icon = super::warm(ksni::Icon { width: 2, height: 1, data: vec![0, 0, 0, 0, 0xFF, 0xF2, 0xF2, 0xF2] });
-        assert_eq!(icon.data, vec![0, 0, 0, 0, 0xFF, 0xF0, 0x6A, 0x3C]);
     }
 }
