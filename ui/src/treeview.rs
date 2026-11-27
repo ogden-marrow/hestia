@@ -226,20 +226,47 @@ impl State {
     pub(crate) fn tree_drop(&mut self, dir: &Path) {
         let many = self.tree_moving_many.take();
         if let Some(list) = many {
-            let n = list.len();
-            for from in list {
-                let to = dir.join(from.file_name().unwrap_or_default());
-                self.tree_move(&from, &to);
-            }
             self.tree_multi = None;
-            if self.msg.starts_with("Moved") {
-                self.msg = format!("Moved {} to {}.", crate::today::count(n, "item", "items"), tilde(dir));
-            }
+            self.move_group(&list, dir);
             return;
         }
         let Some(from) = self.tree_moving.take() else { return };
         let to = dir.join(from.file_name().unwrap_or_default());
         self.tree_move(&from, &to);
+    }
+
+    /// Move several files and folders into `dir` as one journaled batch: all of them or none (the engine's
+    /// `move_many`), so one Undo puts the whole group back.
+    fn move_group(&mut self, list: &[PathBuf], dir: &Path) {
+        let h = home();
+        let Some(stream) = self.stream.clone() else { self.msg = "There is no stream to record the move in.".into(); return };
+        let rel = |p: &Path| p.strip_prefix(&h).ok().map(|r| r.to_string_lossy().into_owned());
+        let mut items = Vec::new();
+        for from in list {
+            let to = dir.join(from.file_name().unwrap_or_default());
+            if let Some(why) = refuse(from, &to, &h) {
+                self.msg = format!("Nothing was moved: {why}");
+                return;
+            }
+            match (rel(from), rel(&to)) {
+                (Some(f), Some(t)) => items.push((f, t)),
+                _ => { self.msg = "Nothing was moved: files can only be moved inside your home folder.".into(); return }
+            }
+        }
+        let excluded = lifestream::tree::excluded(&self.repo_dir).unwrap_or_default();
+        let n = items.len();
+        match lifestream::tree::move_many(&h, &items, &excluded, &stream, "you", "you changed your folders") {
+            Ok(_) => self.msg = format!("Moved {} to {}.", crate::today::count(n, "item", "items"), tilde(dir)),
+            Err(e) => self.msg = match e.downcast_ref::<lifestream::tree::PartlyMoved>() {
+                Some(p) => p.message.clone(),
+                None => format!("{e:#}"),
+            },
+        }
+        self.tree_undoable = self.msg.starts_with("Moved") || self.msg.contains("Undo");
+        self.recs = lifestream::load_all(&stream).unwrap_or_default();
+        self.refresh_derived();
+        self.tree_open.insert(dir.to_path_buf());
+        self.reload_tree();
     }
 
     /// A press on a row: drop what is waiting to be moved, add it to the selection in Select mode, or select it.
@@ -481,6 +508,21 @@ mod tests {
         let r = lifestream::tree::undo_last(&stream, &home).unwrap();
         assert_eq!(r.restored, 2);
         assert!(home.join("Downloads/a.pdf").exists() && home.join("Downloads/b.pdf").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A group move is one batch: one Undo puts every item back.
+    #[test]
+    fn a_group_move_is_one_batch() {
+        let home = scratch("group");
+        let stream = home.join(".stream");
+        std::fs::create_dir_all(home.join("In")).unwrap();
+        for f in ["a.txt", "b.txt"] { std::fs::write(home.join(f), "x").unwrap(); }
+        let items = vec![("a.txt".to_string(), "In/a.txt".to_string()), ("b.txt".to_string(), "In/b.txt".to_string())];
+        lifestream::tree::move_many(&home, &items, &[], &stream, "you", "you changed your folders").unwrap();
+        assert!(home.join("In/a.txt").exists() && home.join("In/b.txt").exists());
+        assert_eq!(lifestream::tree::undo_last(&stream, &home).unwrap().restored, 2);
+        assert!(home.join("a.txt").exists() && home.join("b.txt").exists());
         let _ = std::fs::remove_dir_all(&home);
     }
 
